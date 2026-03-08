@@ -1,0 +1,93 @@
+# Dates
+- raw: 年
+  result: Year
+  direct: Year
+  literal: Nian
+  badtrans: false
+- raw: 月
+  result: Month
+  direct: Month
+  literal: Yue
+  badtrans: false
+- raw: 日
+  result: Day
+  direct: Day
+  literal: Ri
+  badtrans: false
+- raw: 秒
+  result: Second
+  direct: Second
+  literal: Miao
+
+# Time
+- raw: 子时
+  rawSimplified: 子时
+  rawTraditional: 子時
+  result: Hour of Zi
+  direct: 11:00 PM - 1:00 AM
+  literal: zi shi
+- raw: 丑时
+  rawSimplified: 丑时
+  rawTraditional: 丑時
+  result: Hour of Chou
+  direct: 1:00 AM - 3:00 AM
+  literal: chou shi
+- raw: 寅时
+  rawSimplified: 寅时
+  rawTraditional: 寅時
+  result: Hour of Yin
+  direct: 3:00 AM - 5:00 AM
+  literal: yin shi
+- raw: 卯时
+  rawSimplified: 卯时
+  rawTraditional: 卯時
+  result: Hour of Mao
+  direct: 5:00 AM - 7:00 AM
+  literal: mao shi
+- raw: 辰时
+  rawSimplified: 辰时
+  rawTraditional: 辰時
+  result: Hour of Chen
+  direct: 7:00 AM - 9:00 AM
+  literal: chen shi
+- raw: 巳时
+  rawSimplified: 巳时
+  rawTraditional: 巳時
+  result: Hour of Si
+  direct: 9:00 AM - 11:00 AM
+  literal: si shi
+- raw: 午时
+  rawSimplified: 午时
+  rawTraditional: 午時
+  result: Hour of Wu
+  direct: 11:00 AM - 1:00 PM
+- raw: 未时
+  rawSimplified: 未时
+  rawTraditional: 未時
+  result: Hour of Wei
+  direct: 1:00 PM - 3:00 PM
+  literal: wei shi
+- raw: 申时
+  rawSimplified: 申时
+  rawTraditional: 申時
+  result: Hour of Shen
+  direct: 3:00 PM - 5:00 PM
+  literal: shen shi
+- raw: 酉时
+  rawSimplified: 酉时
+  rawTraditional: 酉時
+  result: Hour of You
+  direct: 5:00 PM - 7:00 PM
+  literal: you shi
+- raw: 戌时
+  rawSimplified: 戌时
+  rawTraditional: 戌時
+  result: Hour of Xu
+  direct: 7:00 PM - 9:00 PM
+  literal: xu shi
+- raw: 亥时
+  rawSimplified: 亥时
+  rawTraditional: 亥時
+  result: Hour of Hai
+  direct: 9:00 PM - 11:00 PM
+  literal: hai shi

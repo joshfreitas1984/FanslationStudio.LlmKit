@@ -1,0 +1,99 @@
+# Sounds / Actions
+- raw: 拍拍
+  result: Pat
+  allowalt:
+  - slap
+  - flap
+  direct: pat pat
+  literal: Pai Pai
+- raw: 鹿
+  result: Deer
+  allowalt:
+  - Lu
+  badtrans: false
+- raw: 虎
+  result: Tiger
+  allowalt:
+  - Hu
+  - Gecko
+  context: Sometimes used as literal names
+  badtrans: false
+
+# Sounds
+- raw: 吼
+  result: Roar
+  badtrans: false
+- raw: 咕
+  result: Cluck
+  badtrans: false
+- raw: 呜呜呜
+  rawSimplified: 呜呜呜
+  rawTraditional: 嗚嗚嗚
+  result: Wuwuwu
+  badtrans: false
+- raw: 呜呜
+  rawSimplified: 呜呜
+  rawTraditional: 嗚嗚
+  result: Wuwu
+  badtrans: false
+- raw: 呜...
+  rawSimplified: 呜...
+  rawTraditional: 嗚...
+  result: Wu...
+  badtrans: false
+- raw: 齁齁齁
+  result: Hohoho
+  badtrans: false
+- raw: 齁齁
+  result: Hoho
+  badtrans: false
+- raw: 齁...
+  result: Ho..
+  badtrans: false
+- raw: 嘎嘎嘎
+  result: Gagaga
+  badtrans: false
+- raw: 嘎嘎
+  result: Gaga
+  badtrans: false
+- raw: 嘎...
+  result: Ga...
+  badtrans: false
+- raw: 嘶…
+  result: Hiss
+  badtrans: false
+- raw: 嘶嘶
+  result: Hiss
+  badtrans: false
+- raw: 咕咕咕
+  result: Gugugu
+  badtrans: false
+- raw: 咕咕
+  result: Gugu
+  allowalt:
+  - Clucking
+  context: Can conflict with clucking
+  badtrans: false
+- raw: 咕...
+  result: Gu...
+  badtrans: false
+- raw: 咯咯咯
+  result: Gegege
+  badtrans: false
+- raw: 咯咯
+  result: Gege
+  allowalt:
+  - laugh
+- badtrans: false
+- raw: 咯...
+  result: Ge...
+  badtrans: false
+- raw: 吱吱吱
+  result: Zhizhizhi
+  badtrans: false
+- raw: 吱吱
+  result: Zhizhi
+  badtrans: false
+- raw: 吱...
+  result: Zhi...
+  badtrans: false

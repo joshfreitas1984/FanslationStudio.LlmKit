@@ -1,0 +1,254 @@
+# Common Stats
+- raw: 攻击力
+  rawSimplified: 攻击力
+  rawTraditional: 攻擊力
+  result: Attack Power
+  direct: attack power
+  literal: gong ji li
+  badtrans: false
+- raw: 防御力
+  rawSimplified: 防御力
+  rawTraditional: 防禦力
+  result: Defense
+  allowalt:
+  - Defensive
+  direct: Defense
+  literal: fang yu li
+- raw: 命中率
+  result: Accuracy
+  direct: hit rate
+  literal: ming zhong
+- raw: 气势
+  rawSimplified: 气势
+  rawTraditional: 氣勢
+  result: Momentum
+  direct: Qi force
+  literal: Qishi
+  badtrans: false
+- raw: 护卫
+  rawSimplified: 护卫
+  rawTraditional: 護衛
+  result: Guard
+  direct: protect defend
+  literal: hu wei
+  badtrans: false
+
+# Status
+- raw: 内伤
+  rawSimplified: 内伤
+  rawTraditional: 內傷
+  result: Internal Injury
+  allowalt:
+  - Internal Injuries
+  - Wound
+- raw: 外伤
+  rawSimplified: 外伤
+  rawTraditional: 外傷
+  result: External Injury
+  allowalt:
+  - Extra Damage
+  - Damage
+  - External Injuries
+  badtrans: false
+- raw: 中毒
+  result: Poisoned
+  allowalt:
+  - Poisoning
+  - Poison effect
+  badtrans: false
+- raw: 迷惑
+  result: Confusion
+  allowalt:
+  - Confuse
+  - mesmerizing
+  badtrans: false
+- raw: 冰封
+  result: Frozen
+  badtrans: false
+
+# Stats
+- raw: 胆识
+  rawSimplified: 胆识
+  rawTraditional: 膽識
+  result: Courage
+  context: Courage and Insight
+  badtrans: false
+- raw: 修养
+  rawSimplified: 修养
+  rawTraditional: 修養
+  result: Cultivation
+  allowalt:
+  - Cultivate
+# - raw: 元气
+#   rawSimplified: 元气
+#   rawTraditional: 元氣
+#   result: Vitality
+#   direct: Primordial energy
+#   literal: Yuanqi
+- raw: 氣血
+  rawSimplified: 气血
+  rawTraditional: 氣血
+  result: Lifeforce
+  direct: Qi blood
+  literal: Qixue
+- raw: 真气
+  rawSimplified: 真气
+  rawTraditional: 真氣
+  result: True Qi
+  literal: Zhenqi
+  context: True Qi / True Energy
+- raw: 根骨
+  result: Potential
+  context: refers to a person's natural physical foundation or constitution, often indicating their inherent strength, potential, or aptitude, especially in martial arts or cultivation contexts. It can also imply the sturdiness or resilience of one's physical body. Synonymous to Bone Structure
+  badtrans: false
+- raw: 力道
+  result: Strength
+  direct: Strength path
+  literal: Lidao
+  badtrans: false
+- raw: 筋骨
+  result: Muscle & Bone
+  literal: Jingu
+  context: refers to the tendons and bones, representing the physical strength, flexibility, and overall robustness of the body. In traditional Chinese contexts, it is often used to describe a person's physical condition or potential for martial prowess.
+  badtrans: false
+- raw: 体魄
+  rawSimplified: 体魄
+  rawTraditional: 體魄
+  result: Resilience
+  context: refers to the physical body or physique, often implying strength, health, or robustness in terms of physical constitution.
+- raw: 命中
+  result: Hit Rate
+  direct: Ming Zhong
+  literal: Ming Zhong
+  badtrans: false
+- raw: 太阴
+  rawSimplified: 太阴
+  rawTraditional: 太陰
+  result: Great Yin
+  badtrans: false
+- raw: 太阳
+  rawSimplified: 太阳
+  rawTraditional: 太陽
+  result: Great Yang
+  context: Conflicts with temples
+  badtrans: false
+- raw: 阴
+  rawSimplified: 阴
+  rawTraditional: 陰
+  result: Yin
+  context: Commonly used in other translations
+  badtrans: false
+- raw: 阳
+  rawSimplified: 阳
+  rawTraditional: 陽
+  result: Yang
+  context: Commonly used in other translations
+  badtrans: false
+- raw: 刚
+  rawSimplified: 刚
+  rawTraditional: 剛
+  result: Hard
+  context: Commonly used in other translations
+  badtrans: false
+- raw: 柔
+  result: Soft
+  context: Commonly used in other translations
+  badtrans: false
+- raw: 毒
+  result: Poison
+  context: 
+  badtrans: false
+- raw: 生命
+  result: Health
+  context: 
+  badtrans: false
+- raw: 闪避
+  rawSimplified: 闪避
+  rawTraditional: 閃避
+  result: Dodge
+  context: 
+  badtrans: false
+- raw: 御心
+  result: Discipline
+  context: refers to the ability to control and guard one's mind, emotions, and inner state. It is often associated with mental discipline, emotional resilience, and maintaining focus in combat
+  badtrans: false
+- raw: 诛心
+  rawSimplified: 诛心
+  rawTraditional: 誅心
+  result: Mind Attack
+  allowalt:
+  - heartbreak
+  context: refers to a strategy or technique aimed at breaking an opponent's willpower, confidence, or mental stability rather than physically harming them.
+- raw: 轻功
+  rawSimplified: 轻功
+  rawTraditional: 輕功
+  result: Qinggong
+  allowalt:
+  - Lightness
+- raw: 内功
+  rawSimplified: 内功
+  rawTraditional: 內功
+  result: Neigong
+  context: Neigong refers to the practice of cultivating internal energy through breathing techniques, meditation, and specialized training. It enhances endurance, strength, and resilience. Examples include Qi cultivation and techniques like Taichi or Qigong.
+- raw: 外功
+  result: External Skill
+  context: External Martial Arts
+  badtrans: false
+- raw: 内攻
+  rawSimplified: 内攻
+  rawTraditional: 內攻
+  result: Internal Attack
+  context: refers to offensive techniques that use neigong to damage an opponent's internal organs or disrupt their Qi flow.
+  badtrans: false
+- raw: 内力
+  rawSimplified: 内力
+  rawTraditional: 內力
+  result: Inner Power
+  context: refers to the cultivated energy stored within the body, which martial artists use to enhance strength, resilience, and combat techniques. It is often built through long-term training and can be projected outward to attack or defend.
+  badtrans: false
+- raw: 外防
+  result: External Defense
+  context: Defense against physical attacks (e.g., armor-like body techniques, blocking).
+  badtrans: false
+- raw: 内防
+  rawSimplified: 内防
+  rawTraditional: 內防
+  result: Internal Defense
+  context: Defense against internal attacks (e.g., resisting Qi disruptions, protecting organs).
+  badtrans: false
+- raw: 内息
+  rawSimplified: 内息
+  rawTraditional: 內息
+  result: Inner Qi
+  context: It represents the circulation of Qi within the body, closely tied to breathing techniques and cultivation.
+  badtrans: false
+- raw: 精神
+  result: Willpower
+  allowalt:
+  - Spirit
+  context: refers to a person's mental state, spirit, or vigor, often implying focus, willpower, or emotional energy
+  badtrans: false
+- raw: 身法
+  result: Agility
+  context: refers to a practitioner's movement skills or techniques in martial arts, focusing on agility, speed, and the ability to maneuver the body efficiently during combat or training. It involves the coordination of footwork, balance, and posture to enhance overall performance.
+  badtrans: false
+- raw: 专注
+  rawSimplified: 专注
+  rawTraditional: 專注
+  result: Focus
+  allowalt:
+  - Concentratio
+  context: refers to a high level of concentration or mental focus. Reaching a level of 50 indicates a significant mastery of maintaining intense focus, which is crucial for improving technique, anticipating movements, and staying calm during combat.
+  badtrans: false
+- raw: 要害
+  result: Vital Point
+  context: refers to critical or vital points of the body that, if struck, can cause significant damage or even death. In martial arts, it refers to vital areas like the head, neck, or heart. In gaming, it could be used to represent weak spots or critical hit zones that deal more damage when targeted.
+  badtrans: false
+- raw: 化解
+  result: Counter
+  context: refers to the act of neutralizing, resolving, or dissolving an opponent's attack, often through a defensive or counter technique.
+  badtrans: false
+- raw: 外攻
+  result: External Attack
+  context: refers to offensive techniques that rely on external strength and power, typically involving physical force or direct strikes.
+  badtrans: false

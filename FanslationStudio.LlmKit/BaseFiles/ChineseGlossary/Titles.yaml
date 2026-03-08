@@ -1,0 +1,511 @@
+# Occupation
+- raw: 小二
+  result: Waiter
+  direct: Little Two
+  literal: Xiao Er
+- raw: 丹师
+  rawSimplified: 丹师
+  rawTraditional: 丹師
+  result: Alchemist
+  direct: Dan Shi
+  literal: Dan Shi
+- raw: 流民
+  result: Refugee
+  direct: Displaced people
+  literal: Liu min
+- raw: 通判
+  result: Vice Magistrate
+- raw: 枪士
+  rawSimplified: 枪士
+  rawTraditional: 槍士
+  result: Spearman
+- raw: 士兵枪
+  rawSimplified: 士兵枪
+  rawTraditional: 士兵槍
+  result: Spearman
+- raw: 枪兵
+  rawSimplified: 枪兵
+  rawTraditional: 槍兵
+  result: Spearman
+- raw: 狼蛮
+  rawSimplified: 狼蛮
+  rawTraditional: 狼蠻
+  result: Wolf Barbarian
+- raw: 纳西
+  rawSimplified: 纳西
+  rawTraditional: 納西
+  result: Naxi
+- raw: 锦衣卫
+  rawSimplified: 锦衣卫
+  rawTraditional: 錦衣衛
+  result: Imperial Guard
+- raw: 禁军
+  rawSimplified: 禁军
+  rawTraditional: 禁軍
+  result: Forbidden Army
+- raw: 讲经先生
+  rawSimplified: 讲经先生
+  rawTraditional: 講經先生
+  result: Scripture Teacher
+- raw: 船工
+  result: Boatman
+  badtrans: false
+- raw: 船夫
+  rawSimplified: 船夫
+  rawTraditional: 船伕
+  result: Boatman
+  badtrans: false
+- raw: 缇骑
+  rawSimplified: 缇骑
+  rawTraditional: 緹騎
+  result: Official Riders
+- raw: 打更士兵
+  result: Nightwatch Soldier
+
+# Titles
+- raw: 宗主
+  result: Sect Leader
+  direct: sect master
+  literal: zong zhu
+- raw: 掌門師兄
+  rawSimplified: 掌门师兄
+  rawTraditional: 掌門師兄
+  result: Brother Sect Leader
+  direct: zhang men shi xiong
+- raw: 掌門
+  rawSimplified: 掌门
+  rawTraditional: 掌門
+  result: Sect Leader
+  allowalt:
+  - Palm Leader
+  - Palm Master
+  - Sect Master
+  - Master
+  - Leader
+  direct: zhang men
+  literal: palm/leader of the sect
+- raw: 将军
+  rawSimplified: 将军
+  rawTraditional: 將軍
+  result: General
+  direct: general
+  literal: jiangjun
+- raw: 长老
+  rawSimplified: 长老
+  rawTraditional: 長老
+  result: Elder
+  allowalt:
+  - Senior
+  - Master
+  direct: Long Old
+  literal: Chang Lao
+- raw: 师叔
+  rawSimplified: 师叔
+  rawTraditional: 師叔
+  result: Master Uncle
+  allowalt:
+  - Master
+  direct: Teacher Uncle
+  literal: Shi Shu
+- raw: 羽士
+  result: Taoist
+  direct: Feathered Practitioner
+  literal: Yu Shi
+- raw: 大夫
+  result: Doctor
+  allowalt:
+  - Dr
+  literal: Da Fu
+  context: A title used to address or refer to a medical professional or physician.
+- raw: 二当家
+  rawSimplified: 二当家
+  rawTraditional: 二當家
+  result: Second Boss
+  direct: Er Dang Jia
+  literal: Er Dang Jia
+- raw: 大侠
+  rawSimplified: 大侠
+  rawTraditional: 大俠
+  result: Great Hero
+  allowalt:
+  - Hero
+- raw: 二俠
+  rawSimplified: 二侠
+  rawTraditional: 二俠
+  result: Second Hero
+  allowalt:
+  - Hero
+- raw: 三俠
+  rawSimplified: 三侠
+  rawTraditional: 三俠
+  result: Third Hero
+  allowalt:
+  - Hero
+  direct: three heroes
+  literal: san xia
+- raw: 少俠
+  rawSimplified: 少侠
+  rawTraditional: 少俠
+  result: Young Hero
+  allowalt:
+  - Hero
+  direct: young knight
+  literal: shao xia
+- raw: 前辈
+  rawSimplified: 前辈
+  rawTraditional: 前輩
+  result: Senior
+  allowalt:
+  - Elder
+  literal: Qian Bei
+  context: A respectful term used to address or refer to someone older, more experienced, or who has achieved certain accomplishments before the speaker.
+- raw: 哥哥
+  result: Brother
+  literal: Ge Ge
+  context: Used to refer to or address one's own older brother, often with affection.
+- raw: 兄弟
+  result: Brother
+  allowalt:
+  - fellow
+  literal: Xiong Di
+  context: A term that can refer to literal brothers by birth or metaphorically to close friends or comrades who share a bond similar to familial ties.
+- raw: 小兄弟
+  result: Little Brother
+  literal: Xiao Xiong Di
+  context: Used to address a younger male peer in a friendly, respectful manner.
+- raw: 師弟
+  rawSimplified: 师弟
+  rawTraditional: 師弟
+  result: Junior Disciple
+  allowalt:
+  - Younger Brother
+  - Brother
+  - Junior Brother
+  - Disciple
+  - Junior
+  direct: shi di
+  literal: teacher younger brother
+- raw: 世伯
+  result: Uncle
+  allowalt:
+  - Elder Uncle
+  - Senior Uncle
+  - Elder
+  direct: Shi Bo
+  literal: generation elder / senior uncle
+- raw: 賢姪
+  rawSimplified: 贤姪
+  rawTraditional: 賢姪
+  result: Nephew
+  allowalt:
+  - Niece
+  direct: xian zhi
+  literal: virtuous nephew
+- raw: 三爺
+  rawSimplified: 三爷
+  rawTraditional: 三爺
+  result: Third Master
+  direct: san ye
+- raw: 四俠
+  rawSimplified: 四侠
+  rawTraditional: 四俠
+  result: Fourth Hero
+  direct: si xia
+- raw: 老四
+  result: Old Fourth
+  direct: lao si
+- raw: 弟弟
+  result: Younger Brother
+  allowalt:
+  - Brother
+  literal: Di Di
+  context: Refers to one's younger brother.
+- raw: 大哥
+  result: Senior Brother
+  allowalt:
+  - Brother
+  literal: Da Ge
+  context: A respectful term used among siblings for the older brother.
+- raw: 师兄
+  rawSimplified: 师兄
+  rawTraditional: 師兄
+  result: Senior Brother
+  allowalt:
+  - Brother
+  literal: Shixiong
+- raw: 阿兄
+  result: Elder Brother
+  allowalt:
+  - Brother
+- raw: 师妹
+  rawSimplified: 师妹
+  rawTraditional: 師妹
+  result: Junior Sister
+  allowalt:
+  - Younger Sister
+  - Sister
+- raw: 妹妹
+  result: Younger Sister
+  allowalt:
+  - Sister
+  literal: Mei Mei
+  context: Refers to one's younger sister.
+- raw: 姐姐
+  result: Older Sister
+  allowalt:
+  - Sister
+  literal: Jie Jie
+  context: Refers to one's older sister.
+- raw: 大姐
+  result: Senior Sister
+  allowalt:
+  - Sister
+  literal: Da Jie
+  context: A respectful term used among siblings for the older brother.
+- raw: 义姐
+  rawSimplified: 义姐
+  rawTraditional: 義姐
+  result: Sworn Sister
+  allowalt:
+  - Brother
+- raw: 义兄
+  rawSimplified: 义兄
+  rawTraditional: 義兄
+  result: Sworn Brother
+  allowalt:
+  - Brother
+- raw: 大郎
+  result: First Young Master
+  allowalt:
+  - Dalang
+- raw: 二郎
+  result: Second Young Master
+  allowalt:
+  - Erlang
+  badtrans: false
+- raw: 三郎
+  result: Third Young Master
+  allowalt:
+  - Sanlang
+- raw: 爹
+  result: Father
+  literal: Die
+  badtrans: false
+- raw: 婆婆
+  result: Grandma
+  allowalt:
+  - Fussing
+  - Fussy
+  literal: Po Po
+  context: Conflicts with idiom moms and grandmas (fussing around)
+- raw: 舅舅
+  result: Uncle
+- raw: 公子
+  result: Young Lord
+  literal: Gong Zi
+  context: Often used to refer to the son of nobility, indicating both status and youth.
+  badtrans: false
+- raw: 公主
+  result: Young Lady
+  allowalt:
+  - Princess
+  literal: Gong Zhu
+  context: The daughter of a king or nobleman, indicating royal status and nobility.
+  badtrans: false
+- raw: 施主
+  result: Benefactor
+  allowalt:
+  - Master
+  - Patron
+  direct: bestow master
+  literal: shi zhu
+- raw: 夫人
+  result: Lady
+  allowalt:
+  - Wife
+  - Madam
+  - Ladies
+  - beauties
+  - Beauty
+  - Wives
+  literal: Fu Ren
+  context: Used as a respectful address for married women of noble status or the wife of a high-ranking official.
+- raw: 大人
+  result: Lord
+  allowalt:
+  - Husband
+  literal: Da Ren
+  context: Used as a respectful address for man of noble status or of a high-ranking official.
+  badtrans: false
+- raw: 师傅
+  rawSimplified: 师傅
+  rawTraditional: 師傅
+  result: Master
+  literal: Shi Fu
+  context: Used for an experienced person in a particular skill or trade, similar to master craftsman or teacher.
+- raw: 姑娘
+  result: Miss
+  allowalt:
+  - Girl
+  - Daughter
+  literal: Gu Niang
+  context: A respectful yet informal address to young women, often implying youthfulness or elegance. Can also be used for Girl.
+  badtrans: false
+- raw: 小娘
+  result: Young Miss
+  allowalt:
+  - Little Miss
+  - Miss
+  - Lady
+  direct: little woman
+  literal: xiao niang
+- raw: 娘子
+  result: Wife
+  allowalt:
+  - Lady
+  - ladies
+  - Madam
+  - Wives
+  - beauties
+  - Beauty
+  - Miss
+  - Misses
+  - Woman
+  - Women
+  - Aunt
+  - Auntie
+  - Bride
+  - Girl
+  - Daughter
+  - Dear
+  - Darling
+  literal: Niang Zi
+  context: A respectful address for one's own wife
+- raw: 幫主
+  rawSimplified: 帮主
+  rawTraditional: 幫主
+  result: Gang Leader
+  allowalt:
+  - Sect Leader
+  - Sect Master
+  - Gang Master
+  - Leader
+  direct: bang zhu
+  literal: gang/master
+- raw: 掌柜
+  rawSimplified: 掌柜
+  rawTraditional: 掌櫃
+  result: Shopkeeper
+- raw: 大善人
+  result: Great Benefactor
+- raw: 贡献堂主
+  rawSimplified: 贡献堂主
+  rawTraditional: 貢獻堂主
+  result: Contribution Hall Master
+  allowalt:
+  - Contributions Hall Master
+- raw: 副帮主
+  rawSimplified: 副帮主
+  rawTraditional: 副幫主
+  result: Deputy Leader
+- raw: 锅头
+  rawSimplified: 锅头
+  rawTraditional: 鍋頭
+  result: Pot Head
+- raw: 大锅头
+  rawSimplified: 大锅头
+  rawTraditional: 大鍋頭
+  result: Great Pot Head
+- raw: 二锅头
+  rawSimplified: 二锅头
+  rawTraditional: 二鍋頭
+  result: Second Pot Head
+- raw: 寨主
+  result: Fort Master
+- raw: 二寨主
+  result: Second Fort Master
+- raw: 禅师
+  rawSimplified: 禅师
+  rawTraditional: 禪師
+  result: Zen Master
+- raw: 小沙弥
+  rawSimplified: 小沙弥
+  rawTraditional: 小沙彌
+  result: Junior Monk
+- raw: 知客僧
+  result: Welcoming Monk
+- raw: 庄主
+  rawSimplified: 庄主
+  rawTraditional: 莊主
+  result: Manor Master
+- raw: 三庄主
+  rawSimplified: 三庄主
+  rawTraditional: 三莊主
+  result: Third Manor Master
+- raw: 二庄主
+  rawSimplified: 二庄主
+  rawTraditional: 二莊主
+  result: Second Manor Master
+- raw: 刀客
+  result: Blade Master
+- raw: 大娘
+  result: Great Aunt
+  allowalt:
+  - Aunt
+  - Lady
+  - ladies
+- raw: 二師兄
+  rawSimplified: 二师兄
+  rawTraditional: 二師兄
+  result: Second Senior Brother
+- raw: 四師兄
+  rawSimplified: 四师兄
+  rawTraditional: 四師兄
+  result: Fourth Senior Brother
+- raw: 小師妹
+  rawSimplified: 小师妹
+  rawTraditional: 小師妹
+  result: Little Junior Sister
+- raw: 三師兄
+  rawSimplified: 三师兄
+  rawTraditional: 三師兄
+  result: Third Senior Brother
+- raw: 道長
+  rawSimplified: 道长
+  rawTraditional: 道長
+  result: Daoist
+  direct: Tao elder
+  literal: dao zhang
+  badtrans: false
+- raw: 二公子
+  result: Second Young Lord
+  direct: er gong zi
+  literal: second young master
+- raw: 僧侣
+  rawSimplified: 僧侣
+  rawTraditional: 僧侶
+  result: Monk
+- raw: 侠客
+  rawSimplified: 侠客
+  rawTraditional: 俠客
+  result: Wanderer
+  badtrans: false
+- raw: 江湖侠客
+  rawSimplified: 江湖侠客
+  rawTraditional: 江湖俠客
+  result: Jianghu Wanderer
+  badtrans: false
+- raw: 江湖奇人
+  rawSimplified: 江湖奇人
+  rawTraditional: 江湖奇人
+  result: Jianghu Eccentric
+  badtrans: true
+  direct: rivers lakes strange person
+  literal: jiang hu qi ren
+- raw: 江湖酒客
+  rawSimplified: 江湖酒客
+  rawTraditional: 江湖酒客
+  result: Jianghu Drunkard
+  badtrans: true
+  direct: rivers lakes wine guest
+  literal: jiang hu jiu ke

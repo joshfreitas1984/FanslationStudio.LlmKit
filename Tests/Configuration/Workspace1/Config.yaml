@@ -1,0 +1,16 @@
+﻿workspaceStandardModel:
+  url: "http://localhost/standard"
+workspaceStructuredTextModel:
+  url: "http://localhost/structured"
+  apiKeyRequired: true
+presets:
+  standardModelPreset: Qwen25
+  structuredTextModelPreset: Qwen25
+  usePresetChineseGlossary: true
+  chineseGlossaryTypesToSupress:
+    - Phonetics
+retryCount: 4
+batchSize: 20000
+skipLineValidation: false
+correctionPromptsEnabled: true
+translateFlagged: true

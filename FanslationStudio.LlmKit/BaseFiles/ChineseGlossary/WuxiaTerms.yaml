@@ -1,0 +1,72 @@
+# Wuxia Terms
+- raw: 武侠
+  rawSimplified: 武侠
+  rawTraditional: 武俠
+  result: Wuxia
+  allowalt:
+    - martial hero
+- raw: 天书
+  rawSimplified: 天书
+  rawTraditional: 天書
+  result: Heavenly Scripture
+  badtrans: false
+- raw: 武林
+  result: Wulin
+  badtrans: false
+- raw: 江湖
+  result: Jianghu
+- raw: 马帮
+  rawSimplified: 马帮
+  rawTraditional: 馬幫
+  result: Horse Gang
+- raw: 盐帮
+  rawSimplified: 盐帮
+  rawTraditional: 鹽幫
+  result: Salt Gang
+- raw: 河图
+  rawSimplified: 河图
+  rawTraditional: 河圖
+  result: River Map
+  allowalt:
+  - Hetu
+  context: Hetu is river map but can be part of Hetu Luoshu
+  badtrans: false
+- raw: 河出马图
+  rawSimplified: 河出马图
+  rawTraditional: 河出馬圖
+  result: Hetu Luoshu
+- raw: 八卦
+  result: Bagua
+  allowalt:
+  - Gossip
+  - Rumors
+- raw: 机关
+  rawSimplified: 机关
+  rawTraditional: 機關
+  result: Mechanism
+  allowalt:
+  - Organization
+  - Scheme
+  - Mechanical
+  direct: Organization
+  literal: Jiguan
+  badtrans: false
+- raw: 心法
+  result: Heart Method
+  direct: Heart Method
+  literal: Xin Fa
+
+# Sayings
+- raw: 阿弥陀佛
+  rawSimplified: 阿弥陀佛
+  rawTraditional: 阿彌陀佛
+  result: Amituofo
+- raw: 承让了
+  rawSimplified: 承让了
+  rawTraditional: 承讓了
+  result: Thank you for letting me win
+  allowalt:
+    - Thank you for showing mercy
+  direct: accept yielding
+  literal: cheng rang le
+  badtrans: false

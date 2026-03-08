@@ -1,0 +1,21 @@
+apiKeyRequired: false
+url: "http://localhost:11434/api/chat"
+model: "qwen2.5:7b"
+modelParams:
+  temperature: 0.15
+  top_p: 0.92
+  top_k: 40
+  repeat_penalty: 1.05
+  frequency_penalty: 0
+  presence_penalty: 0
+  num_ctx: 16384
+  num_predict: 512
+structuredTextModelParams:
+  temperature: 0
+  top_p: 0.95
+  top_k: 0
+  repeat_penalty: 1.0
+  frequency_penalty: 0
+  presence_penalty: 0
+  num_ctx: 16384
+  num_predict: 512

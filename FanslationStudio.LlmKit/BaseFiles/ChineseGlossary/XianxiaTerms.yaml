@@ -1,0 +1,65 @@
+﻿# Cultivation Terms
+- raw: 化境
+  result: Transcendant
+  allowalt:
+  - Transcendence
+  direct: transform realm
+  literal: hua jing
+- raw: 心魔
+  result: Inner Demon
+  direct: Heart Demon
+  literal: Xinmo
+- raw: 海色宝会
+  rawSimplified: 海色宝会
+  rawTraditional: 海色寶會
+  result: Sea Treasure Gathering
+  direct: Sea Color Treasure Gathering
+  literal: Hai Se Bao Hui
+- raw: 空军
+  rawSimplified: 空军
+  rawTraditional: 空軍
+  result: Sky Warrior
+  direct: Sky Warrior
+  literal: Kōng jūn
+- raw: 真人
+  result: Immortal
+  direct: True Person
+  literal: Zhen Ren
+  badtrans: false
+
+# Common stages
+- raw: 炼气
+  rawSimplified: 炼气
+  rawTraditional: 煉氣
+  result: Qi Refining
+  badtrans: true
+  direct: refine qi
+  literal: lian qi
+- raw: 筑基
+  rawSimplified: 筑基
+  rawTraditional: 築基
+  result: Foundation Establishment
+  badtrans: true
+  direct: build foundation
+  literal: zhu ji
+- raw: 结丹
+  rawSimplified: 结丹
+  rawTraditional: 結丹
+  result: Core Formation
+  badtrans: true
+  direct: form core
+  literal: jie dan
+- raw: 元婴
+  rawSimplified: 元婴
+  rawTraditional: 元嬰
+  result: Nascent Soul
+  badtrans: true
+  direct: primordial infant
+  literal: yuan ying
+- raw: 化神
+  rawSimplified: 化神
+  rawTraditional: 化神
+  result: Soul Formation
+  badtrans: true
+  direct: transform spirit
+  literal: hua shen

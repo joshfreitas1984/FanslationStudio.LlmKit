@@ -1,0 +1,14 @@
+﻿- raw: 攻击力
+  rawSimplified: 攻击力
+  rawTraditional: 攻擊力
+  result: Attack Power
+  direct: attack power
+  literal: gong ji li
+  badtrans: true
+
+- raw: 防御力
+  rawSimplified: 防御力
+  rawTraditional: 防禦力
+  result: Guard
+  direct: Guard
+  literal: fang yu li

@@ -1,0 +1,135 @@
+# Places
+- raw: 茶庄
+  rawSimplified: 茶庄
+  rawTraditional: 茶莊
+  result: Tea Estate
+- raw: 茶铺
+  rawSimplified: 茶铺
+  rawTraditional: 茶鋪
+  result: Tea Shop
+- raw: 茶馆
+  rawSimplified: 茶馆
+  rawTraditional: 茶館
+  result: Tea House
+- raw: 据点
+  rawSimplified: 据点
+  rawTraditional: 據點
+  result: Outpost
+- raw: 码头
+  rawSimplified: 码头
+  rawTraditional: 碼頭
+  result: Port
+- raw: 酒楼
+  rawSimplified: 酒楼
+  rawTraditional: 酒樓
+  result: Tavern
+- raw: 酒家
+  result: Tavern
+- raw: 酒馆
+  rawSimplified: 酒馆
+  rawTraditional: 酒館
+  result: Tavern
+- raw: 酒坊
+  result: Winery
+  allowalt:
+  - Wineries
+- raw: 青楼
+  rawSimplified: 青楼
+  rawTraditional: 青樓
+  result: Pleasure House
+- raw: 医馆
+  rawSimplified: 医馆
+  rawTraditional: 醫館
+  result: Medical Pavilion
+- raw: 当铺
+  rawSimplified: 当铺
+  rawTraditional: 當鋪
+  result: Pawnshop
+- raw: 鱼塘
+  rawSimplified: 鱼塘
+  rawTraditional: 魚塘
+  result: Fish pond
+- raw: 锯木厂
+  rawSimplified: 锯木厂
+  rawTraditional: 鋸木廠
+  result: Sawmill
+- raw: 石料厂
+  rawSimplified: 石料厂
+  rawTraditional: 石料廠
+  result: Stone Quarry
+- raw: 盐场
+  rawSimplified: 盐场
+  rawTraditional: 鹽場
+  result: Salt Farm
+- raw: 香料场
+  rawSimplified: 香料场
+  rawTraditional: 香料場
+  result: Spice Farm
+- raw: 牧场
+  rawSimplified: 牧场
+  rawTraditional: 牧場
+  result: Pasture
+- raw: 煤场
+  rawSimplified: 煤场
+  rawTraditional: 煤場
+  result: Coal Yard
+- raw: 铜矿场
+  rawSimplified: 铜矿场
+  rawTraditional: 銅礦場
+  result: Copper Mine
+- raw: 铁矿场
+  rawSimplified: 铁矿场
+  rawTraditional: 鐵礦場
+  result: Iron Mine
+- raw: 瓷器窑
+  rawSimplified: 瓷器窑
+  rawTraditional: 瓷器窯
+  result: Pottery Kiln
+- raw: 茶叶园
+  rawSimplified: 茶叶园
+  rawTraditional: 茶葉園
+  result: Tea Garden
+- raw: 草药园
+  rawSimplified: 草药园
+  rawTraditional: 草藥園
+  result: Herb Garden
+- raw: 人参园
+  rawSimplified: 人参园
+  rawTraditional: 人蔘園
+  result: Ginseng Garden
+- raw: 农田
+  rawSimplified: 农田
+  rawTraditional: 農田
+  result: Crop Field
+- raw: 麻田
+  result: Hemp Field
+- raw: 棉花田
+  result: Cotton Field
+- raw: 桑田
+  result: Mulberry Field
+- raw: 炼丹坊
+  rawSimplified: 炼丹坊
+  rawTraditional: 煉丹坊
+  result: Alchemical Workshop
+- raw: 胭脂坊
+  result: Cosmetic Workshop
+- raw: 珠宝坊
+  rawSimplified: 珠宝坊
+  rawTraditional: 珠寶坊
+  result: Jewelry Workshop
+- raw: 丝坊
+  rawSimplified: 丝坊
+  rawTraditional: 絲坊
+  result: Silk Workshop
+- raw: 染坊
+  result: Dyeing Workshop
+- raw: 冶炼工坊
+  rawSimplified: 冶炼工坊
+  rawTraditional: 冶煉工坊
+  result: Metalworking Workshop
+- raw: 赌坊
+  rawSimplified: 赌坊
+  rawTraditional: 賭坊
+  result: Gambling Den
+- raw: 外城
+  result: Outer City

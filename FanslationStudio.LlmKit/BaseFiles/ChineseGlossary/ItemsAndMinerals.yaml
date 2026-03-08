@@ -1,0 +1,136 @@
+# Items and Minerals
+- raw: 钱
+  rawSimplified: 钱
+  rawTraditional: 錢
+  result: Coin
+  allowalt:
+  - Qian
+  - Money
+  badtrans: false
+- raw: 铁矿石
+  rawSimplified: 铁矿石
+  rawTraditional: 鐵礦石
+  result: Iron Ore
+- raw: 铜矿石
+  rawSimplified: 铜矿石
+  rawTraditional: 銅礦石
+  result: Copper Ore
+  direct: Copper Mineral
+  literal: Tong kuang shi
+- raw: 金属矿石
+  rawSimplified: 金属矿石
+  rawTraditional: 金屬礦石
+  result: Metallic ore
+  direct: Jinshu kuangshi
+  literal: Jinshu kuangshi
+- raw: 玄铁
+  rawSimplified: 玄铁
+  rawTraditional: 玄鐵
+  result: Dark Steel
+- raw: 黑铁
+  rawSimplified: 黑铁
+  rawTraditional: 黑鐵
+  result: Dark Iron
+- raw: 寒铁
+  rawSimplified: 寒铁
+  rawTraditional: 寒鐵
+  result: Cold Iron
+- raw: 镔铁
+  rawSimplified: 镔铁
+  rawTraditional: 鑌鐵
+  result: Refined Iron
+- raw: 黑金
+  result: Black Gold
+- raw: 乌金
+  rawSimplified: 乌金
+  rawTraditional: 烏金
+  result: Black Gold
+- raw: 熊掌
+  result: Bear Paw
+- raw: 豹胎
+  result: Leopard Fetus
+- raw: 黄连
+  rawSimplified: 黄连
+  rawTraditional: 黃連
+  result: Coptis root
+- raw: 槟榔
+  rawSimplified: 槟榔
+  rawTraditional: 檳榔
+  result: Betel nut
+- raw: 龙珠
+  rawSimplified: 龙珠
+  rawTraditional: 龍珠
+  result: Dragon ball
+- raw: 炼狱
+  rawSimplified: 炼狱
+  rawTraditional: 煉獄
+  result: Purgatory
+- raw: 千年灵芝
+  rawSimplified: 千年灵芝
+  rawTraditional: 千年靈芝
+  result: Thousand-year old Lingzhi
+- raw: 一条根
+  rawSimplified: 一条根
+  rawTraditional: 一條根
+  result: One Root
+- raw: 腹皮
+  result: Rhizome Bark
+- raw: 金不换
+  rawSimplified: 金不换
+  rawTraditional: 金不換
+  result: Priceless Gold
+  allowalt:
+  - Gold
+- raw: 生姜
+  rawSimplified: 生姜
+  rawTraditional: 生薑
+  result: Raw Ginger
+- raw: 甘草
+  result: Licorice
+- raw: 续断
+  rawSimplified: 续断
+  rawTraditional: 續斷
+  result: Teasel Root
+- raw: 茯苓
+  result: Poria
+  allowalt:
+  - Ding Fuling
+- raw: 三七
+  result: Sanqi
+  badtrans: false
+- raw: 细辛
+  rawSimplified: 细辛
+  rawTraditional: 細辛
+  result: Fragrant Root
+  allowalt:
+  - Liu Xixin
+  direct: Xi Xin
+  literal: Xi Xin
+- raw: 软筋散
+  rawSimplified: 软筋散
+  rawTraditional: 軟筋散
+  result: Soft Muscle Powder
+- raw: 杜康酒
+  result: Dukang Wine
+- raw: 即墨老酒
+  result: Jimo Old Wine
+- raw: 竹叶青
+  rawSimplified: 竹叶青
+  rawTraditional: 竹葉青
+  result: Bamboo Leaf Tea
+- raw: 葡萄酒
+  result: Grape Wine
+- raw: 猴儿酒
+  rawSimplified: 猴儿酒
+  rawTraditional: 猴兒酒
+  result: Monkey Wine
+- raw: 梅香酎
+  result: Plum-Scented Liquor
+  direct: Mei Xiang Zhou
+  literal: Mei Xiang Zhou
+- raw: 杂黍菊华
+  rawSimplified: 杂黍菊华
+  rawTraditional: 雜黍菊華
+  result: Mixed Millet and Chrysanthemum
+  direct: Zashi Juhua
+  literal: Zashi Juhua

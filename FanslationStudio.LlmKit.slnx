@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="FanslationStudio.LlmKit/FanslationStudio.LlmKit.csproj" />
+  <Project Path="Tests/FanslationStudio.LlmKit.Tests.csproj" />
+</Solution>

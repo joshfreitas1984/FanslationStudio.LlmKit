@@ -1,0 +1,72 @@
+# Game Terms
+- raw: 双击
+  rawSimplified: 双击
+  rawTraditional: 雙擊
+  result: Double tap
+  direct: Double-click
+  literal: Shuangji
+- raw: 冷却中
+  rawSimplified: 冷却中
+  rawTraditional: 冷卻中
+  result: Cooldown
+  direct: In Cooling Process
+  literal: Lengque Zhong
+- raw: 絕招
+  rawSimplified: 绝招
+  rawTraditional: 絕招
+  result: Ultimate
+  direct: Ultimate Technique
+  literal: Juezhao
+
+
+# Ranks
+- raw: 一阶
+  rawSimplified: 一阶
+  rawTraditional: 一階
+  result: Tier 1
+  badtrans: false
+- raw: 二阶
+  rawSimplified: 二阶
+  rawTraditional: 二階
+  result: Tier 2
+  badtrans: false
+- raw: 三阶
+  rawSimplified: 三阶
+  rawTraditional: 三階
+  result: Tier 3
+  badtrans: false
+- raw: 四阶
+  rawSimplified: 四阶
+  rawTraditional: 四階
+  result: Tier 4
+  badtrans: false
+- raw: 五阶
+  rawSimplified: 五阶
+  rawTraditional: 五階
+  result: Tier 5
+  badtrans: false
+- raw: 六阶
+  rawSimplified: 六阶
+  rawTraditional: 六階
+  result: Tier 6
+  badtrans: false
+- raw: 七阶
+  rawSimplified: 七阶
+  rawTraditional: 七階
+  result: Tier 7
+  badtrans: false
+- raw: 八阶
+  rawSimplified: 八阶
+  rawTraditional: 八階
+  result: Tier 8
+  badtrans: false
+- raw: 九阶
+  rawSimplified: 九阶
+  rawTraditional: 九階
+  result: Tier 9
+  badtrans: false
+- raw: 十阶
+  rawSimplified: 十阶
+  rawTraditional: 十階
+  result: Tier 10
+  badtrans: false

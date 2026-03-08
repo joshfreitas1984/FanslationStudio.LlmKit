@@ -1,0 +1,88 @@
+# Weapons
+- raw: 刀
+  result: Blade
+  allowalt:
+  - Knife
+  - Knives
+  - Cleaver
+  - Scissor
+  - Saber
+  - Dao
+  - Scabbard
+  context: Dao is Blade or Cleaver or Knife
+  badtrans: false
+- raw: 剑
+  rawSimplified: 剑
+  rawTraditional: 劍
+  result: Sword
+  allowalt:
+  - Jian
+  - scabbard
+  context: Sometimes gets translated inccorectly
+- raw: 暗器
+  result: Hidden Weapon
+- raw: 枪
+  rawSimplified: 枪
+  rawTraditional: 槍
+  result: Spear
+  allowalt:
+  - Sharp
+  - Qiang
+  badtrans: false
+- raw: 枪棍
+  rawSimplified: 枪棍
+  rawTraditional: 槍棍
+  result: Spear & Staff
+  allowalt:
+  - Spear and Staff
+  - Spear
+- raw: 棍
+  result: Staff
+  context: More like club or cludgel or stick. Also used as part of other words
+  badtrans: false
+- raw: 杖
+  result: Staff
+  context: More like walking stick or formal staff
+  badtrans: false
+- raw: 肩甲
+  result: Shoulder Armor
+  direct: jian jia
+  literal: shoulder armor
+
+# Arts
+- raw: 枪法
+  rawSimplified: 枪法
+  rawTraditional: 槍法
+  result: Spear Art
+  allowalt:
+  - Spear Technique
+- raw: 刀法
+  result: Blade Art
+  allowalt:
+  - Knife Technique
+  - Blade Technique
+  badtrans: false
+- raw: 刀式
+  result: Blade Form
+  allowalt:
+  - Blade Technique
+  - Blade Style
+  badtrans: false
+- raw: 剑法
+  rawSimplified: 剑法
+  rawTraditional: 劍法
+  result: Sword Art
+  allowalt:
+  - Sword Technique
+  - Swordsmanship
+  badtrans: false
+- raw: 剑术
+  rawSimplified: 剑术
+  rawTraditional: 劍術
+  result: Swordsmanship
+  allowalt:
+  - Sword Technique
+  - Swordsmanship
+  direct: Sword Technique
+  literal: Jianshu
+  badtrans: false

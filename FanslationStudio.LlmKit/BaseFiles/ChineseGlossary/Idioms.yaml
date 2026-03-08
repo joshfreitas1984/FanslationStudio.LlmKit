@@ -1,0 +1,108 @@
+# Idioms
+- raw: 找死
+  result: courting death
+  allowalt:
+  - court death
+  - seek death
+  - seeks death
+  - seeking death
+  direct: Seeking death
+  literal: Zhǎo sǐ.
+- raw: 刀剑无眼
+  rawSimplified: 刀剑无眼
+  rawTraditional: 刀劍無眼
+  result: Blades and swords have no eyes
+  direct: Blade sword has no eyes
+  literal: Dāo jiàn wú yǎn
+  badtrans: false
+- raw: 弱肉强食
+  rawSimplified: 弱肉强食
+  rawTraditional: 弱肉強食
+  result: The weak are prey to the strong
+  direct: Weak meat, strong eat.
+  literal: Ruò ròu qiáng shí.
+  badtrans: false
+- raw: 高手如云
+  rawSimplified: 高手如云
+  rawTraditional: 高手如雲
+  result: Experts are as common as clouds
+  direct: Masters like clouds.
+  literal: Gāo shǒu rú yún.
+  badtrans: false
+- raw: 事半功倍
+  result: Half the effort for double the result
+  direct: Half work, double the achievement.
+  literal: Shì bàn gōng bèi.
+  badtrans: false
+- raw: 事倍功半
+  result: Double the effort for half the result
+  allowalt:
+  - Double the effort with half the result
+  direct: Double the work, half the achievement.
+  literal: Shì bèi gōng bàn.
+  badtrans: false
+- raw: 调虎离山
+  rawSimplified: 调虎离山
+  rawTraditional: 調虎離山
+  result: Lure the tiger out of the mountain
+  direct: Move the tiger away from the mountain.
+  literal: Tiáo hǔ lí shān.
+  badtrans: false
+- raw: 冰清玉洁
+  rawSimplified: 冰清玉洁
+  rawTraditional: 冰清玉潔
+  result: Clear as ice and clean as jade
+  direct: Ice-clear, jade-pure.
+  literal: Bīng qīng yù jié.
+  badtrans: false
+- raw: 鲤鱼跳龙门
+  rawSimplified: 鲤鱼跳龙门
+  rawTraditional: 鯉魚跳龍門
+  result: Carp leaps through the Dragon Gate
+  direct: The carp jumps the Dragon Gate.
+  literal: Lǐ yú tiào lóng mén.
+  badtrans: false
+- raw: 易如反掌
+  result: As easy as turning one's hand
+  direct: Easy as turning the palm.
+  literal: Yì rú fǎn zhǎng.
+  badtrans: false
+- raw: 剑拔弩张
+  rawSimplified: 剑拔弩张
+  rawTraditional: 劍拔弩張
+  result: swords drawn and bows bent
+  allowalt:
+  - swords were drawn and bows bent
+  - swords are drawn and bows bent
+  direct: Sword drawn, crossbow set.
+  literal: Jiàn bá nǔ zhāng.
+  badtrans: false
+- raw: 井底之蛙
+  result: Frog at the bottom of the well
+  direct: Frog at the bottom of the well.
+  literal: Jǐng dǐ zhī wā.
+  badtrans: false
+- raw: 坐井观天
+  rawSimplified: 坐井观天
+  rawTraditional: 坐井觀天
+  result: View the sky from the bottom of a well
+  allowalt:
+  - Viewing the sky from the bottom of a well
+  direct: Sitting in the well, watching the sky.
+  literal: Zuò jǐng guān tiān.
+  badtrans: false
+- raw: 以毒攻毒
+  result: Fight poison with poison
+  direct: Use poison to attack poison.
+  literal: Yǐ dú gōng dú.
+  badtrans: false
+- raw: 不共戴天
+  result: Cannot live under the same sky
+  direct: Cannot share the same sky.
+  literal: Bù gòng dài tiān.
+  badtrans: false
+- raw: 金盆洗手
+  result: Wash one's hands in a Golden Basin
+  direct: Wash hands in a golden basin.
+  literal: Jīn pén xǐ shǒu.
+  badtrans: false

@@ -1,0 +1,235 @@
+# Sect Terms
+- raw: 门派
+  rawSimplified: 门派
+  rawTraditional: 門派
+  result: Sect
+  context: Refers to a school or faction, especially in martial arts or cultivation settings, often with a specific philosophy or technique.
+  badtrans: false
+- raw: 门派背景
+  rawSimplified: 门派背景
+  rawTraditional: 門派背景
+  result: Sect Background
+  context: Refers to the history, origin, or cultural background of a particular sect, often detailing its philosophies, teachings, or important events.
+  badtrans: false
+- raw: 流派
+  result: Style
+  allowalt:
+  - School
+  context: Refers to a specific tradition or school of thought, technique, or philosophy, often used in martial arts, arts, or intellectual disciplines.
+  badtrans: false
+- raw: 盟主
+  result: Alliance Leader
+  allowalt:
+  - Leader
+  direct: Alliance Master
+  literal: Meng Zhu
+- raw: 武林盟
+  result: Wulin Alliance
+  allowalt:
+  - Alliance
+  direct: martial forest alliance
+  literal: wulin meng
+- raw: 法王
+  result: Dharma King
+  direct: Dharma King
+  literal: Fa Wang
+- raw: 魔教
+  result: Demon Sect
+  direct: mo jiao
+  literal: demon sect
+- raw: 委托
+  rawSimplified: 委托
+  rawTraditional: 委託
+  result: Commission
+  direct: Entrust
+  literal: Wei tuo
+# 6 Paths clans
+- raw: 六道法王
+  result: Six Paths Dharma King
+  direct: Six Paths Dharma King
+  literal: Liu Dao Fa Wang
+- raw: 人間道
+  rawSimplified: 人间道
+  rawTraditional: 人間道
+  result: Human Path
+  direct: Human Realm Path
+  literal: Ren Jian Dao
+- raw: 餓鬼道
+  rawSimplified: 饿鬼道
+  rawTraditional: 餓鬼道
+  result: Hungry Ghost Path
+  direct: e gui dao
+  literal: hungry ghost path
+- raw: 地獄道
+  rawSimplified: 地狱道
+  rawTraditional: 地獄道
+  result: Hell's Path
+  direct: di yu dao
+  literal: earth prison path / hell path
+- raw: 畜生道
+  result: Beast Path
+  direct: chu sheng dao
+  literal: beast path / animal path
+- raw: 畜牲道
+  result: Beast Path
+  direct: animal beast path
+  literal: Chu Sheng Dao
+- raw: 天道
+  result: Heavenly path
+  direct: heaven way
+  literal: Tiandao
+- raw: 修羅道
+  rawSimplified: 修罗道
+  rawTraditional: 修羅道
+  result: Asura Path
+  direct: Xiu Luo Dao
+  literal: Asura path / path of demonic warriors
+# Ancient Factions
+- raw: 西夏
+  result: Western Xia
+  direct: Western Xia
+  literal: Xixia
+- raw: 吐蕃
+  result: Tubo
+  direct: Tubo
+  literal: Tufan (Tibetan)
+- raw: 唐門
+  rawSimplified: 唐门
+  rawTraditional: 唐門
+  result: Tang Clan
+  direct: Tang gate
+  literal: Tangmen
+- raw: 飛石幫
+  rawSimplified: 飞石帮
+  rawTraditional: 飛石幫
+  result: Flying Stone Gang
+- raw: 青城
+  result: Qingcheng
+  direct: Green City
+  literal: Qingcheng
+- raw: 武當
+  rawSimplified: 武当
+  rawTraditional: 武當
+  result: Wudang
+  direct: Martial Hall
+  literal: Wudang
+- raw: 少林
+  result: Shaolin
+  direct: Small Forest
+  literal: Shaolin
+- raw: 峨嵋
+  result: Emei
+  direct: Lofty Eyebrow
+  literal: Emei
+- raw: 丐幫
+  rawSimplified: 丐帮
+  rawTraditional: 丐幫
+  result: Beggar Sect
+  direct: Beggar Gang
+  literal: Gaibang
+- raw: 恶人谷
+  rawSimplified: 恶人谷
+  rawTraditional: 惡人谷
+  result: Villains Valley
+  badtrans: true
+  direct: Evil person valley
+  literal: e ren gu
+- raw: 天山
+  result: Tianshan
+  direct: Heaven Mountain
+  literal: Tianshan
+- raw: 雪山派
+  result: Snow Mountain Sect
+  direct: Snow Mountain Faction
+  literal: Xueshan pai
+- raw: 鳳凰山
+  rawSimplified: 凤凰山
+  rawTraditional: 鳳凰山
+  result: Phoenix Mountain
+  direct: Phoenix Mountain
+  literal: Fenghuang shan
+- raw: 嵩山
+  result: Songshan
+  direct: Lofty Mountain
+  literal: Songshan
+- raw: 嶺南
+  rawSimplified: 岭南
+  rawTraditional: 嶺南
+  result: Lingnan
+  direct: South of Mountains
+  literal: Lingnan
+  badtrans: false
+- raw: 逍遙派
+  rawSimplified: 逍遥派
+  rawTraditional: 逍遙派
+  result: Carefree Sect
+  direct: Carefree Faction
+  literal: Xiaoyao pai
+- raw: 日月神教
+  result: Sun Moon Holy Cult
+  direct: Sun Moon Divine Cult
+  literal: Riyue shenjiao
+- raw: 岳家
+  result: Yue Clan
+  allowalt:
+  - Yue Family
+  direct: Mountain Family
+  literal: Yue jia
+- raw: 段家
+  result: Duan Clan
+  allowalt:
+  - Duan Family
+  direct: Segment Family
+  literal: Duan jia
+- raw: 胡家
+  result: Hu Clan
+  allowalt:
+  - Hu Family
+  direct: Hu Family
+  literal: Hu jia
+- raw: 全真
+  result: Quanzhen
+  direct: Complete Truth
+  literal: Quanzhen
+- raw: 錦香
+  rawSimplified: 锦香
+  rawTraditional: 錦香
+  result: Jinxiang
+  direct: Brocade Fragrance
+  literal: Jin Xiang
+- raw: 點蒼
+  rawSimplified: 点苍
+  rawTraditional: 點蒼
+  result: Diancang
+  direct: Spot Cyan
+  literal: Diancang
+- raw: 鐵拳
+  rawSimplified: 铁拳
+  rawTraditional: 鐵拳
+  result: Iron Fist
+  direct: Iron Fist
+  literal: Tiequan
+- raw: 泥教
+  result: Mud Cult
+  direct: Mud Teaching
+  literal: Ni jiao
+- raw: 奪魄
+  rawSimplified: 夺魄
+  rawTraditional: 奪魄
+  result: Soul Stealer
+  direct: Seize Soul
+  literal: Duopo
+- raw: 南宮
+  rawSimplified: 南宫
+  rawTraditional: 南宮
+  result: Nangong
+  direct: Southern Palace
+  literal: Nangong
+- raw: 崆峒
+  result: Kongtong
+  direct: Lofty Peak
+  literal: Kongtong
+- raw: 玄功
+  result: Mystic Skill
+  direct: Profound Skill
+  literal: Xuanggong
