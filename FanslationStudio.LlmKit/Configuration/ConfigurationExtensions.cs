@@ -1,6 +1,6 @@
-﻿using System.Text;
-using FanslationStudio.LlmKit.Support;
+﻿using FanslationStudio.LlmKit.Support;
 using FanslationStudio.LlmKit.Utility;
+using System.Text;
 using YamlDotNet.Serialization;
 
 namespace FanslationStudio.LlmKit.Configuration;
@@ -12,40 +12,68 @@ public static class ConfigurationExtensions
         var deserializer = YamlHelper.CreateDeserializer();
         var response = deserializer.Deserialize<LlmConfig>(File.ReadAllText($"{workingDirectory}/Config.yaml", Encoding.UTF8));
 
-        response.ExecutionValues.WorkingDirectory = workingDirectory;
+        // Validate models
+        if (response.Models == null || response.Models.Count == 0)
+            throw new InvalidOperationException("At least one model configuration must be provided in Config.yaml.");
+
+        response.Runtime.WorkingDirectory = workingDirectory;
 
         // Load Manual Translations if exists
         var manualTranslationsFile = $"{workingDirectory}/ManualTranslations.yaml";
         if (File.Exists(manualTranslationsFile))
-            response.ExecutionValues.ManualTranslations =
+            response.Runtime.ManualTranslations =
                 deserializer.Deserialize<List<GlossaryLine>>(File.ReadAllText(manualTranslationsFile, Encoding.UTF8))
                 ?? new List<GlossaryLine>();
 
+
         // Load and Merge Model Presets
-        if (response.Presets.StructuredTextModelPreset == ModelPreset.Qwen25
-            || response.Presets.StandardModelPreset == ModelPreset.Qwen25)
-            LoadQwen25Preset(deserializer, response);
+        foreach (var model in response.Models)
+        {
+            if (model.Name == string.Empty)
+                model.Name = "Standard";
 
-        MergeWorkspacePrompts($"{workingDirectory}/StandardPrompts", true, response.ExecutionValues);
-        MergeWorkspacePrompts($"{workingDirectory}/StructuredPrompts", false, response.ExecutionValues);
+            if (response.Runtime.Models.ContainsKey(model.Name))
+                throw new InvalidOperationException($"Duplicate model name '{model.Name}' found in configuration.");
 
-        // Merge Model Configuration
-        MergeModelConfig(response.ExecutionValues.StandardModel, response.WorkspaceStandardModel);
-        MergeModelConfig(response.ExecutionValues.StructuredTextModel, response.WorkspaceStructuredTextModel);
+            var runtimeConfig = new ModelExecutionConfig
+            {
+                Model = model.Model,
+                Url = model.Url,
+                ApiKeyRequired = model.ApiKeyRequired,
+                ModelParams = model.ModelParams,
+                Prompts = new Dictionary<string, string>()
+            };
 
-        // Load API Keys
-        LoadApiKey($"{workingDirectory}/StandardApiKey.txt", response.ExecutionValues.StandardModel);
-        LoadApiKey($"{workingDirectory}/StructuredTextApiKey.txt", response.ExecutionValues.StructuredTextModel);
+            // Load Presets - add more here
+            if (model.ModelPreset == ModelPreset.Qwen25)
+                runtimeConfig = MergeModelConfig(GetQwen25Preset(deserializer, model), runtimeConfig);
+
+            // Set the merged config to runtime
+            response.Runtime.Models[model.Name] = runtimeConfig;
+
+            // Merge custom prompts if they are specified
+            var customPromptsPath = model.CustomPromptsPath == string.Empty ?
+                $"{workingDirectory}/{model.Name}Prompts"
+                : $"{workingDirectory}/{model.CustomPromptsPath}";
+
+            MergeWorkspacePrompts(customPromptsPath, response.Runtime.Models[model.Name]);
+
+            var apiKeyPath = model.ApiKeyFilePath == string.Empty ?
+                $"{workingDirectory}/{model.Name}ApiKey.txt"
+                : $"{workingDirectory}/{model.ApiKeyFilePath}";
+
+            LoadApiKey(apiKeyPath, response.Runtime.Models[model.Name]);
+        }
 
         // Load Preset Glossary before workspace glossary so that workspace can override preset entries
         LoadPresetGlossary(deserializer, response);
-        MergeWorkspaceGlossary($"{workingDirectory}/Glossary", deserializer, response.ExecutionValues);
+        MergeWorkspaceGlossary($"{workingDirectory}/Glossary", deserializer, response.Runtime);
 
         // Change hyphens to non-breaking hyphens to avoid Unity line-breaking them when rendering
-        foreach (var line in response.ExecutionValues.GlossaryLines)
+        foreach (var line in response.Runtime.GlossaryLines)
             line.Result = line.Result.Replace("-", "\u2011");
 
-        foreach (var line in response.ExecutionValues.ManualTranslations)
+        foreach (var line in response.Runtime.ManualTranslations)
             line.Result = line.Result.Replace("-", "\u2011");
 
         return response;
@@ -59,33 +87,25 @@ public static class ConfigurationExtensions
             throw new InvalidOperationException($"API key is required but '{apiKeyFile}' not found.");
     }
 
-    private static void LoadQwen25Preset(IDeserializer deserializer, LlmConfig config)
+    private static ModelExecutionConfig GetQwen25Preset(IDeserializer deserializer, ModelConfig model)
     {
         var assembly = typeof(ConfigurationExtensions).Assembly;
         var resourceName = "FanslationStudio.LlmKit.BaseFiles.Qwen25.Config.yaml";
         using var stream = assembly.GetManifestResourceStream(resourceName)
             ?? throw new InvalidOperationException($"Embedded resource '{resourceName}' not found.");
         using var reader = new StreamReader(stream, Encoding.UTF8);
-        var presetConfig = deserializer.Deserialize<PresetModelConfig>(reader);
+        var presetConfig = deserializer.Deserialize<PresetConfig>(reader);
 
-        if (config.Presets.StandardModelPreset == ModelPreset.Qwen25)
+        return new ModelExecutionConfig
         {
-            config.ExecutionValues.StandardModel.Model = presetConfig.Model;
-            config.ExecutionValues.StandardModel.Url = presetConfig.Url;
-            config.ExecutionValues.StandardModel.ApiKeyRequired = presetConfig.ApiKeyRequired;
-            config.ExecutionValues.StandardModel.ModelParams = presetConfig.ModelParams;
-            config.ExecutionValues.StandardModel.Prompts = LoadPresetPrompts("FanslationStudio.LlmKit.BaseFiles.Qwen25");
-        }
-
-        if (config.Presets.StructuredTextModelPreset == ModelPreset.Qwen25)
-        {
-            config.ExecutionValues.StructuredTextModel.Model = presetConfig.Model;
-            config.ExecutionValues.StructuredTextModel.Url = presetConfig.Url;
-            config.ExecutionValues.StructuredTextModel.ApiKeyRequired = presetConfig.ApiKeyRequired;
-            config.ExecutionValues.StructuredTextModel.Model = presetConfig.Model;
-            config.ExecutionValues.StructuredTextModel.ModelParams = presetConfig.ModelParams;
-            config.ExecutionValues.StructuredTextModel.Prompts = LoadPresetPrompts("FanslationStudio.LlmKit.BaseFiles.Qwen25");
-        }
+            Model = presetConfig.Model,
+            Url = presetConfig.Url,
+            ApiKeyRequired = presetConfig.ApiKeyRequired,
+            ModelParams = model.ModelPresetType == ModelPresetType.Standard ?
+                presetConfig.ModelParams
+                : presetConfig.StructuredTextModelParams,
+            Prompts = LoadPresetPrompts("FanslationStudio.LlmKit.BaseFiles.Qwen25")
+        };
     }
 
     public static Dictionary<string, string> LoadPresetPrompts(string resourcePrefix)
@@ -102,14 +122,14 @@ public static class ConfigurationExtensions
 
             using var reader = new StreamReader(stream, Encoding.UTF8);
             var promptContent = reader.ReadToEnd();
-            var promptKey = Path.GetFileNameWithoutExtension(resourceName);
+            var promptKey = Path.GetFileNameWithoutExtension(resourceName).Split('.').Last();
 
             prompts.Add(promptKey, promptContent);
         }
         return prompts;
     }
 
-    public static void MergeWorkspacePrompts(string promptsDirectory, bool isStandard, ExecutionValues executionValues)
+    public static void MergeWorkspacePrompts(string promptsDirectory, ModelExecutionConfig config)
     {
         if (!Directory.Exists(promptsDirectory))
             return;
@@ -119,24 +139,20 @@ public static class ConfigurationExtensions
         {
             var key = Path.GetFileNameWithoutExtension(file);
             var value = File.ReadAllText(file, Encoding.UTF8);
-
-            if (isStandard)
-                executionValues.StandardModel.Prompts[key] = value;
-            else
-                executionValues.StructuredTextModel.Prompts[key] = value;
+            config.Prompts[key] = value;
         }
     }
 
     private static void LoadPresetGlossary(IDeserializer deserializer, LlmConfig response)
     {
-        if (!response.Presets.UsePresetChineseGlossary)
+        if (!response.GlossaryPreset.UsePresetChineseGlossary)
             return;
 
         var assembly = typeof(ConfigurationExtensions).Assembly;
         var presetGlossaryLines = new List<GlossaryLine>();
 
         var glossaryTypesToLoad = Enum.GetValues<ChineseGlossaryTypes>()
-            .Except(response.Presets.ChineseGlossaryTypesToSupress);
+            .Except(response.GlossaryPreset.ChineseGlossaryTypesToSupress);
 
         foreach (var glossaryType in glossaryTypesToLoad)
         {
@@ -149,10 +165,10 @@ public static class ConfigurationExtensions
             presetGlossaryLines.AddRange(lines);
         }
 
-        response.ExecutionValues.GlossaryLines = presetGlossaryLines;
+        response.Runtime.GlossaryLines = presetGlossaryLines;
     }
 
-    private static void MergeWorkspaceGlossary(string glossaryDirectory, IDeserializer deserializer, ExecutionValues executionValues)
+    private static void MergeWorkspaceGlossary(string glossaryDirectory, IDeserializer deserializer, RuntimeValues executionValues)
     {
         if (!Directory.Exists(glossaryDirectory))
             return;
@@ -174,10 +190,10 @@ public static class ConfigurationExtensions
             }
         }
     }
-    public static void MergeModelConfig(ModelUrlConfig baseConfig, ModelUrlConfig? overrideConfig)
+    public static ModelExecutionConfig MergeModelConfig(ModelExecutionConfig baseConfig, ModelExecutionConfig? overrideConfig)
     {
         if (overrideConfig == null)
-            return;
+            return baseConfig;
 
         if (!string.IsNullOrEmpty(overrideConfig.Model))
             baseConfig.Model = overrideConfig.Model;
@@ -191,5 +207,7 @@ public static class ConfigurationExtensions
         // Override all model parameters if any are provided in the override config
         if (overrideConfig.ModelParams != null)
             baseConfig.ModelParams = overrideConfig.ModelParams;
+
+        return baseConfig;
     }
 }

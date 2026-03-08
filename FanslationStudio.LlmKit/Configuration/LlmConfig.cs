@@ -6,26 +6,26 @@ namespace FanslationStudio.LlmKit.Configuration;
 
 public class LlmConfig
 {
-    /// <summary>
-    /// Model to use for translating simple text that doesn't have placeholders, html or other complex structures.
-    /// </summary>
-    public ModelUrlConfig? WorkspaceStandardModel { get; set; }
+    ///// <summary>
+    ///// Model to use for translating simple text that doesn't have placeholders, html or other complex structures.
+    ///// </summary>
+    //public ModelUrlConfig? WorkspaceStandardModel { get; set; }
 
-    /// <summary>
-    /// Model to use for translating text that have placeholders, html and other complex structures.
-    /// </summary>
-    public ModelUrlConfig? WorkspaceStructuredTextModel { get; set; }
+    ///// <summary>
+    ///// Model to use for translating text that have placeholders, html and other complex structures.
+    ///// </summary>
+    //public ModelUrlConfig? WorkspaceStructuredTextModel { get; set; }
 
     public int? RetryCount { get; set; }
     public int? BatchSize { get; set; }
     public bool SkipLineValidation { get; set; }
     public bool CorrectionPromptsEnabled { get; set; }
     public bool TranslateFlagged { get; set; }
-
-    public PresetConfig Presets { get; set; } = new PresetConfig();
+    public List<ModelConfig> Models { get; set; } = new();
+    public GlossaryPresetConfig GlossaryPreset { get; set; } = new();
 
     [YamlIgnore]
-    public ExecutionValues ExecutionValues { get; set; } = new ExecutionValues();
+    public RuntimeValues Runtime { get; set; } = new();
 }
 
 // Convert this further
@@ -35,11 +35,10 @@ public class LlmConfig
 // Api Key would be Key<ApiKey>.txt
 // Presets for Model params would have a structured/unstructured. - you can say whether you want structured or unstructured
 
-public class ExecutionValues
+public class RuntimeValues
 {
     public string? WorkingDirectory { get; set; }
-    public ModelExecutionConfig StandardModel { get; set; } = new ModelExecutionConfig();
-    public ModelExecutionConfig StructuredTextModel { get; set; } = new ModelExecutionConfig();
+    public Dictionary<string, ModelExecutionConfig> Models { get; set; } = new();
     public List<GlossaryLine> GlossaryLines { get; set; } = [];
     public List<GlossaryLine> ManualTranslations { get; set; } = [];
     public Dictionary<string, string> TranslationCache { get; set; } = [];

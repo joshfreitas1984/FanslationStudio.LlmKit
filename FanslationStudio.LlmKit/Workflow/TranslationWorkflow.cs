@@ -298,7 +298,7 @@ public class TranslationWorkflow
         if (!textFile.EnableGlossary)
             return null;
 
-        foreach (var manual in config.ExecutionValues.ManualTranslations)
+        foreach (var manual in config.Runtime.ManualTranslations)
         {
             if (split.Text != manual.Raw)
                 continue;
@@ -413,7 +413,7 @@ public class TranslationWorkflow
         if (split.Translated == null)
             return modified;
 
-        foreach (var item in config.ExecutionValues.GlossaryLines)
+        foreach (var item in config.Runtime.GlossaryLines)
         {
             if (!item.CheckForBadTranslation)
                 continue;
@@ -457,7 +457,7 @@ public class TranslationWorkflow
         if (split.Translated == null)
             return modified;
 
-        foreach (var item in config.ExecutionValues.GlossaryLines)
+        foreach (var item in config.Runtime.GlossaryLines)
         {
             var wordPattern = $"\\b{item.Result}\\b";
 
@@ -477,7 +477,7 @@ public class TranslationWorkflow
                     continue;
 
                 // Check for Alternatives
-                var dupes = config.ExecutionValues.GlossaryLines.Where(s => s.Result == item.Result && s.Raw != item.Raw);
+                var dupes = config.Runtime.GlossaryLines.Where(s => s.Result == item.Result && s.Raw != item.Raw);
                 bool found = false;
 
                 foreach (var dupe in dupes)

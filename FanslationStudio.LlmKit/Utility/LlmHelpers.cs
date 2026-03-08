@@ -23,9 +23,12 @@ public static class LlmHelpers
 
     public static ModelExecutionConfig CalculateModelConfig(LlmConfig config, string preparedRaw)
     {
-        return preparedRaw.Contains("<")
-            ? config.ExecutionValues.StructuredTextModel
-            : config.ExecutionValues.StandardModel;
+        // TODO: Implement properly
+        //return preparedRaw.Contains("<")
+        //    ? config.Runtime.Models.First().Value
+        //    : config.Runtime.Models.Last().Value;
+
+        return config.Runtime.Models.First().Value;
     }
 
     public static string GenerateLlmRequestData(ModelExecutionConfig modelConfig, List<object> messages)

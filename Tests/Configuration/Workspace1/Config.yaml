@@ -1,16 +1,30 @@
-﻿workspaceStandardModel:
-  url: "http://localhost/standard"
-workspaceStructuredTextModel:
-  url: "http://localhost/structured"
-  apiKeyRequired: true
-presets:
-  standardModelPreset: Qwen25
-  structuredTextModelPreset: Qwen25
-  usePresetChineseGlossary: true
-  chineseGlossaryTypesToSupress:
-    - Phonetics
-retryCount: 4
+﻿retryCount: 4
 batchSize: 20000
 skipLineValidation: false
 correctionPromptsEnabled: true
 translateFlagged: true
+glossaryPreset:
+  usePresetChineseGlossary: true
+  chineseGlossaryTypesToSupress:
+    - Phonetics  
+models: 
+  - name: Standard
+    modelPreset: Qwen25
+    url: "http://localhost/standard"
+    overridePromptFolder: "StandardPrompts"
+  - name: Structured
+    modelPreset: Qwen25  
+    modelPresetType: StructuredText
+    url: "http://localhost/structured"
+    apiKeyRequired: true
+    overridePromptFolder: "StructuredPrompts"
+  # - name: alwaysFailing
+  #   modelPreset: Qwen35  
+  #   modelType: Escalation
+  # - name: regexMatch
+  #   modelPreset: Gpt4oMini
+  #   structuredPreset: None
+  #   regexMatches:
+  #     - ".*error.*"
+  #   params:
+  #     temperature: 0.7 

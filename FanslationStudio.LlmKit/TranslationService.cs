@@ -18,11 +18,11 @@ public static class TranslationService
     public static async Task FillTranslationCacheAsync(string workingDirectory, int charsToCache, Dictionary<string, string> cache, LlmConfig config)
     {
         // Add Manual adjustments 
-        foreach (var k in config.ExecutionValues.ManualTranslations)
+        foreach (var k in config.Runtime.ManualTranslations)
             cache.Add(k.Raw, k.Result);
 
         // Add Glossary Lines to Cache
-        foreach (var line in config.ExecutionValues.GlossaryLines)
+        foreach (var line in config.Runtime.GlossaryLines)
         {
             if (!cache.ContainsKey(line.Raw))
                 cache.Add(line.Raw, line.Result);
@@ -66,7 +66,7 @@ public static class TranslationService
         });
 
         //Add it to config to make it easier to use
-        config.ExecutionValues.TranslationCache = cache;
+        config.Runtime.TranslationCache = cache;
     }
 
     public static async Task TranslateViaLlmAsync(string workingDirectory, bool forceRetranslation)
@@ -374,15 +374,15 @@ public static class TranslationService
                 return new ValidationResult(LineValidation.CleanupLineBeforeSaving($"{combinedResult}", preparedRaw, textFile, tokenReplacer));
         }
 
-        var cacheHit = config.ExecutionValues.TranslationCache.ContainsKey(preparedRaw);
+        var cacheHit = config.Runtime.TranslationCache.ContainsKey(preparedRaw);
         if (cacheHit)
-            return new ValidationResult(LineValidation.CleanupLineBeforeSaving(config.ExecutionValues.TranslationCache[preparedRaw], preparedRaw, textFile, tokenReplacer));
+            return new ValidationResult(LineValidation.CleanupLineBeforeSaving(config.Runtime.TranslationCache[preparedRaw], preparedRaw, textFile, tokenReplacer));
 
         // Calculate Executing model based on text
         var modelConfig = LlmHelpers.CalculateModelConfig(config, preparedRaw);
 
         // Define the request payload
-        List<object> messages = GenerateBaseMessages(modelConfig, config.ExecutionValues.GlossaryLines, preparedRaw, textFile, additionalPrompts);
+        List<object> messages = GenerateBaseMessages(modelConfig, config.Runtime.GlossaryLines, preparedRaw, textFile, additionalPrompts);
 
         try
         {
@@ -418,7 +418,7 @@ public static class TranslationService
                         // If it still failed, regenerate messages with the corrected result for next retry
                         if (!validationResult.Valid)
                         {
-                            messages = GenerateBaseMessages(modelConfig, config.ExecutionValues.GlossaryLines, preparedRaw, textFile);
+                            messages = GenerateBaseMessages(modelConfig, config.Runtime.GlossaryLines, preparedRaw, textFile);
                             var correctionPrompt = CalulateCorrectionPrompt(modelConfig, validationResult, preparedRaw, correctedResult);
                             AddCorrectionMessages(messages, correctedResult, correctionPrompt);
                         }
@@ -428,7 +428,7 @@ public static class TranslationService
                         var correctionPrompt = CalulateCorrectionPrompt(modelConfig, validationResult, preparedRaw, llmResult);
 
                         // Regenerate base messages so we dont hit token limit by constantly appending retry history
-                        messages = GenerateBaseMessages(modelConfig, config.ExecutionValues.GlossaryLines, preparedRaw, textFile);
+                        messages = GenerateBaseMessages(modelConfig, config.Runtime.GlossaryLines, preparedRaw, textFile);
                         AddCorrectionMessages(messages, llmResult, correctionPrompt);
                     }
                 }
@@ -471,10 +471,10 @@ public static class TranslationService
                 // This prevents the LLM from re-translating everything
                 var messages = new List<object>
                 {
-                    LlmHelpers.GenerateSystemPrompt(config.ExecutionValues.StandardModel.Prompts["BaseSystemPrompt"]),
+                    LlmHelpers.GenerateSystemPrompt(executingModel.Prompts["BaseSystemPrompt"]),
                     LlmHelpers.GenerateUserPrompt("The following sentence contains untranslated Chinese characters. Translate all Chinese characters to English while keeping the rest of the sentence intact."),
                     LlmHelpers.GenerateAssistantPrompt(sentence),
-                    LlmHelpers.GenerateUserPrompt("Translate all Chinese characters in this sentence to English. " + config.ExecutionValues.StandardModel.Prompts["BaseCorrectionSuffixPrompt"])
+                    LlmHelpers.GenerateUserPrompt("Translate all Chinese characters in this sentence to English. " + executingModel.Prompts["BaseCorrectionSuffixPrompt"])
                 };
 
                 var correctedSentence = await TranslateMessagesAsync(client, config, executingModel, messages);
