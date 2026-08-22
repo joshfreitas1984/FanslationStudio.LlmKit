@@ -4,12 +4,14 @@ using FanslationStudio.LlmKit.Utility;
 
 public class FileIteration
 {
-    public static async Task IterateTranslatedFilesAsync(string workingDirectory, Func<string, TextFileToSplit, List<TranslationLine>, Task> performActionAsync)
+    public static async Task IterateTranslatedFilesAsync(string workingDirectory,
+        TextFileToSplit[] textFiles,
+        Func<string, TextFileToSplit, List<TranslationLine>, Task> performActionAsync)
     {
         var deserializer = YamlHelper.CreateDeserializer();
         string outputPath = $"{workingDirectory}/Converted";
 
-        foreach (var textFileToTranslate in GameTextFiles.TextFilesToSplit)
+        foreach (var textFileToTranslate in textFiles)
         {
             var outputFile = $"{outputPath}/{textFileToTranslate.Path}.yaml";
 
@@ -25,12 +27,14 @@ public class FileIteration
         }
     }
 
-    public static async Task IterateTranslatedFilesInParallelAsync(string workingDirectory, Func<string, TextFileToSplit, List<TranslationLine>, Task> performActionAsync)
+    public static async Task IterateTranslatedFilesInParallelAsync(string workingDirectory,
+        TextFileToSplit[] textFiles,
+        Func<string, TextFileToSplit, List<TranslationLine>, Task> performActionAsync)
     {
         var deserializer = YamlHelper.CreateDeserializer();
         string outputPath = $"{workingDirectory}/Converted";
 
-        var tasks = GameTextFiles.TextFilesToSplit
+        var tasks = textFiles
             .Select(async textFileToTranslate =>
             {
                 var outputFile = $"{outputPath}/{textFileToTranslate.Path}.yaml";

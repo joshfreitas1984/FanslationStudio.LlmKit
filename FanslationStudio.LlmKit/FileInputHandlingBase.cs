@@ -1,23 +1,15 @@
-﻿using FanslationStudio.LlmKit.Support;
+﻿using FanslationStudio.LlmKit.Configuration;
+using FanslationStudio.LlmKit.Support;
 using FanslationStudio.LlmKit.Utility;
 
 namespace FanslationStudio.LlmKit;
 
-public abstract class InputFileHandlingBase
+public static class InputFileHandlingBase
 {
-    public abstract void ExportGamespecificTextAssetsToCustomFormat(string workingDirectory);
-
-    public void ExportDynamicStringTextAssetToCustomFormat(string workingDirectory)
+    public static async Task MergeFilesIntoTranslatedAsync(string workingDirectory, 
+        TextFileToSplit[] textFiles)
     {
-    }
-
-    public void ExportPrefabTextAssetToCustomFormat(string workingDirectory)
-    {
-    }
-
-    public static async Task MergeFilesIntoTranslatedAsync(string workingDirectory)
-    {
-        await FileIteration.IterateTranslatedFilesAsync(workingDirectory, async (outputFile, textFileToTranslate, fileLines) =>
+        await FileIteration.IterateTranslatedFilesAsync(workingDirectory, textFiles, async (outputFile, textFileToTranslate, fileLines) =>
         {
             var newCount = 0;
 
@@ -68,5 +60,27 @@ public abstract class InputFileHandlingBase
 
             await Task.CompletedTask;
         });
+    }
+
+    public static List<string> CheckFileLinesMatch(string workingDirectory, TextFileToSplit[] textFiles)
+    {
+        var config = ConfigurationExtensions.GetConfiguration(workingDirectory);
+        var badFiles = new List<string>();
+
+        foreach (var textFile in textFiles)
+        {
+            var file = $"{workingDirectory}/Raw/Export/{textFile.Path}.yaml";
+            var convertedFile = $"{workingDirectory}/Converted/{textFile.Path}.yaml";
+
+            var deserializer = YamlHelper.CreateDeserializer();
+
+            var lines = deserializer.Deserialize<List<TranslationLine>>(File.ReadAllText(file));
+            var convertedLines = deserializer.Deserialize<List<TranslationLine>>(File.ReadAllText(convertedFile)); ;
+
+            if (lines.Count != convertedLines.Count)
+                badFiles.Add($"Bad File: {Path.GetFileName(file)} Export: {lines.Count} Converted: {convertedLines.Count} ");
+        }
+        
+        return badFiles;
     }
 }

@@ -24,6 +24,9 @@ public class LlmConfig
     public List<ModelConfig> Models { get; set; } = new();
     public GlossaryPresetConfig GlossaryPreset { get; set; } = new();
 
+    public List<string> SplitRegexPatterns { get; set; } = new();
+    public List<string> SplitCharactersList { get; set; } = new();
+
     [YamlIgnore]
     public RuntimeValues Runtime { get; set; } = new();
 }

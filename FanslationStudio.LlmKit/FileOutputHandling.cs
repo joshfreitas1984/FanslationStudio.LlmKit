@@ -1,10 +1,12 @@
-﻿using System.Text.RegularExpressions;
+﻿using FanslationStudio.LlmKit.Support;
+using System.Text.RegularExpressions;
 
 namespace FanslationStudio.LlmKit;
 
 public class FileOutputHandling
 {
-    public static async Task PackageFinalTranslationAsync(string workingDirectory)
+    public static async Task PackageFinalTranslationAsync(string workingDirectory, 
+        TextFileToSplit[] textFiles)
     {
         string inputPath = $"{workingDirectory}/Converted";
         string outputPath = $"{workingDirectory}/Mod";
@@ -19,7 +21,9 @@ public class FileOutputHandling
         var passedCount = 0;
         var failedCount = 0;
 
-        await FileIteration.IterateTranslatedFilesAsync(workingDirectory, async (outputFile, textFileToTranslate, fileLines) =>
+        await FileIteration.IterateTranslatedFilesAsync(workingDirectory, 
+            textFiles, 
+            async (outputFile, textFileToTranslate, fileLines) =>
         {
             var failedLines = new List<string>();
             var outputLines = new List<string>();

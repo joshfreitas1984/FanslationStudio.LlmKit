@@ -15,7 +15,9 @@ public static class TranslationService
     public const int BatchlessLog = 25;
     public const int BatchlessBuffer = 25;
 
-    public static async Task FillTranslationCacheAsync(string workingDirectory, int charsToCache, Dictionary<string, string> cache, LlmConfig config)
+    public static async Task FillTranslationCacheAsync(string workingDirectory, 
+        int charsToCache, Dictionary<string, string> cache, 
+        LlmConfig config, TextFileToSplit[] textFiles)
     {
         // Add Manual adjustments 
         foreach (var k in config.Runtime.ManualTranslations)
@@ -48,7 +50,9 @@ public static class TranslationService
             }
         }
 
-        await FileIteration.IterateTranslatedFilesAsync(workingDirectory, async (outputFile, textFileToTranslate, fileLines) =>
+        await FileIteration.IterateTranslatedFilesAsync(workingDirectory, 
+            textFiles, 
+            async (outputFile, textFileToTranslate, fileLines) =>
         {
             foreach (var line in fileLines)
             {
@@ -69,7 +73,8 @@ public static class TranslationService
         config.Runtime.TranslationCache = cache;
     }
 
-    public static async Task TranslateViaLlmAsync(string workingDirectory, bool forceRetranslation)
+    public static async Task TranslateViaLlmAsync(string workingDirectory, bool forceRetranslation,
+        TextFileToSplit[] textFiles)
     {
         string inputPath = $"{workingDirectory}/Raw/Export";
         string outputPath = $"{workingDirectory}/Converted";
@@ -83,7 +88,7 @@ public static class TranslationService
         // Translation Cache - for smaller translations that tend to hallucinate
         var translationCache = new Dictionary<string, string>();
         var charsToCache = 10;
-        await FillTranslationCacheAsync(workingDirectory, charsToCache, translationCache, config);
+        await FillTranslationCacheAsync(workingDirectory, charsToCache, translationCache, config, textFiles);
 
         // Create an HttpClient instance
         using var client = new HttpClient();
@@ -92,7 +97,7 @@ public static class TranslationService
         int incorrectLineCount = 0;
         int totalRecordsProcessed = 0;
 
-        foreach (var textFileToTranslate in GameTextFiles.TextFilesToSplit)
+        foreach (var textFileToTranslate in textFiles)
         {
             var inputFile = $"{inputPath}/{textFileToTranslate.Path}";
             var outputFile = $"{outputPath}/{textFileToTranslate.Path}.yaml";
@@ -251,11 +256,13 @@ public static class TranslationService
         return (false, string.Empty);
     }
 
-    public static async Task<(bool split, string result)> SplitBracketsRegexIfNeededAsync(LlmConfig config, string raw, HttpClient client, TextFileToSplit textFile)
+    public static async Task<(bool split, string result)> SplitBracketsRegexIfNeededAsync(LlmConfig config, 
+        string raw, HttpClient client, 
+        TextFileToSplit textFile)
     {
         // Collect all matches across all patterns and sort by position so multiple bracket types in
         // the same string are all handled in a single pass (e.g. "天竺国《无量寿经》【副本】4000钱")
-        var allMatches = GameTextFiles.SplitRegexPatterns
+        var allMatches = config.SplitRegexPatterns
             .SelectMany(pattern => Regex.Matches(raw, pattern).Cast<Match>())
             .OrderBy(m => m.Index)
             .ToList();
@@ -322,7 +329,11 @@ public static class TranslationService
     }
 
 
-    public static async Task<ValidationResult> TranslateSplitAsync(LlmConfig config, string? raw, HttpClient client, TextFileToSplit textFile, string additionalPrompts = "")
+    public static async Task<ValidationResult> TranslateSplitAsync(LlmConfig config, 
+        string? raw, 
+        HttpClient client, 
+        TextFileToSplit textFile, 
+        string additionalPrompts = "")
     {
         if (string.IsNullOrEmpty(raw))
             return new ValidationResult(true, string.Empty); //Is ok because raw was empty
@@ -353,7 +364,7 @@ public static class TranslationService
             return new ValidationResult(LineValidation.CleanupLineBeforeSaving(regexResult, preparedRaw, textFile, tokenReplacer));
 
         // We do segementation here since saves context window by splitting // "。" doesnt work like u think it would        
-        foreach (var splitCharacters in GameTextFiles.SplitCharactersList)
+        foreach (var splitCharacters in config.SplitCharactersList)
         {
             var (split, result) = await SplitOnCharsIfNeededAsync(splitCharacters, config, preparedRaw, client, textFile);
 

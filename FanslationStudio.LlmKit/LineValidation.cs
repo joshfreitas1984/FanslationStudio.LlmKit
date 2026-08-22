@@ -13,8 +13,28 @@ public static partial class LineValidation
     public const string ChinesePlaceholderPattern = @"\{[a-zA-Z]*\s*\p{IsCJKUnifiedIdeographs}+\}";
     public const string PlaceholderMatchPattern = @"(\{[^{}]+\})";
 
-    // If you use Regexes in hot paths, compile them for performance
-    public static readonly Regex ChineseCharPatternCompiled = new Regex(ChineseCharPattern, RegexOptions.Compiled);
+    // Compiled / source-generated regexes — one instance shared across all calls
+    public static Regex ChineseCharPatternCompiled => ChineseCharRegex();
+
+    private static readonly string[] InvalidPhrases =
+    [
+        "provide the text",
+        "Certainly! Please provide the Chinese",
+        "Certainly! Please provide the specific Chinese",
+        "It seems like your input might be incomplete or missing some context",
+        "Please provide the Chinese string you would like to be translated into English",
+        "please provide the Chinese string",
+        "please provide the specific Chinese strings",
+        "Chinese text",
+        "Chinese sentence",
+        "translates to",
+        "It seems that the text",
+        "'''",
+        "<p", "</p", "<em", "</em", "<|", "<strong", "</strong",
+        "\\U",
+    ];
+
+    private static readonly (string raw, string trans)[] CheckForRemoval = [];
 
     public static string PrepareRaw(string raw, StringTokenReplacer? tokenReplacer)
     {
@@ -122,7 +142,7 @@ public static partial class LineValidation
                     result = result.Replace(" ", "");
                 else if (textFile.NameCleanupRoutines2)
                 {
-                    if (!Regex.IsMatch(input, ChineseCharPattern))
+                    if (!ChineseCharRegex().IsMatch(input))
                     {
                         var splits = result.Split(" ", StringSplitOptions.RemoveEmptyEntries);
                         switch (splits.Length)
@@ -205,26 +225,7 @@ public static partial class LineValidation
         if (string.IsNullOrEmpty(raw))
             response = false;
 
-        var invalidPhrases = new[]
-        {
-            "provide the text",
-            "Certainly! Please provide the Chinese",
-            "Certainly! Please provide the specific Chinese",
-            "It seems like your input might be incomplete or missing some context",
-            "Please provide the Chinese string you would like to be translated into English",
-            "please provide the Chinese string",
-            "please provide the specific Chinese strings",
-            "Chinese text",
-            "Chinese sentence",
-            "translates to",
-            "It seems that the text",
-            //"also known as" //Causes issues
-            "'''",
-            "<p", "</p", "<em", "</em", "<|", "<strong", "</strong",
-            "\\U",
-        };
-
-        if (invalidPhrases.Any(phrase => result.IndexOf(phrase, StringComparison.OrdinalIgnoreCase) >= 0))
+        if (InvalidPhrases.Any(phrase => result.IndexOf(phrase, StringComparison.OrdinalIgnoreCase) >= 0))
             response = false;
 
         // 99% chance its gone crazy with hallucinations
@@ -295,18 +296,7 @@ public static partial class LineValidation
         }
 
         // Removed characters
-        (string raw, string trans)[] checkForRemoval = { 
-            //("'", "'"), 
-            //("(", "("),
-            //("（", "("), 
-            //(")", ")"),
-            //("）", ")"), 
-            //("...", "..."), //Problematic still
-            //("…", "..."),
-        };
-
-
-        foreach (var check in checkForRemoval)
+        foreach (var check in CheckForRemoval)
         {
             if (raw.Contains(check.raw) && !result.Contains(check.trans))
             {
@@ -369,7 +359,7 @@ public static partial class LineValidation
             result = result.Replace("\n", " ");
         }
 
-        if (Regex.IsMatch(result, ChineseCharPattern) && !Regex.IsMatch(result, ChinesePlaceholderPattern))
+        if (ChineseCharRegex().IsMatch(result) && !ChinesePlaceholderRegex().IsMatch(result))
         {
             response = false;
             correctionPrompts.AddPromptWithValues(config, "CorrectChinesePrompt");
@@ -445,8 +435,7 @@ public static partial class LineValidation
             return markupTags;
 
         // Regular expression to match markup tags in the format <tag>
-        string pattern = "<[^>]+>";
-        MatchCollection matches = Regex.Matches(input, pattern);
+        var matches = HtmlTagRegex().Matches(input);
 
         // Add each match to the list of markup tags
         foreach (Match match in matches)
@@ -457,12 +446,10 @@ public static partial class LineValidation
 
     public static string EncaseColorsForWholeLines(string raw, string translated)
     {
-        var pattern = @"(<[^>]+>).*(</[^>]+>)";
-
         if (raw.StartsWith("<color") && raw.EndsWith("</color>")
             && raw.LastIndexOf("<color") == 0 && !translated.StartsWith("<color"))
         {
-            var matches = Regex.Matches(raw, pattern);
+            var matches = EncaseColorTagRegex().Matches(raw);
             string start = matches[0].Groups[1].Value;
             string end = matches[0].Groups[2].Value;
             translated = $"{start}{translated}{end}";
@@ -506,18 +493,8 @@ public static partial class LineValidation
 
     public static string ReplaceIncorrectLowercaseWords(string input)
     {
-        var words = new Dictionary<string, string>
-        {
-            { "jianghu", "Jianghu" },
-            { "wulin", "Wulin"  }
-        };
-
-        foreach (var word in words)
-        {
-            string pattern = $"\\b{word.Key}\\b"; // \b ensures 'jianghu' is a whole word
-            input = Regex.Replace(input, pattern, word.Value);
-        }
-
+        input = JianghuRegex().Replace(input, "Jianghu");
+        input = WulinRegex().Replace(input, "Wulin");
         return input;
     }
 
@@ -527,7 +504,7 @@ public static partial class LineValidation
             return input;
 
         // Remove all digits from the string
-        return Regex.Replace(input, @"\d", "");
+        return DigitRegex().Replace(input, "");
     }
 
     public static string RemoveExtraThe(string raw, string input)
@@ -536,7 +513,7 @@ public static partial class LineValidation
             return input;
         if (raw.Contains(' '))
             return input;
-        if (input.StartsWith("The ") && input.Count(c => c == '.') == 0)
+        if (input.StartsWith("The ") && !input.Contains('.'))
         {
             var words = input.
                 Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -558,9 +535,9 @@ public static partial class LineValidation
         var fullStop = '.';
 
         // Check if there's only one sentence (one full stop at the end)
-        if (input.Count(c => c == fullStop) == 1
-            && !input.Contains("!")
-            && !input.Contains("?")
+        if (input.IndexOf(fullStop) == input.LastIndexOf(fullStop)
+            && !input.Contains('!')
+            && !input.Contains('?')
             && input.TrimEnd().EndsWith(fullStop))
         {
             // Count words
@@ -578,4 +555,25 @@ public static partial class LineValidation
 
     [GeneratedRegex(PlaceholderMatchPattern)]
     private static partial Regex PlaceholderPatternRegex();
+
+    [GeneratedRegex(ChineseCharPattern)]
+    private static partial Regex ChineseCharRegex();
+
+    [GeneratedRegex(ChinesePlaceholderPattern)]
+    private static partial Regex ChinesePlaceholderRegex();
+
+    [GeneratedRegex(@"<[^>]+>")]
+    private static partial Regex HtmlTagRegex();
+
+    [GeneratedRegex(@"(<[^>]+>).*(</[^>]+>)")]
+    private static partial Regex EncaseColorTagRegex();
+
+    [GeneratedRegex(@"\d")]
+    private static partial Regex DigitRegex();
+
+    [GeneratedRegex(@"\bjianghu\b")]
+    private static partial Regex JianghuRegex();
+
+    [GeneratedRegex(@"\bwulin\b")]
+    private static partial Regex WulinRegex();
 }
