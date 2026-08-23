@@ -115,6 +115,8 @@
   rawSimplified: 体魄
   rawTraditional: 體魄
   result: Resilience
+  allowalt:
+    - Body
   context: refers to the physical body or physique, often implying strength, health, or robustness in terms of physical constitution.
 - raw: 命中
   result: Hit Rate

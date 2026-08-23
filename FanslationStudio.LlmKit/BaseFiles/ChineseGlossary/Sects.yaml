@@ -41,6 +41,8 @@
   rawSimplified: 委托
   rawTraditional: 委託
   result: Commission
+  allowalt: 
+    - entrust
   direct: Entrust
   literal: Wei tuo
 # 6 Paths clans

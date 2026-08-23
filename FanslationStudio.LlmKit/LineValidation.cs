@@ -67,6 +67,21 @@ public static partial class LineValidation
         return raw;
     }
 
+    /// <summary>
+    /// Optional caller-supplied hook invoked at the very end of <see cref="PrepareResult"/> - i.e.
+    /// immediately after every LLM call (each attempt in the main retry loop, and each round of
+    /// <see cref="TranslationService.CorrectSentenceBySentenceAsync"/>) and before
+    /// <see cref="CheckTransalationSuccessful"/> gets a chance to validate/flag the result. Lets a
+    /// game-specific project (e.g. Tests/GameFileHandling.cs) deterministically fix up known LLM
+    /// quirks - like a possessive/contraction suffix ending up glued inside a placeholder token,
+    /// e.g. "#PlayerName's#" instead of "#PlayerName#'s" - instead of paying for a whole retry
+    /// round-trip to fix something a plain string replace already knows how to repair. Receives
+    /// (raw, llmResult) and must return the (possibly repaired) result. Left null (no-op) unless a
+    /// caller opts in; this is intentionally left game-agnostic here in the shared library, same as
+    /// <see cref="Utility.CompoundFieldSplitterOptions.PlaceholderPatterns"/>.
+    /// </summary>
+    public static Func<string, string, string>? CustomPostRepair { get; set; }
+
     public static string PrepareResult(string raw, string llmResult)
     {
         // Fix up anything we know the LLM has messed up but can autocorrect before validation
@@ -75,9 +90,14 @@ public static partial class LineValidation
         if (raw.EndsWith("...") && !llmResult.EndsWith("...") && llmResult.EndsWith("."))
             llmResult = $"{llmResult}..";
 
-        return llmResult
+        var result = llmResult
             .Replace("’", "'")
             .Replace("‘", "'");
+
+        if (CustomPostRepair != null)
+            result = CustomPostRepair(raw, result);
+
+        return result;
     }
 
     public static string CleanupLineBeforeSaving(string input, string raw, TextFileToSplit textFile, StringTokenReplacer tokenReplacer)
@@ -92,11 +112,11 @@ public static partial class LineValidation
 
             //if (!StringTokenReplacer.EmojiItems.Any(phrase => result.IndexOf(phrase, StringComparison.OrdinalIgnoreCase) >= 0))
             //{
-                //if (result.Contains('[') && !raw.Contains('['))
-                //    result = result.Replace("[", "");
+            //if (result.Contains('[') && !raw.Contains('['))
+            //    result = result.Replace("[", "");
 
-                //if (result.Contains(']') && !raw.Contains(']'))
-                //    result = result.Replace("]", "");
+            //if (result.Contains(']') && !raw.Contains(']'))
+            //    result = result.Replace("]", "");
             //}
 
             if (result.Contains('`') && !raw.Contains('`'))

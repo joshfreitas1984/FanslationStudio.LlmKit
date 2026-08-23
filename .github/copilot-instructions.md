@@ -68,7 +68,8 @@ quote-escaping (`""`) and only re-quote a field on rebuild if it actually needs 
 `CompoundFieldSplitter.Decompose(cell)` extracts translatable fragments from a single cell:
 
 - Matches runs via `(?:[+\-](?=[0-9]))?[<CjkTextChars>]+(?:%[<CjkTextChars>]*)*` where
-  `<CjkTextChars>` = `\p{IsCJKUnifiedIdeographs}0-9.\p{IsCJKSymbolsandPunctuation}\p{IsHalfwidthandFullwidthForms}`,
+  `<CjkTextChars>` =
+  `\p{IsCJKUnifiedIdeographs}0-9.\p{IsCJKSymbolsandPunctuation}\p{IsHalfwidthandFullwidthForms}\u2018\u2019\u201C\u201D`,
   then **discards** any matched run that turns out to be pure digits/sign/percent/punctuation with
   no actual Chinese character (that's just a number/format string and is left as literal template
   text, e.g. `1000-12-0-0/1/2/3/4/5`, or `威望+10` where `+10` has nothing following it to glue to).
@@ -87,7 +88,14 @@ quote-escaping (`""`) and only re-quote a field on rebuild if it actually needs 
   `同盟区域50%后进入门派` and `自宅` (template `{0}/{1}`), not split at the `%`.
 - **Any full-width/CJK punctuation (`，` `。` `？` `！` `：` `；` `、` `（）` `～` etc. — i.e. the
   Unicode "CJK Symbols and Punctuation" and "Halfwidth and Fullwidth Forms" blocks) is absorbed
-  into the run and never acts as a fragment boundary.** An LLM is free to reposition, merge, or
+  into the run and never acts as a fragment boundary.** Curly Chinese quotation marks `“` `”` `‘`
+  `’` (`U+201C`/`U+201D`/`U+2018`/`U+2019`) are **also** explicitly absorbed even though they live
+  in the Unicode "General Punctuation" block, not the two CJK blocks above — this game uses them as
+  ordinary in-sentence quotation marks (e.g. `...摊开，都翻到小数字为"一"的那一页）`), and without
+  the explicit addition they acted as a spurious boundary, splitting a quoted word out into its own
+  fragment mid-sentence (a real bug fixed Aug 2026 — see the
+  `CurlyChineseQuotationMarksStayGluedIntoSurroundingSentence` test in
+  `Tests/CompoundFieldSplitterTests.cs`). An LLM is free to reposition, merge, or
   drop punctuation during translation (move a clause, reorder a parenthetical, change a comma to a
   full stop), so splitting a sentence into separate fragments around its own internal punctuation
   and reassembling with a fixed literal mark in between risks an ungrammatical or nonsensical
@@ -147,14 +155,42 @@ var options = new CompoundFieldSplitterOptions
 var (template, fragments) = CompoundFieldSplitter.Decompose(cell, options);
 ```
 
-Any regex in `PlaceholderPatterns` that **fully** matches the literal text sitting between two
-fragments (or leading/trailing a single fragment) causes that gap to be absorbed into the
-adjacent fragment(s) rather than left as a fixed boundary — including fusing two fragments into
-one when the placeholder sits directly between them (mirrors the existing zero-gap merge, just
-generalized to "gap is empty OR gap is purely a placeholder match"). Omitting `options` (or using
+Any regex in `PlaceholderPatterns` is folded directly into the run-matching regex itself as just
+another alternative a run can extend through (see `GetTranslatableRunRegex`/`BuildRunRegexForOptions`
+in `CompoundFieldSplitter.cs`) — a placeholder token immediately adjacent to Chinese text on either
+side becomes part of the *same* regex match/fragment as that text, rather than a separate literal
+gap that has to be merged back in after the fact. Omitting `options` (or using
 `CompoundFieldSplitterOptions.Default`) preserves the original game-agnostic behavior where every
 ASCII character between two Chinese runs is a hard boundary. See `DragonHeirOverLlm`'s
 `Tests/GameFileHandling.cs` for the concrete `#PlayerName#` configuration for that game.
+
+**Design history (Aug 2026) — folded into the run regex instead of post-hoc gap merging.** An
+earlier version tried to detect and merge "non-structural gaps" (placeholder matches, isolated CJK
+punctuation) *after* the initial regex pass, via `MergeAdjacentFragments`/`IsMergeableGap`. That
+approach kept missing composite cases — e.g. `#PlayerName#！#PlayerName#都...` (a punctuation mark
+stranded *between* two placeholders) and `...一方。\n#PlayerName#若是...` (a placeholder sitting
+*right after* a genuine literal boundary like `\n`, where only part of the "gap" should merge) —
+because gap-merging only ever considered a whole literal span between two `{n}` tokens as one
+unit, either merging all of it or none. The fix was to stop treating placeholders as a
+post-processing concern entirely: `GetTranslatableRunRegex` builds (and caches, per
+`CompoundFieldSplitterOptions` instance, via a `ConditionalWeakTable`) a regex where each
+placeholder pattern is just another alternative inside the same repeating "core" group as the CJK
+character class, e.g. `(?:(?:#\w+#)|[<CjkTextChars>])+`. This means a placeholder adjacent to
+Chinese text is consumed by the *same* regex match as that text from the start — it can never end
+up as a separate literal token in the first place, so nothing needs merging back in. Only the
+sign/digit-restart empty-gap case (see below) still needs a post-pass, because that one is a
+genuine artifact of two *separate* regex matches ending up with zero characters between them, not
+a placeholder/punctuation concern. If you're tempted to add another kind of "gap that should
+merge", check first whether it can instead be expressed as another alternative folded into
+`BuildRunRegexForOptions`'s core group — that's almost always simpler and more correct than
+detecting the gap afterward.
+
+**A remaining post-pass only handles the sign/digit-restart empty-gap case** (`MergeAdjacentFragments`
+in `CompoundFieldSplitter.cs`): `TranslatableRunRegex`'s leading `(?:[+\-](?=[0-9]))?` can restart a
+new match immediately where a previous one ended (e.g. `占领门派（` ends one match right before `-`,
+`-99表示自动）` begins the next), leaving an empty literal gap between the two `{n}` fragments —
+those get fused into one fragment. This is unrelated to placeholders and still applies with or
+without `CompoundFieldSplitterOptions`.
 
 ## Merging translations across re-exports (`GameFileHandlingBase.MergeFilesIntoTranslatedAsync`)
 

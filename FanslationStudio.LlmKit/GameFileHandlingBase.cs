@@ -1,6 +1,7 @@
 ﻿using FanslationStudio.LlmKit.Configuration;
 using FanslationStudio.LlmKit.Support;
 using FanslationStudio.LlmKit.Utility;
+using System.Text.RegularExpressions;
 
 namespace FanslationStudio.LlmKit;
 
@@ -121,5 +122,51 @@ public static class GameFileHandlingBase
         }
 
         return badFiles;
+    }
+
+    public static TextFileToSplit DefaultTestTextFile() => new TextFileToSplit()
+    {
+        Path = "",
+    };
+
+    public record FailedTranslation(string Text, string Translated, string Reason);
+
+    public static async Task<(List<FailedTranslation> failures, List<string> forTheGlossary)> GetFailedTranslations(
+        string workingDirectory, TextFileToSplit[] textFiles)
+    {
+        var failures = new List<FailedTranslation>();
+        var pattern = LineValidation.ChineseCharPattern;
+
+        var forTheGlossary = new List<string>();
+
+        await FileIteration.IterateTranslatedFilesAsync(workingDirectory,
+            textFiles,
+            async (outputFile, textFileToTranslate, fileLines) =>
+            {
+                foreach (var line in fileLines)
+                {
+                    foreach (var split in line.Splits)
+                    {
+                        if (string.IsNullOrEmpty(split.Text))
+                            continue;
+
+                        // If it is already translated or just special characters return it
+                        if (!Regex.IsMatch(split.Text, pattern))
+                            continue;
+
+                        if (!string.IsNullOrEmpty(split.Text) && (string.IsNullOrEmpty(split.Translated) || split.FlaggedForRetranslation))
+                        {
+                            failures.Add(new FailedTranslation(split.Text, split.Translated, split.FlaggedMistranslation));
+
+                            if (split.Text.Length < 6)
+                                if (!forTheGlossary.Contains(split.Text))
+                                    forTheGlossary.Add(split.Text);
+                        }
+                    }
+                }
+
+                await Task.CompletedTask;
+            });
+        return (failures, forTheGlossary);
     }
 }

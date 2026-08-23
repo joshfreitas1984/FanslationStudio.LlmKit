@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -40,13 +41,58 @@ public static partial class CompoundFieldSplitter
     // afterwards and left as literal template text - e.g. "威望+10" still splits into fragment
     // "威望" + literal "+10" because nothing follows the number, and "1000-12-0-0" stays fully
     // literal.
-    private const string CjkTextChars = @"\p{IsCJKUnifiedIdeographs}0-9.\p{IsCJKSymbolsandPunctuation}\p{IsHalfwidthandFullwidthForms}";
+    // Curly quotation marks ('“' '”' '‘' '’', U+2018/2019/201C/201D) are also absorbed even though
+    // they live in the Unicode "General Punctuation" block rather than "CJK Symbols and
+    // Punctuation"/"Halfwidth and Fullwidth Forms" - this game's text uses them as ordinary Chinese
+    // quotation marks (e.g. wrapping a quoted word inside a sentence), so without this they act as
+    // a spurious fragment boundary and split a quoted word out of its sentence, e.g.
+    // "...摊开，都翻到小数字为“一”的那一页）" would otherwise split into three fragments around "一"
+    // instead of staying one continuous sentence fragment.
+    private const string CjkTextChars = @"\p{IsCJKUnifiedIdeographs}0-9.\p{IsCJKSymbolsandPunctuation}\p{IsHalfwidthandFullwidthForms}\u2018\u2019\u201C\u201D";
 
     [GeneratedRegex(@"(?:[+\-](?=[0-9]))?[" + CjkTextChars + @"]+(?:%[" + CjkTextChars + @"]*)*", RegexOptions.Compiled)]
     private static partial Regex TranslatableRunRegex();
 
     [GeneratedRegex(@"\p{IsCJKUnifiedIdeographs}", RegexOptions.Compiled)]
     private static partial Regex ChineseCharRegex();
+
+    // Caches one compiled run-regex per distinct CompoundFieldSplitterOptions instance whose
+    // PlaceholderPatterns fold placeholder tokens directly into the run-matching alternation (see
+    // GetTranslatableRunRegex/BuildRunRegexForOptions below) - callers are expected to reuse a
+    // single options instance across many Decompose calls (e.g. one per game/config), so this
+    // avoids recompiling the regex per cell while still supporting per-options patterns.
+    private static readonly ConditionalWeakTable<CompoundFieldSplitterOptions, Regex> RunRegexCache = new();
+
+    /// <summary>
+    /// Returns the regex used to find translatable runs for the given options. When
+    /// <paramref name="options"/> has no <see cref="CompoundFieldSplitterOptions.PlaceholderPatterns"/>
+    /// configured, this is just the static <see cref="TranslatableRunRegex"/>. Otherwise a regex is
+    /// built (and cached per options instance) where each placeholder pattern is folded in as just
+    /// another alternative a run can extend through, alongside individual CJK/fullwidth characters -
+    /// so a placeholder token sitting between/adjacent to Chinese text becomes part of the *same*
+    /// regex match as that text, rather than a separate literal gap that has to be merged back in
+    /// after the fact. This is what lets something like "...一方。\n#PlayerName#若是..." correctly
+    /// stop at the literal "\n" (not part of any alternative) while still treating
+    /// "#PlayerName#若是..." as one continuous run (the placeholder is just another alternative the
+    /// run can pass through, immediately followed by more Chinese).
+    /// </summary>
+    private static Regex GetTranslatableRunRegex(CompoundFieldSplitterOptions options)
+    {
+        if (options.PlaceholderPatterns.Count == 0)
+            return TranslatableRunRegex();
+
+        return RunRegexCache.GetValue(options, BuildRunRegexForOptions);
+    }
+
+    private static Regex BuildRunRegexForOptions(CompoundFieldSplitterOptions options)
+    {
+        var alternatives = options.PlaceholderPatterns
+            .Select(pattern => $"(?:{pattern})")
+            .Append($"[{CjkTextChars}]");
+        var core = $"(?:{string.Join('|', alternatives)})";
+
+        return new Regex($@"(?:[+\-](?=[0-9]))?{core}+(?:%{core}*)*", RegexOptions.Compiled);
+    }
 
     public static string[] ParseCsvRow(string line)
     {
@@ -124,11 +170,13 @@ public static partial class CompoundFieldSplitter
     /// separators, role tokens like '|'/'&amp;') is left untouched in the template. Returns an
     /// empty fragment list when there's no Chinese text (caller should treat the cell as a plain,
     /// non-compound column). If <paramref name="options"/> supplies
-    /// <see cref="CompoundFieldSplitterOptions.PlaceholderPatterns"/>, any game-specific
-    /// placeholder token (e.g. "#PlayerName#") sitting between two Chinese runs is glued into a
-    /// single fragment with them instead of acting as a fixed split point - the placeholder's
-    /// position can legitimately move during translation, so it must never be pinned to a fixed
-    /// spot in a template built from independently-translated fragments.
+    /// <see cref="CompoundFieldSplitterOptions.PlaceholderPatterns"/>, each pattern is folded
+    /// directly into the run-matching regex as another character a run can pass through (see
+    /// <see cref="GetTranslatableRunRegex"/>) - a placeholder token immediately adjacent to Chinese
+    /// text on either side becomes part of that same continuous run/fragment, instead of acting as
+    /// a fixed literal split point pinned between two independently-translated fragments. A
+    /// placeholder with no Chinese text anywhere in its run (nothing to glue onto) is left as plain
+    /// literal template text, same as any other non-Chinese run.
     /// </summary>
     public static (string Template, List<string> Fragments) Decompose(string cell, CompoundFieldSplitterOptions? options = null)
     {
@@ -137,7 +185,8 @@ public static partial class CompoundFieldSplitter
         if (string.IsNullOrEmpty(cell))
             return (cell, fragments);
 
-        var rawTemplate = TranslatableRunRegex().Replace(cell, match =>
+        var runRegex = GetTranslatableRunRegex(options ?? CompoundFieldSplitterOptions.Default);
+        var rawTemplate = runRegex.Replace(cell, match =>
         {
             if (!ChineseCharRegex().IsMatch(match.Value))
                 return match.Value; // pure digits/decimal point run - not translatable, leave as-is
@@ -147,28 +196,26 @@ public static partial class CompoundFieldSplitter
             return placeholder;
         });
 
-        return MergeAdjacentFragments(rawTemplate, fragments, (options ?? CompoundFieldSplitterOptions.Default).PlaceholderPatterns);
+        return MergeAdjacentFragments(rawTemplate, fragments);
     }
 
     /// <summary>
-    /// Merges fragments that end up separated (or preceded/followed) only by a "gap" that isn't a
-    /// genuine structural boundary. Two kinds of gap qualify:
-    /// <list type="bullet">
-    /// <item>An empty gap (fragments directly touching in the template) - this happens when the
-    /// leading sign/digit lookahead in <see cref="TranslatableRunRegex"/> restarts a new match
-    /// immediately where the previous one ended, with no boundary character actually consumed in
-    /// between.</item>
-    /// <item>A gap that is entirely consumed by one of <paramref name="placeholderPatterns"/> - a
-    /// caller-supplied, game-specific placeholder token (e.g. "#PlayerName#") sitting between two
-    /// Chinese runs, or leading/trailing a single run. A placeholder's position can legitimately
-    /// move during translation, so it must travel with its adjacent text as one fragment rather
-    /// than being left as a fixed literal split point (or fixed literal prefix/suffix).</item>
-    /// </list>
-    /// In both cases there was never a real game-syntax separator there, so the surrounding text is
-    /// one continuous piece of translatable text.
+    /// Merges fragments that end up directly touching in the template with an empty literal gap
+    /// between them. This happens when the leading sign/digit lookahead in
+    /// <see cref="TranslatableRunRegex"/> (or its per-options equivalent from
+    /// <see cref="GetTranslatableRunRegex"/>) restarts a new match immediately where the previous
+    /// one ended, with no boundary character actually consumed in between - e.g. "占领门派（" ends
+    /// a match right before '-', and "-99表示自动）" begins a new match starting with that same
+    /// '-' (via the sign lookahead), leaving nothing at all between the two matches. There was
+    /// never a real game-syntax separator there, so the two fragments must be treated as one
+    /// continuous piece of translatable text rather than two fragments each holding half of an
+    /// unbalanced bracket. (Placeholder tokens no longer need handling here - they're folded
+    /// directly into the run-matching regex itself, so a placeholder adjacent to Chinese text is
+    /// already part of the same match/fragment by the time this runs; see
+    /// <see cref="GetTranslatableRunRegex"/>.)
     /// </summary>
     private static (string Template, List<string> Fragments) MergeAdjacentFragments(
-        string rawTemplate, List<string> rawFragments, IReadOnlyList<Regex> placeholderPatterns)
+        string rawTemplate, List<string> rawFragments)
     {
         if (rawFragments.Count == 0)
             return (rawTemplate, rawFragments);
@@ -199,20 +246,15 @@ public static partial class CompoundFieldSplitter
         }
         tokens.Add((false, literal.ToString()));
 
-        // Repeatedly absorb any mergeable literal token into an adjacent fragment token (or fuse
-        // two fragments together when the literal sits between them) until no more merges apply.
+        // Repeatedly fuse two fragments together whenever an empty literal token sits between them
+        // until no more merges apply.
         bool changed = true;
         while (changed)
         {
             changed = false;
             for (int k = 0; k < tokens.Count; k++)
             {
-                if (tokens[k].IsFragment)
-                    continue;
-
-                var text = tokens[k].Text;
-                bool mergeable = text.Length == 0 || IsPurePlaceholder(text, placeholderPatterns);
-                if (!mergeable)
+                if (tokens[k].IsFragment || tokens[k].Text.Length != 0)
                     continue;
 
                 bool prevIsFragment = k > 0 && tokens[k - 1].IsFragment;
@@ -220,22 +262,8 @@ public static partial class CompoundFieldSplitter
 
                 if (prevIsFragment && nextIsFragment)
                 {
-                    tokens[k - 1] = (true, tokens[k - 1].Text + text + tokens[k + 1].Text);
+                    tokens[k - 1] = (true, tokens[k - 1].Text + tokens[k + 1].Text);
                     tokens.RemoveRange(k, 2);
-                    changed = true;
-                    break;
-                }
-                else if (prevIsFragment && text.Length > 0)
-                {
-                    tokens[k - 1] = (true, tokens[k - 1].Text + text);
-                    tokens.RemoveAt(k);
-                    changed = true;
-                    break;
-                }
-                else if (nextIsFragment && text.Length > 0)
-                {
-                    tokens[k + 1] = (true, text + tokens[k + 1].Text);
-                    tokens.RemoveAt(k);
                     changed = true;
                     break;
                 }
@@ -258,22 +286,6 @@ public static partial class CompoundFieldSplitter
         }
 
         return (template.ToString(), mergedFragments);
-    }
-
-    /// <summary>
-    /// True when <paramref name="gap"/> is fully consumed by a single match of one of the given
-    /// placeholder patterns (not just containing a match somewhere within it).
-    /// </summary>
-    private static bool IsPurePlaceholder(string gap, IReadOnlyList<Regex> placeholderPatterns)
-    {
-        foreach (var pattern in placeholderPatterns)
-        {
-            var match = pattern.Match(gap);
-            if (match.Success && match.Index == 0 && match.Length == gap.Length)
-                return true;
-        }
-
-        return false;
     }
 
 

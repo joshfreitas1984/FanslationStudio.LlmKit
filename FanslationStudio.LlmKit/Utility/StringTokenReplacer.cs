@@ -11,7 +11,7 @@ public class StringTokenReplacer
 {
     private static readonly Regex PlaceholderRegex = new(@"(\{[^{}]+\})", RegexOptions.Compiled);
     private static readonly Regex CoordinateRegex = new(@"\(-?\d+,-?\d+\)", RegexOptions.Compiled);
-    private static readonly Regex NumericValueRegex = new(@"(?<![{<]|color=|<[^>]*)(?:[+-]?(?:\d+\.\d*|\.\d+|\d+))(?![}>])", RegexOptions.Compiled);   
+    private static readonly Regex NumericValueRegex = new(@"(?<![{<]|color=|<[^>]*)(?:[+-]?(?:\d+\.\d*|\.\d+|\d+))(?![}>])", RegexOptions.Compiled);
     private static readonly Regex ColorStartRegex = new(@"<color=[^>]+>", RegexOptions.Compiled);
     private static readonly Regex KeyPressRegex = new(@"<\w+\s+>", RegexOptions.Compiled);
     public static readonly Regex SizeRegex = new(@"<size=[^>]+>", RegexOptions.Compiled);
