@@ -1,4 +1,5 @@
 ﻿using FanslationStudio.LlmKit.Support;
+using System.Collections.Concurrent;
 using YamlDotNet.Serialization;
 
 namespace FanslationStudio.LlmKit.Configuration;
@@ -45,7 +46,11 @@ public class RuntimeValues
     public Dictionary<string, ModelExecutionConfig> Models { get; set; } = new();
     public List<GlossaryLine> GlossaryLines { get; set; } = [];
     public List<GlossaryLine> ManualTranslations { get; set; } = [];
-    public Dictionary<string, string> TranslationCache { get; set; } = [];
+
+    // ConcurrentDictionary because this is read and written from the parallel translation workers
+    // in TranslationService.TranslateViaLlmAsync (a plain Dictionary is not thread-safe for
+    // concurrent reads/writes and could corrupt its internal state or throw under contention).
+    public ConcurrentDictionary<string, string> TranslationCache { get; set; } = new();
 }
 
 public class ModelUrlConfig
@@ -58,7 +63,7 @@ public class ModelUrlConfig
     public Dictionary<string, object>? ModelParams { get; set; }
 }
 
-public class ModelExecutionConfig: ModelUrlConfig
+public class ModelExecutionConfig : ModelUrlConfig
 {
     public Dictionary<string, string> Prompts { get; set; } = [];
 }

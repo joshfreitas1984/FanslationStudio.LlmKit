@@ -1,6 +1,7 @@
 ﻿using FanslationStudio.LlmKit.Configuration;
 using FanslationStudio.LlmKit.Support;
 using FanslationStudio.LlmKit.Utility;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Net.WebSockets;
@@ -15,19 +16,18 @@ public static class TranslationService
     public const int BatchlessLog = 25;
     public const int BatchlessBuffer = 25;
 
-    public static async Task FillTranslationCacheAsync(string workingDirectory, 
-        int charsToCache, Dictionary<string, string> cache, 
+    public static async Task FillTranslationCacheAsync(string workingDirectory,
+        int charsToCache, ConcurrentDictionary<string, string> cache,
         LlmConfig config, TextFileToSplit[] textFiles)
     {
         // Add Manual adjustments 
         foreach (var k in config.Runtime.ManualTranslations)
-            cache.Add(k.Raw, k.Result);
+            cache.TryAdd(k.Raw, k.Result);
 
         // Add Glossary Lines to Cache
         foreach (var line in config.Runtime.GlossaryLines)
         {
-            if (!cache.ContainsKey(line.Raw))
-                cache.Add(line.Raw, line.Result);
+            cache.TryAdd(line.Raw, line.Result);
         }
 
         // File with old files
@@ -44,14 +44,13 @@ public static class TranslationService
             {
                 foreach (var split in line.Splits)
                 {
-                    if (!cache.ContainsKey(split.Text))
-                        cache.Add(split.Text, split.Translated);
+                    cache.TryAdd(split.Text, split.Translated);
                 }
             }
         }
 
-        await FileIteration.IterateTranslatedFilesAsync(workingDirectory, 
-            textFiles, 
+        await FileIteration.IterateTranslatedFilesAsync(workingDirectory,
+            textFiles,
             async (outputFile, textFileToTranslate, fileLines) =>
         {
             foreach (var line in fileLines)
@@ -61,8 +60,8 @@ public static class TranslationService
                     if (string.IsNullOrEmpty(split.Translated) || split.FlaggedForRetranslation)
                         continue;
 
-                    if (split.Text.Length <= charsToCache && !cache.ContainsKey(split.Text))
-                        cache.Add(split.Text, split.Translated);
+                    if (split.Text.Length <= charsToCache)
+                        cache.TryAdd(split.Text, split.Translated);
                 }
             }
 
@@ -85,15 +84,24 @@ public static class TranslationService
 
         var config = ConfigurationExtensions.GetConfiguration(workingDirectory);
 
-        // Translation Cache - for smaller translations that tend to hallucinate
-        var translationCache = new Dictionary<string, string>();
-        var charsToCache = 10;
+        // Translation Cache - dedups repeated strings within this run and across history
+        // (manual translations, glossary, TestResults/OldFiles, already-translated splits). Capped
+        // by length rather than uncapped: short/medium repeated strings (names, common short
+        // phrases) are very likely to recur elsewhere and are cheap to keep in memory, but longer
+        // translations (40-50+ chars) are unlikely to repeat verbatim and aren't worth retaining -
+        // an uncapped cache would just accumulate one-off long strings for no benefit. 50 was chosen
+        // to comfortably cover short/medium repeated phrases while still excluding long one-off
+        // sentences.
+        // ConcurrentDictionary because splits within a batch are translated in parallel
+        // (Task.WhenAll below) and each worker reads/writes this cache concurrently.
+        var translationCache = new ConcurrentDictionary<string, string>();
+        var charsToCache = 50;
         await FillTranslationCacheAsync(workingDirectory, charsToCache, translationCache, config, textFiles);
 
         // Create an HttpClient instance
         using var client = new HttpClient();
         client.Timeout = TimeSpan.FromSeconds(300);
- 
+
         int incorrectLineCount = 0;
         int totalRecordsProcessed = 0;
 
@@ -166,9 +174,12 @@ public static class TranslationService
 
                     if (string.IsNullOrEmpty(split.Translated))
                         incorrectLineCount++;
-                    //Two translations could be doing this at the same time
-                    else if (!cacheHit && split.Text.Length <= charsToCache)
-                        translationCache.TryAdd(split.Text, split.Translated);
+                    else
+                    {
+                        //Two translations could be doing this at the same time
+                        if (!cacheHit && split.Text.Length <= charsToCache)
+                            translationCache.TryAdd(split.Text, split.Translated);
+                    }
                 }));
 
                 // Duplicates
@@ -222,7 +233,6 @@ public static class TranslationService
         if (raw.Contains(splitCharacters))
         {
             var splits = raw.Split(splitCharacters);
-            var builder = new StringBuilder();
 
             string suffix;
 
@@ -233,16 +243,18 @@ public static class TranslationService
             else
                 suffix = splitCharacters;
 
-            foreach (var split in splits)
-            {
-                var trans = await TranslateSplitAsync(config, split, client, textFile);
+            // Pieces are independent of each other - translate them concurrently instead of one
+            // at a time. Order is preserved because Task.WhenAll returns results in the same order
+            // as the input tasks array.
+            var translations = await Task.WhenAll(splits.Select(split => TranslateSplitAsync(config, split, client, textFile)));
 
-                // If one fails we have to kill the lot
-                if (!trans.Valid && !config.SkipLineValidation)
-                    return (true, string.Empty);
+            // If any piece fails we have to kill the lot
+            if (translations.Any(t => !t.Valid) && !config.SkipLineValidation)
+                return (true, string.Empty);
 
+            var builder = new StringBuilder();
+            foreach (var trans in translations)
                 builder.Append($"{trans.Result}{suffix}");
-            }
 
             var result = builder.ToString();
 
@@ -256,8 +268,8 @@ public static class TranslationService
         return (false, string.Empty);
     }
 
-    public static async Task<(bool split, string result)> SplitBracketsRegexIfNeededAsync(LlmConfig config, 
-        string raw, HttpClient client, 
+    public static async Task<(bool split, string result)> SplitBracketsRegexIfNeededAsync(LlmConfig config,
+        string raw, HttpClient client,
         TextFileToSplit textFile)
     {
         // Collect all matches across all patterns and sort by position so multiple bracket types in
@@ -270,30 +282,42 @@ public static class TranslationService
         if (allMatches.Count == 0)
             return (false, string.Empty);
 
-        // Pre-translate each match's inner content separately and wrap it in single quotes as a
-        // placeholder (e.g. 'Sutra of Immeasurable Life') so the LLM treats it as a proper noun
-        // and preserves it during full-sentence translation. After translation, restore the original
-        // bracket characters by replacing 'translatedText' with openBracket+translatedText+closeBracket.
+        // Discard overlapping matches up-front so the remaining set can be translated concurrently
+        // without affecting each other's outcome.
+        var nonOverlappingMatches = new List<Match>();
+        var lastOriginalIndexForFilter = 0;
+        foreach (var match in allMatches)
+        {
+            if (match.Index < lastOriginalIndexForFilter)
+                continue;
+
+            nonOverlappingMatches.Add(match);
+            lastOriginalIndexForFilter = match.Index + match.Length;
+        }
+
+        // Pre-translate each match's inner content separately (independent of each other, so done
+        // concurrently) and wrap it in single quotes as a placeholder (e.g. 'Sutra of Immeasurable
+        // Life') so the LLM treats it as a proper noun and preserves it during full-sentence
+        // translation. After translation, restore the original bracket characters by replacing
+        // 'translatedText' with openBracket+translatedText+closeBracket.
+        var innerTranslations = await Task.WhenAll(nonOverlappingMatches.Select(match =>
+            TranslateSplitAsync(config, match.Value[1..^1], client, textFile)));
+
+        if (innerTranslations.Any(t => !t.Valid) && !config.SkipLineValidation)
+            return (true, string.Empty);
+
         var bracketRestorations = new List<(string quotedText, char openBracket, char closeBracket)>();
         var modifiedRaw = raw;
-        var lastOriginalIndex = 0;
         var offset = 0;
 
         var matchIndex = 99;
 
-        foreach (var match in allMatches)
+        for (int matchPos = 0; matchPos < nonOverlappingMatches.Count; matchPos++)
         {
-            // Skip overlapping matches
-            if (match.Index < lastOriginalIndex)
-                continue;
-
+            var match = nonOverlappingMatches[matchPos];
             var openBracket = match.Value[0];
             var closeBracket = match.Value[^1];
-            var inner = match.Value[1..^1];
-
-            var innerTrans = await TranslateSplitAsync(config, inner, client, textFile);
-            if (!innerTrans.Valid && !config.SkipLineValidation)
-                return (true, string.Empty);
+            var innerTrans = innerTranslations[matchPos];
 
             var quotedText = $"{matchIndex++}";
             bracketRestorations.Add((quotedText, openBracket, closeBracket));
@@ -301,7 +325,6 @@ public static class TranslationService
             var adjustedIndex = match.Index + offset;
             modifiedRaw = modifiedRaw[..adjustedIndex] + quotedText + modifiedRaw[(adjustedIndex + match.Length)..];
             offset += quotedText.Length - match.Length;
-            lastOriginalIndex = match.Index + match.Length;
         }
 
         // Translate the full sentence with pre-translated placeholders to preserve surrounding context
@@ -331,10 +354,10 @@ public static class TranslationService
     }
 
 
-    public static async Task<ValidationResult> TranslateSplitAsync(LlmConfig config, 
-        string? raw, 
-        HttpClient client, 
-        TextFileToSplit textFile, 
+    public static async Task<ValidationResult> TranslateSplitAsync(LlmConfig config,
+        string? raw,
+        HttpClient client,
+        TextFileToSplit textFile,
         string additionalPrompts = "")
     {
         if (string.IsNullOrEmpty(raw))
@@ -467,12 +490,11 @@ public static class TranslationService
     {
         // Split the failed result by sentences (period followed by space or end of string)
         var sentences = failedResult.Split(new[] { ". " }, StringSplitOptions.None);
-        var correctedSentences = new List<string>();
 
-        for (int i = 0; i < sentences.Length; i++)
+        // Sentences are independent of each other - correct them concurrently instead of one at a
+        // time. Task.WhenAll preserves input order in its result array.
+        var correctedSentences = await Task.WhenAll(sentences.Select(async (sentence, i) =>
         {
-            var sentence = sentences[i];
-
             // Add period back if not the last sentence
             if (i < sentences.Length - 1)
                 sentence += ".";
@@ -491,14 +513,12 @@ public static class TranslationService
                 };
 
                 var correctedSentence = await TranslateMessagesAsync(client, config, executingModel, messages);
-                correctedSentences.Add(correctedSentence.Trim());
+                return correctedSentence.Trim();
             }
-            else
-            {
-                // Sentence is fine, keep it as is
-                correctedSentences.Add(sentence);
-            }
-        }
+
+            // Sentence is fine, keep it as is
+            return sentence;
+        }));
 
         // Rejoin sentences with proper spacing
         return string.Join(" ", correctedSentences);
@@ -609,15 +629,19 @@ public static class TranslationService
                 int retryDelay = 5000; // start with 2 seconds
                 int maxDelay = 60000; // max 30 seconds
                 int retries = 0;
+                var backoffStopwatch = Stopwatch.StartNew();
                 while ((int)response.StatusCode == 429 && retries < 5)
                 {
-                    Console.WriteLine("Received 429 Too Many Requests. Backing off...");
+                    Console.WriteLine($"Received 429 Too Many Requests. Backing off attempt {retries + 1}/5, waiting {retryDelay}ms...");
                     await Task.Delay(retryDelay);
                     retryDelay = Math.Min(retryDelay * 2, maxDelay);
                     response = await client.PostAsync(modelToUse.Url, content);
                     responseBody = await response.Content.ReadAsStringAsync();
                     retries++;
                 }
+
+                if (retries > 0)
+                    Console.WriteLine($"429 backoff finished after {retries} attempt(s), {backoffStopwatch.ElapsedMilliseconds}ms blocked, final status {(int)response.StatusCode}.");
             }
 
             response.EnsureSuccessStatusCode();
