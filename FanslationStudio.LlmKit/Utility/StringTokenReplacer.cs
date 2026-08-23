@@ -23,11 +23,19 @@ public class StringTokenReplacer
     private Dictionary<string, string> colorMap = new();
     private Dictionary<string, string> sizeMap = new();
 
-    private readonly List<string> extraStringTokenReplacer = new();
-    public static Regex ExtraTokenRegex;
+    public static Regex? ExtraTokenRegex;
 
     public static void SetExtraTokens(List<string> extraTokens)
     {
+        // No extra tokens configured - leave the regex unset rather than building one from an
+        // empty pattern (string.Join on an empty sequence yields "", and a regex with an empty
+        // pattern matches the empty string at every position, which would corrupt every line).
+        if (extraTokens == null || extraTokens.Count == 0)
+        {
+            ExtraTokenRegex = null;
+            return;
+        }
+
         var extraTokenPattern = string.Join("|", extraTokens.Select(Regex.Escape));
         ExtraTokenRegex = new Regex(extraTokenPattern, RegexOptions.Compiled);
     }
@@ -108,7 +116,14 @@ public class StringTokenReplacer
             return $"{{{index++}}}";
         });
 
-        if (extraStringTokenReplacer.Count > 0)
+        // Bug fix: this used to be gated on an instance field that was declared but never
+        // populated anywhere, so it was always empty and this block never ran - meaning tokens
+        // like `#PlayerName#` were never swapped out for a `{n}` placeholder before being sent to
+        // the LLM, and the raw `#...#` text (which the LLM can mangle or drop) went straight into
+        // the prompt instead. Gate on the static regex actually being configured (see
+        // SetExtraTokens, called once from ConfigurationExtensions.GetConfiguration with
+        // LlmConfig.ExtraStringTokenReplacers).
+        if (ExtraTokenRegex != null)
         {
             result.Replace(ExtraTokenRegex, match =>
             {
