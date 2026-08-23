@@ -12,6 +12,15 @@ via a project reference to `FanslationStudio.LlmKit.csproj`.
 
 > **Workflow rule:** After any significant feature or fix, update this file and `readme.md` —
 > they are the primary source of truth for future sessions.
+>
+> **Reverse-engineering rule:** Whenever you investigate/reverse-engineer how existing code in
+> this repo works (tracing a log line back to its source, figuring out why a validation heuristic
+> fires, mapping a runtime behavior back to the responsible method, etc.), write down what you
+> learned in this file before finishing the task, even if not explicitly asked to document it —
+> findings that only exist in chat history are lost for future sessions. Keep entries concise and
+> reference exact file/method names so a future session can jump straight to the relevant code.
+> Consuming repos (e.g. `DragonHeirOverLlm`) should record LlmKit-internal findings here, not in
+> their own repo notes, since this is the sibling repo the logic actually belongs to.
 
 ## Core data model (`Support/`)
 
@@ -168,6 +177,92 @@ column (whole-cell text → per-fragment text), so previously translated compoun
 auto-match on export/merge and will need re-translation once. This is expected and acceptable —
 it only affects columns that actually contain multiple fragments (compound columns), not plain
 single-value columns.
+
+## Translation performance / retry / "Unprocessable" notes (`TranslationService.cs`)
+
+- Backend is typically a local Ollama instance (`http://localhost:11434/api/chat`), which usually
+  serves one request at a time per model regardless of client-side concurrency — setting a high
+  `maxConcurrency` in a consuming project's config does not give proportional real throughput
+  against that backend; requests just queue up.
+- `TranslateSplitAsync` already retries a failing split fully internally: up to
+  `LlmConfig.RetryCount` whole-cell attempts, each potentially followed by up to `RetryCount`
+  sentence-by-sentence correction rounds (only entered when
+  `ValidationResult.RequiresSentenceBySentenceCorrection` is set, e.g. leftover Chinese
+  characters). **Never wrap another `RetryCount`-bounded retry loop around a call to
+  `TranslateSplitAsync` (or anything that calls it)** — this squares the worst-case call count
+  instead of adding to it. This was a real bug fixed in this method and in
+  `CorrectSentenceBySentenceAsync`/`SplitBracketsRegexIfNeededAsync`'s `fullTrans` step; see git
+  history/comments in `TranslationService.cs` around those call sites for the reasoning.
+- `TranslateViaLlmAsyncPooled`'s progress log (`Processed: X of Y pending split(s) (Z unique
+  total)...`) uses `pendingCount` (splits that still need translation, by the same condition used
+  in the worker loop) as the denominator, not `workItems.Count` (every unique split including
+  already-translated ones from a prior run) — using the raw count makes an already-mostly-done run
+  look stuck.
+- `incorrectLineCount` (logged as `Unprocessable`) is incremented once per work item, only after
+  all its retries are exhausted and `split.Translated` ends up empty — it is a count of
+  permanently-failed splits, not a running tally of individual retry failures. `CheckTransalationSuccessful`
+  in `LineValidation.cs` is the validator whose heuristics (banned phrases, output-length
+  hallucination checks, spurious punctuation insertion on short strings, missing/added
+  tags/placeholders, leftover Chinese, etc.) decide whether a split needs a retry; a split can
+  also become permanently unprocessable if `TranslateSplitAsync` catches an `HttpRequestException`
+  (Ollama connection/timeout issue), which returns invalid immediately with no further retry.
+- **Diagnostic logging (added Aug 2026):** `TranslateViaLlmAsyncPooled` now captures the raw text +
+  failure reason (`ValidationResult.CorrectionPrompt`, or a placeholder noting a likely HTTP
+  failure) for every split that ends up unprocessable, and writes them to
+  `{workingDirectory}/TestResults/UnprocessableItems.log` periodically during the run (same
+  cadence as the `Processed: ...` progress log, via the `WriteUnprocessableItemsLog` helper) as
+  well as once more at the end — overwritten each write, not appended, so it always reflects the
+  run so far rather than only being visible after the whole run finishes. Use this file to see
+  which validation heuristic dominates real failures before tuning `LineValidation.cs` heuristics,
+  `RetryCount`, or investigating Ollama-side timeouts/concurrency — don't guess from the aggregate
+  `Unprocessable` count alone.
+- **Leading structural punctuation is stripped and re-attached deterministically, not left to the
+  model (added Aug 2026):** a real run's `UnprocessableItems.log` showed the single largest cause
+  of unprocessable splits was raw text starting with a bare `：`/`:` (e.g.
+  `：七十二洞研究奇门兵器，提升奇门威力。`) — a leftover field-templating artifact (the label half
+  of a compound cell was already carved off elsewhere), never natural Chinese sentence punctuation.
+  Forcing the LLM to preserve a bare leading separator like this in fluent English is unnatural, so
+  it reliably drops it, which then fails `CheckTransalationSuccessful`'s "Removed :" check and
+  burns a full retry budget every time for a mark that doesn't need the model's help at all.
+  `TranslateSplitAsync` now has a dedicated branch (right after the existing
+  `ColorTagHelpers.StartsWithHalfColorTag` branch, following the same "split off the part the
+  model shouldn't need to handle, translate only the remainder, recombine ourselves" pattern): if
+  `preparedRaw`'s first character is in `LeadingStructuralPunctuation` (`:`, `;`, `,`), it strips
+  that character, recursively translates the remainder, and prepends the original character back
+  onto the result itself — deterministic and retry-free, instead of hoping the model preserves it.
+  This bypasses `CheckTransalationSuccessful` validation entirely for the combined result (same as
+  the color-tag branch does), so don't extend this set to punctuation that might carry real
+  meaning if attached to model-produced text without a review pass first.
+- **Not every unprocessable split is fixable by a code/heuristic change** — the same real run's log
+  also showed long, idiomatic/archaic wuxia-style sentences (e.g. `KungFuData.csv` flavor text)
+  still ending up unprocessable after exhausting the leftover-Chinese sentence-correction retries.
+  That's a genuine `qwen2.5:7b` capability limit on hard sentences, not a bug. `retryCount` was
+  dropped from `3` to `1` in the consuming `DragonHeirOverLlm` repo's `Files/Config.yaml` for this
+  reason — with only one real model available, extra whole-cell retry attempts against it mostly
+  just re-prompt the same model and burn time rather than meaningfully improving the success rate.
+- **Model escalation (implemented Aug 2026):** `LlmConfig.EscalationModelName` (+
+  `EscalationRetryCount`) lets a split that's still invalid after exhausting its normal
+  `RetryCount` against its primary model get a second, independent attempt budget against a
+  *different* named model (must match a `ModelConfig.Name` under `models:` in `Config.yaml`).
+  Validated at config-load time in `ConfigurationExtensions.GetConfiguration` (throws if the name
+  doesn't match a configured model). Implementation lives entirely in `TranslateSplitAsync`
+  (`TranslationService.cs`): the whole-cell + sentence-by-sentence retry loop was extracted into a
+  local function `AttemptTranslationWithRetriesAsync(executingModel, maxRetries, isEscalation)` so
+  the primary attempt (`modelConfig`, `RetryCount`) and the escalation attempt
+  (`escalationModelConfig`, `EscalationRetryCount`) share identical logic instead of two copies
+  drifting apart. Escalation only actually runs if `EscalationModelName` resolves to a model whose
+  `Model` string differs from the primary one already tried (skips pointless re-attempts against
+  an identical model) - **this makes it safe to point `escalationModelName` at the same model
+  entry today as a placeholder**: it validates cleanly and is a documented no-op until a real
+  second/stronger model is added under `models:` and the name is repointed, with no further code
+  changes needed. `ValidationResult.EscalationAttempted` (set only when escalation actually ran)
+  is surfaced in `UnprocessableItems.log` reasons (`[escalation attempted: yes/no]`) and a separate
+  `_escalationAttemptCounter` (mirrors `_retryAttemptCounter`) is reported in the periodic progress
+  log (`escalations this interval: N (total: M)`), so escalation's real cost/benefit is visible
+  once a genuinely different model is configured - don't fold escalation attempts into the
+  existing retry counters. `LlmHelpers.CalculateModelConfig` is unrelated to this and still a stub
+  (`// TODO: Implement properly`, always returns `config.Runtime.Models.First().Value`) - that
+  governs which model a split starts with, not escalation after failure.
 
 ## Testing conventions
 

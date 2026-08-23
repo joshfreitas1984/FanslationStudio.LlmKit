@@ -13,6 +13,11 @@ Do the experiment first. If the theory doesn't hold up, don't do the refactor.
 
 ## 1. Translation throughput / batching (highest priority — this is the one you flagged)
 
+> **Status: implemented behind a flag, and confirmed faster on a real translation run.** See
+> "What's implemented" and "Validation result" below before re-reading the original
+> theory/proposal as if it were still open — the scheduling change has landed and held up in
+> practice; what's left is formal head-to-head numbers before fully retiring the old path.
+
 ### Current behavior (see ARCHITECTURE.md § Translation pipeline)
 
 ```
@@ -76,6 +81,54 @@ across the whole run**:
 This is the "massive refactor" — do it as a separate branch, keep the current implementation
 behind a flag until throughput is compared on a real file set (see Testing the theory, below).
 
+### What's implemented
+
+`TranslationService.TranslateViaLlmAsync` is now a thin dispatcher over two schedulers, selected
+by `LlmConfig.UseContinuousWorkerPool` (`Config.yaml: useContinuousWorkerPool`, default `false`):
+
+- `TranslateViaLlmAsyncBatched` — the original scheduler described above, unchanged in behavior.
+- `TranslateViaLlmAsyncPooled` — the pool-based scheduler described in "Proposed fix": every
+  file is loaded up-front, each file's unique-by-`Text` splits (same per-file dedup semantics as
+  the batched scheduler — translation prompts still respect each file's own
+  `EnableGlossary`/`AdditionalPromptName`/etc., so this intentionally does **not** dedup across
+  files beyond what the existing run-wide translation cache already does) are flattened into one
+  work list across every file, and `Parallel.ForEachAsync` with
+  `MaxDegreeOfParallelism = LlmConfig.MaxConcurrency ?? BatchSize ?? 20` pulls the next item as
+  soon as a worker frees up — no batch barrier, no file-boundary barrier. Buffered writes still
+  happen every `BatchlessBuffer` (25) completed records, now per-file under a lock instead of
+  inline in a single-threaded loop. Duplicate-propagation (the batched scheduler's post-batch
+  "copy first duplicate's translation to the rest" step) runs opportunistically before every
+  buffered write for that file (not just once at the end), plus once more after the whole pool
+  drains to catch anything translated after the last flush — scoped to the whole file instead of
+  whichever batch a duplicate happened to land in (a strict improvement, since duplicates that
+  were previously split across two different batches of the same file now always get linked).
+  This also means a cancelled/killed run only loses the unique-split translations and duplicate
+  propagation that happened since that file's last flush, not everything back to the start of the
+  file — restart-safety is comparable to (arguably better than) the batched scheduler.
+
+To try it: set `useContinuousWorkerPool: true` in `Config.yaml`, optionally tune
+`maxConcurrency` (otherwise it reuses `batchSize`).
+
+### Validation result
+
+Confirmed faster on a real translation run in `DragonHierOverLlm` (informal — wall-clock feel,
+not yet the full instrumented p95/in-flight-concurrency comparison described below). The tail-
+latency theory holds up in practice: the pooled scheduler noticeably outperformed the batched one.
+Formal head-to-head numbers and an output-YAML diff (see "Remaining validation work" below) are
+still worth capturing before fully retiring the batched path, but confidence is now high enough to
+treat `useContinuousWorkerPool: true` as the recommended setting going forward.
+
+### Remaining validation work (nice-to-have now, not a blocker)
+
+- Re-run the instrumentation from "Cheap experiment" above (or at minimum compare total
+  wall-clock time and `Console.WriteLine` "Processed: N of M" cadence) on the same file(s) with
+  `useContinuousWorkerPool: false` vs `true` to get real numbers (p95 latency, in-flight
+  concurrency over time) rather than relying on the informal result above.
+- Diff the resulting `Converted/*.yaml` between both paths on the same input — should be
+  identical modulo LLM non-determinism (no structural differences, no missing splits).
+- Once that's done, consider making `useContinuousWorkerPool: true` the default and eventually
+  retiring `TranslateViaLlmAsyncBatched`.
+
 ### Note: overlap with `CompoundFieldSplitter` for CSV-sourced files
 
 Since `CompoundFieldSplitter` now decomposes CSV cells at export time (splitting only at genuine
@@ -90,80 +143,71 @@ formatting (`\n`, `<br>`, enumeration glyphs) and for non-CSV `TextFileType`s
 `ExportGameSpecificTextAssetsToCustomFormat` — just don't reintroduce CSV structural separators
 into it.
 
-### Secondary, smaller wins in the same area (do these regardless — low effort, no architecture change)
+### Secondary, smaller wins in the same area (done)
 
-- **Dedup globally, not per-batch**: `uniqueSplits` grouping in `TranslateViaLlmAsync` only looks
-  within the current batch. Build one dictionary of already-seen `Text → Translated` for the whole
-  file (or whole run) and skip a repeat immediately, before it ever reaches the worker. With
-  `batchSize=100` this is probably already catching most repeats, but it's a one-line broadening
-  for zero added complexity.
-- **Rework `SplitBracketsRegexIfNeededAsync` / `SplitOnCharsIfNeededAsync` — these are the actual
-  "slow tail" source, not just an opportunity to parallelize.** Both functions share two problems
-  beyond sequential `await`:
-  1. **Sequential `foreach` + `await` per piece** — a cell that splits into 4 pieces is 4x
-     latency, serialized, even though the pieces are independent. Straightforward fix:
-     `Task.WhenAll` over the pieces instead of a loop.
-  2. **All-or-nothing failure discards already-good work** — if *any* one piece fails validation,
-     the whole function returns `(true, string.Empty)` and the caller's retry loop
-     (`TranslateSplitAsync`'s `RetryCount`) re-translates **every** piece again from scratch,
-     including ones that already succeeded. Because a different piece can fail on each retry,
-     this can churn without ever converging, and wastes LLM calls on pieces that were already
-     fine. Fix: track per-piece validity, only retry the failed piece(s), reuse cached-good
-     results for the rest — same idea `TranslateSplitAsync` itself already uses at the whole-cell
-     level, just not propagated down into these two helpers.
-  3. **`SplitBracketsRegexIfNeededAsync` hand-rolls index/offset string surgery**
-     (`modifiedRaw[..adjustedIndex] + quotedText + ...`) to build a placeholder-substituted
-     sentence before re-translating it — this is a bespoke, more fragile reimplementation of what
-     `CompoundFieldSplitter.Decompose`/`Reconstruct` already do safely via `{n}` templates
-     (quote/bracket-balance bugs here would be easy to introduce and hard to notice, since the
-     failure mode is silently wrong reconstructed text, not an exception). Worth converting this
-     function to build a `Decompose`-style template + fragment list and calling `Reconstruct`,
-     rather than manual substring math.
+- **Dedup globally, not per-batch — done.** `translationCache` (in `TranslationService`) is now
+  the single dedup mechanism, capped at `TranslationCacheMaxChars` (50 chars, raised from the
+  original 10) rather than split into a separate uncapped run-wide cache — short/medium repeated
+  strings get deduped across the whole run and across files; long one-off sentences (40-50+
+  chars) are deliberately excluded so the cache doesn't grow unbounded with strings unlikely to
+  repeat. Also switched to `ConcurrentDictionary<string,string>` (was a plain `Dictionary` being
+  mutated from parallel workers — a real, if latent, thread-safety bug that predated this pass).
+- **Rework `SplitBracketsRegexIfNeededAsync` / `SplitOnCharsIfNeededAsync` — done.** Both functions
+  now translate their independent pieces via `Task.WhenAll` (parallelization) and only retry the
+  piece(s) that actually failed validation, via a shared `TranslatePiecesWithRetryAsync` helper,
+  instead of discarding every piece (including already-succeeded ones) on any single failure.
+  `SplitBracketsRegexIfNeededAsync` also no longer hand-rolls index/offset string surgery — it now
+  builds a `{n}`-placeholder template in one forward pass and calls
+  `CompoundFieldSplitter.Reconstruct` to restore bracket contents, the same safe substitution used
+  for CSV-cell fragments elsewhere. **This refactor also fixed a real bug**: the previous
+  hand-rolled restoration discarded each bracket's actual translated content and spliced in a
+  mangled substring of the internal placeholder *number* instead (`quotedText[1..^1]`), so
+  bracketed text (`《...》`, `「...」`, etc.) translated via this path silently lost its
+  translation. Confirmed via git history that `splitRegexPatterns` had these bracket patterns
+  enabled on real `DragonHierOverLlm` runs before being disabled again — see
+  `TranslationWorkflowTests.SetBracketSplitBugLinesAsInvalid` (added to flag affected lines for
+  retranslation) and `TranslationServiceTests.SplitBracketsRegexIfNeededAsync_RestoresTranslatedBracketContent`
+  (mocked-LLM regression test) in the respective test projects.
 
-  Net effect once fixed: these two helpers stop being sequential multi-round-trip chains that can
-  single-handedly hold up a whole worker-pool slot (item #1's refactor helps less than expected if
-  the tail latency is actually concentrated here rather than in "which item happened to need a
-  retry"). Recommend measuring this specifically in the item #1 instrumentation — tag logged
-  requests with whether they came from a bracket-split/char-split/sentence-correction sub-path
-  (already listed above) and check if these sub-paths are disproportionately represented in the
-  tail.
+  Net effect: these two helpers stop being sequential multi-round-trip chains that can
+  single-handedly hold up a whole worker-pool slot. Still worth measuring in a future pass whether
+  bracket-split/char-split sub-paths are disproportionately represented in tail latency, but no
+  further code changes are required for this item.
 - **`CorrectSentenceBySentenceAsync` is the same family of problem, plus an extra naive-splitting
-  risk on top — likely the worst offender of the three.** It fires when
-  `ValidationResult.RequiresSentenceBySentenceCorrection` (leftover-Chinese-characters case),
-  called from inside `TranslateSplitAsync`'s own `RetryCount` loop:
-  1. **Sequential per-sentence `await` loop** — identical issue to the two helpers above; the
-     sentences are independent and should be `Task.WhenAll`'d.
-  2. **Splits on the literal string `". "`** — this is the same class of mistake
-     `CompoundFieldSplitter` was built to fix for CSV cells (naive `line.Split(',')`), just applied
-     to sentences: no quote/bracket awareness (a period inside a quoted clause splits mid-thought),
-     no placeholder/token awareness (a `{0}` or `#PlayerName#` token near a period isn't
-     protected, unlike everywhere else in the pipeline), and it can't handle `!`/`?`-terminated or
-     no-ASCII-punctuation sentences — plausible exactly in the case this function exists for
-     (leftover CJK text may have no ASCII period at all).
-  3. **Nests inside, rather than composes with, the outer retry loop** — if the sentence-by-
-     sentence pass still fails validation afterward, control falls through to the *outer*
-     `RetryCount` loop, which regenerates messages and retries the **whole cell** again from
-     scratch, discarding any sentences the inner pass did fix. Worst case this is
-     `RetryCount × sentence-count` LLM calls for one troublesome cell, most of them redundant —
-     same "discard good partial work" issue as the two helpers above, but nested one level deeper
-     so it compounds further.
+  risk on top — done.** It fires when `ValidationResult.RequiresSentenceBySentenceCorrection`
+  (leftover-Chinese-characters case), called from inside `TranslateSplitAsync`'s own `RetryCount`
+  loop:
+  1. ~~Sequential per-sentence `await` loop~~ — **done**, now `Task.WhenAll`'d.
+  2. ~~Splits on the literal string `". "`~~ — **done**. Replaced with a dedicated
+     `SplitIntoSentences` helper that splits on `.`/`!`/`?` followed by whitespace or
+     end-of-string, while tracking brace depth (never splits inside a `{n}` placeholder) and
+     double-quote state (never splits inside a quoted clause) - covered by
+     `TranslationServiceTests.CorrectSentenceBySentenceAsync_DoesNotSplitInsideQuotes`. Single
+     quotes are intentionally not tracked (they're overwhelmingly English contraction apostrophes
+     in translated output, not quote delimiters).
+  3. ~~Nests inside, rather than composes with, the outer retry loop~~ — **done**. The outer retry
+     loop in `TranslateSplitAsync` now keeps re-invoking `CorrectSentenceBySentenceAsync` (feeding
+     the previous attempt's output back in as the next input) instead of falling through to a
+     fresh whole-cell `TranslateMessagesAsync` call as soon as one correction attempt fails.
+     Because `CorrectSentenceBySentenceAsync` only re-translates sentences that still contain
+     Chinese characters, already-corrected sentences from a prior attempt are left untouched on
+     each re-invocation - so a stubborn sentence no longer forces every already-fixed sentence in
+     the same cell to be discarded and the whole cell retranslated from scratch. Only falls back
+     to a normal whole-cell correction message (the old behavior) once the sentence-level retry
+     budget (`RetryCount`) is exhausted and the cell is still invalid. Covered by
+     `TranslationServiceTests.TranslateSplitAsync_SentenceCorrectionRetry_DoesNotFallBackToWholeCellRetranslation`
+     (asserts the whole-cell translation request is only ever sent once).
   4. **Minimal-context correction prompt is a real trade-off, not just an optimization** — the
      per-sentence prompt intentionally omits the original full sentence/glossary to avoid
      re-translating everything, but that also means the model has the least context exactly when
      it's already shown it struggles with that text. Worth validating empirically (log how often
      this path actually converges vs. falls through to a full outer retry) rather than assuming
-     it's a net win.
-
-  Fix direction is the same as above: parallelize the independent per-sentence calls, and make
-  the outer retry only re-attempt sentences that are still failing rather than the whole cell.
-  Longer term, consider whether "sentence" splitting here could reuse `CompoundFieldSplitter`-style
-  fragment boundaries (or at minimum a regex that respects placeholders/quotes) instead of a bare
-  `Split(". ")`.
-- **Increase `RetryCount`/backoff visibility**: 429 backoff (5s→60s, 5 retries) inside
-  `TranslateMessagesAsync` is invisible to the batch scheduler — a single throttled request can
-  block a worker slot for up to ~5 minutes worst case. Once on a worker-pool model this stops
-  blocking *other* work, but it's worth logging when it happens either way, since it's a likely
-  culprit for tail latency.
+     it's a net win. Not yet done — no logging added for this specifically, and considered low
+     priority relative to everything else that's landed.
+- **429 backoff visibility — done.** `TranslateMessagesAsync`'s 429 backoff now logs attempt
+  number, wait time per attempt, and total blocked time once backoff finishes, so a request stuck
+  in backoff (up to ~5 minutes worst case: 5 retries, 5s→60s exponential) is visible in logs
+  instead of only showing a generic "Backing off..." line per attempt.
 
 ### Test plan for the refactor itself
 
@@ -218,10 +262,18 @@ These are lower risk than #1 and directly address "reduce time spent setting thi
 
 ## Suggested order of work
 
-1. Instrumentation + experiment for item #1 (cheap, answers the actual question you asked).
-2. Secondary batching wins (global dedup, parallel sibling sub-translations) — low effort,
-   independent of whether the full worker-pool refactor happens.
-3. Decide on the worker-pool refactor based on experiment results.
-4. Reuse/scaffold work (item #2) whenever starting the next project, or proactively if there's
-   downtime between translation runs.
-5. Robustness items (#3) opportunistically.
+1. ~~Instrumentation + experiment for item #1~~ — superseded; implemented and validated directly
+   on a real run instead (see "Validation result" above).
+2. ~~Secondary batching wins (global dedup, parallel sibling sub-translations, per-piece retry,
+   `CompoundFieldSplitter`-based bracket reconstruction, quote/placeholder-aware sentence
+   splitting, sentence-correction outer-retry-scoping)~~ — **all done.** The only item left in
+   this section is point 4 of `CorrectSentenceBySentenceAsync` (no empirical logging of how often
+   the sentence-correction path converges vs. falls through) - low priority.
+3. ~~Decide on the worker-pool refactor~~ — done, `useContinuousWorkerPool: true` is the
+   recommended setting going forward (see "Validation result").
+4. **Remaining open items, roughly in priority order:**
+   - Formal head-to-head numbers (item #1's "Remaining validation work") — nice-to-have, not
+     blocking.
+   - Reuse/scaffold work (item #2) whenever starting the next project, or proactively if there's
+     downtime between translation runs.
+   - Robustness items (#3) opportunistically.

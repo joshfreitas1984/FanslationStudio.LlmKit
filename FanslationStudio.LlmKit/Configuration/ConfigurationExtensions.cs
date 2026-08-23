@@ -71,6 +71,14 @@ public static class ConfigurationExtensions
             LoadApiKey(apiKeyPath, response.Runtime.Models[model.Name]);
         }
 
+        // Fail fast on a typo'd/unconfigured escalation model name rather than silently never
+        // escalating (see LlmConfig.EscalationModelName doc comment).
+        if (!string.IsNullOrEmpty(response.EscalationModelName)
+            && !response.Runtime.Models.ContainsKey(response.EscalationModelName))
+            throw new InvalidOperationException(
+                $"EscalationModelName '{response.EscalationModelName}' does not match any configured model name. " +
+                $"Configured model names: {string.Join(", ", response.Runtime.Models.Keys)}");
+
         // Load Preset Glossary before workspace glossary so that workspace can override preset entries
         LoadPresetGlossary(deserializer, response);
         MergeWorkspaceGlossary($"{workingDirectory}/Glossary", deserializer, response.Runtime);
