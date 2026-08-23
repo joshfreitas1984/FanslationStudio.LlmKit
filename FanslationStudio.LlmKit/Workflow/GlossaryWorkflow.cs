@@ -6,7 +6,7 @@ using ToolGood.Words;
 namespace FanslationStudio.LlmKit.Workflow;
 
 
-public class GlossaryWorkflow
+public static class GlossaryWorkflow
 {
     /// <summary>
     /// Return glossary lines enriched with simplified and traditional Chinese variants if they are missing, based on the original raw text. 
@@ -19,7 +19,8 @@ public class GlossaryWorkflow
             if (string.IsNullOrEmpty(line.RawSimplified) && string.IsNullOrEmpty(line.RawTraditional))
             {
                 var traditional = WordsHelper.ToTraditionalChinese(line.Raw);
-                var simplified = WordsHelper.ToSimplifiedChinese(line.Raw);
+                var simplified = WordsHelper.ToSimplifiedChinese(line.Raw);                
+
                 if (simplified != line.Raw)
                 {
                     line.RawTraditional = line.Raw;
@@ -49,7 +50,7 @@ public class GlossaryWorkflow
         HashSet<string> SimilarEntries,
         HashSet<string> ConflictingEntries);
 
-    public GlossaryAnalysisResult AnalyseGlossaryForIssues(GlossaryLine[] allEntries)
+    public static GlossaryAnalysisResult AnalyseGlossaryForIssues(GlossaryLine[] allEntries)
     {
         return new GlossaryAnalysisResult(
             FindDuplicates(allEntries),
@@ -120,11 +121,16 @@ public class GlossaryWorkflow
         || checkingEntry.AllowedAlternatives.Any(a => a.Contains(baseEntry.Result, StringComparison.OrdinalIgnoreCase))
         || checkingEntry.AllowedAlternatives.Any(a => baseEntry.Result.Contains(a, StringComparison.OrdinalIgnoreCase));
 
+
     private static IEnumerable<string> GetVariants(GlossaryLine entry)
     {
-        yield return entry.Raw;
-        if (!string.IsNullOrEmpty(entry.RawSimplified)) yield return entry.RawSimplified;
-        if (!string.IsNullOrEmpty(entry.RawTraditional)) yield return entry.RawTraditional;
+        var variants = new List<string> { entry.Raw };
+        if (!string.IsNullOrEmpty(entry.RawSimplified)) variants.Add(entry.RawSimplified);
+        if (!string.IsNullOrEmpty(entry.RawTraditional)) variants.Add(entry.RawTraditional);
+
+        // Ensure an entry never reports a "duplicate" against its own repeated variant
+        // (e.g. RawSimplified/RawTraditional falling back to the same text as Raw).
+        return variants.Distinct();
     }
 
     private static string FormatConflict(GlossaryLine baseEntry, GlossaryLine checkingEntry, string matchedVariant)

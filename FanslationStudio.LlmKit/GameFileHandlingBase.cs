@@ -4,9 +4,43 @@ using FanslationStudio.LlmKit.Utility;
 
 namespace FanslationStudio.LlmKit;
 
-public static class InputFileHandlingBase
+public static class GameFileHandlingBase
 {
-    public static async Task MergeFilesIntoTranslatedAsync(string workingDirectory, 
+    public static string CalculateVersionNumber() => DateTime.Now.ToString("yyyy.MM.dd.HH.mm");
+
+    public static void CopyDirectory(string sourceDir, string destDir, bool overwrite = false)
+    {
+        // Get the subdirectories for the specified directory.
+        var dir = new DirectoryInfo(sourceDir);
+
+        if (!dir.Exists)
+            throw new DirectoryNotFoundException($"Source directory does not exist or could not be found: {sourceDir}");
+
+        // If the destination directory doesn't exist, create it.
+        if (!Directory.Exists(destDir))
+            Directory.CreateDirectory(destDir);
+
+        // Get the files in the directory and copy them to the new location.
+        FileInfo[] files = dir.GetFiles();
+        foreach (FileInfo file in files)
+        {
+            var tempPath = Path.Combine(destDir, file.Name);
+            file.CopyTo(tempPath, overwrite);
+        }
+
+        // Copy each subdirectory using recursion
+        DirectoryInfo[] dirs = dir.GetDirectories();
+        foreach (DirectoryInfo subdir in dirs)
+        {
+            if (subdir.Name == ".git" || subdir.Name == ".vs")
+                continue;
+
+            var tempPath = Path.Combine(destDir, subdir.Name);
+            CopyDirectory(subdir.FullName, tempPath, overwrite);
+        }
+    }
+
+    public static async Task MergeFilesIntoTranslatedAsync(string workingDirectory,
         TextFileToSplit[] textFiles)
     {
         await FileIteration.IterateTranslatedFilesAsync(workingDirectory, textFiles, async (outputFile, textFileToTranslate, fileLines) =>
@@ -28,7 +62,9 @@ public static class InputFileHandlingBase
                 {
                     foreach (var split in line.Splits)
                     {
-                        var found2 = found.Splits.FirstOrDefault(x => x.Text == split.Text);
+                        var found2 = found.Splits.FirstOrDefault(x => x.Split == split.Split && x.SubIndex == split.SubIndex && x.Text == split.Text)
+                            ?? found.Splits.FirstOrDefault(x => x.Text == split.Text);
+
                         if (found2 != null)
                             split.Translated = found2.Translated;
                     }
@@ -39,8 +75,11 @@ public static class InputFileHandlingBase
                     foreach (var split in line.Splits)
                     {
                         var found2 = fileLines
-                            .Select(x => x.Splits.FirstOrDefault(s => s.Text == split.Text))
-                            .FirstOrDefault(s => s != null);
+                            .Select(x => x.Splits.FirstOrDefault(s => s.Split == split.Split && s.SubIndex == split.SubIndex && s.Text == split.Text))
+                            .FirstOrDefault(s => s != null)
+                            ?? fileLines
+                                .Select(x => x.Splits.FirstOrDefault(s => s.Text == split.Text))
+                                .FirstOrDefault(s => s != null);
 
                         if (found2 != null)
                             split.Translated = found2.Translated;
@@ -80,7 +119,7 @@ public static class InputFileHandlingBase
             if (lines.Count != convertedLines.Count)
                 badFiles.Add($"Bad File: {Path.GetFileName(file)} Export: {lines.Count} Converted: {convertedLines.Count} ");
         }
-        
+
         return badFiles;
     }
 }

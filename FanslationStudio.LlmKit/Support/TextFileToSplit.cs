@@ -43,4 +43,16 @@ public class TextFileToSplit
     public bool AllowMissingColorTags { get; set; } = true;
 
     public bool IgnoreHtmlTagsInText { get; set; } = false;
+
+    /// <summary>
+    /// Zero-based CSV column indices that should never be decomposed/translated for this file -
+    /// e.g. an icon/resource-path column that happens to contain CJK characters but is not
+    /// user-facing text. Skipped columns are left completely untouched (no
+    /// <see cref="TranslationSplit"/> or <see cref="FieldTemplate"/> is created for them at all),
+    /// so it doesn't matter whether the column's content would otherwise have decomposed into one
+    /// fragment or several sub-fragments - the column is never passed to
+    /// <c>CompoundFieldSplitter.Decompose</c> in the first place and is reconstructed verbatim
+    /// from the original raw CSV.
+    /// </summary>
+    public HashSet<int> SkipColumns { get; set; } = [];
 }

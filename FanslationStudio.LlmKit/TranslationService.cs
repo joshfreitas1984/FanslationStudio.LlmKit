@@ -279,6 +279,8 @@ public static class TranslationService
         var lastOriginalIndex = 0;
         var offset = 0;
 
+        var matchIndex = 99;
+
         foreach (var match in allMatches)
         {
             // Skip overlapping matches
@@ -293,7 +295,7 @@ public static class TranslationService
             if (!innerTrans.Valid && !config.SkipLineValidation)
                 return (true, string.Empty);
 
-            var quotedText = $"'{innerTrans.Result}'";
+            var quotedText = $"{matchIndex++}";
             bracketRestorations.Add((quotedText, openBracket, closeBracket));
 
             var adjustedIndex = match.Index + offset;

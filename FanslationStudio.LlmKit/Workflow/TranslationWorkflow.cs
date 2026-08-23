@@ -399,6 +399,16 @@ public static class TranslationWorkflow
             modified = true;
         }
 
+        foreach (var token in config.ExtraStringTokenReplacers)
+        {
+            if (split.Text.Contains(token) && !split.Translated.Contains(token))
+            {
+                logLines.Add($"Invalid {textFile.Path} Failures:Missing '{token}'\n{split.Translated}");
+                split.FlaggedForRetranslation = true;
+                modified = true;
+            }
+        }
+
         return modified;
     }
 

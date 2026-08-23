@@ -7,6 +7,13 @@ public class TranslationSplit
 {
     public int Split { get; set; } = 0;
 
+    /// <summary>
+    /// Index of this fragment within its CSV column when the column is a compound field that was
+    /// decomposed into multiple translatable fragments (see <see cref="FieldTemplate"/>). Zero for
+    /// plain columns where the whole cell is a single split, preserving old behavior/serialized data.
+    /// </summary>
+    public int SubIndex { get; set; } = 0;
+
     [YamlMember(ScalarStyle = ScalarStyle.DoubleQuoted)]
     public string Text { get; set; } = string.Empty;
 
@@ -32,6 +39,13 @@ public class TranslationSplit
     public TranslationSplit(int split, string text)
     {
         Split = split;
+        Text = text;
+    }
+
+    public TranslationSplit(int split, int subIndex, string text)
+    {
+        Split = split;
+        SubIndex = subIndex;
         Text = text;
     }
 

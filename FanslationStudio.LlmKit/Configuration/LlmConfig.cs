@@ -26,6 +26,7 @@ public class LlmConfig
 
     public List<string> SplitRegexPatterns { get; set; } = new();
     public List<string> SplitCharactersList { get; set; } = new();
+    public List<string> ExtraStringTokenReplacers { get; set; } = new();
 
     [YamlIgnore]
     public RuntimeValues Runtime { get; set; } = new();

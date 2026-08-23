@@ -16,6 +16,12 @@ public static class ConfigurationExtensions
         if (response.Models == null || response.Models.Count == 0)
             throw new InvalidOperationException("At least one model configuration must be provided in Config.yaml.");
 
+        // YamlDotNet deserializes keys with no items (e.g. all entries commented out) as null,
+        // overriding the property's default empty-list initializer. Guard against that here.
+        response.SplitRegexPatterns ??= new List<string>();
+        response.SplitCharactersList ??= new List<string>();
+        response.ExtraStringTokenReplacers ??= new List<string>();
+
         response.Runtime.WorkingDirectory = workingDirectory;
 
         // Load Manual Translations if exists
@@ -75,6 +81,8 @@ public static class ConfigurationExtensions
 
         foreach (var line in response.Runtime.ManualTranslations)
             line.Result = line.Result.Replace("-", "\u2011");
+
+        StringTokenReplacer.SetExtraTokens(response.ExtraStringTokenReplacers);
 
         return response;
     }

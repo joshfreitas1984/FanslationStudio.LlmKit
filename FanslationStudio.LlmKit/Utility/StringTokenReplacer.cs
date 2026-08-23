@@ -14,42 +14,22 @@ public class StringTokenReplacer
     private static readonly Regex NumericValueRegex = new(@"(?<![{<]|color=|<[^>]*)(?:[+-]?(?:\d+\.\d*|\.\d+|\d+))(?![}>])", RegexOptions.Compiled);   
     private static readonly Regex ColorStartRegex = new(@"<color=[^>]+>", RegexOptions.Compiled);
     private static readonly Regex KeyPressRegex = new(@"<\w+\s+>", RegexOptions.Compiled);
-    private static readonly Regex TokenRegex;
-    private static readonly Regex EmojiRegex;
-
     public static readonly Regex SizeRegex = new(@"<size=[^>]+>", RegexOptions.Compiled);
     public static readonly Regex SizeValueRegex = new(@"(?<=<size=)\d+", RegexOptions.Compiled);
     public static readonly Regex SizeValue2Regex = new(@"(?<=<size=#)\d+", RegexOptions.Compiled);
     public static readonly Regex SizeValueCurlyRegex = new Regex(@"\{size=(\d+)\}", RegexOptions.Compiled);
 
-    public static string[] otherTokens = ["{}"];
-    public static string[] EmojiItems = [
-        "[发现宝箱]",
-        "[石化]",
-        "[开心]",
-        "[不知所措]",
-        "[疑问]",
-        "[担忧]",
-        "[生气]",
-        "[哭泣]",
-        "[惊讶]",
-        "[发怒]",
-        "[抓狂]",
-        "[委屈]",
-    ];
-
     private Dictionary<int, string> placeholderMap = new();
     private Dictionary<string, string> colorMap = new();
     private Dictionary<string, string> sizeMap = new();
 
-    // Use Static constructor to make sure the regexes are only compiled once (otherwise very slow)
-    static StringTokenReplacer()
-    {
-        var tokenPattern = string.Join("|", otherTokens.Select(Regex.Escape));
-        TokenRegex = new Regex(tokenPattern, RegexOptions.Compiled);
+    private readonly List<string> extraStringTokenReplacer = new();
+    public static Regex ExtraTokenRegex;
 
-        var emojiPattern = string.Join("|", EmojiItems.Select(Regex.Escape));
-        EmojiRegex = new Regex(emojiPattern, RegexOptions.Compiled);
+    public static void SetExtraTokens(List<string> extraTokens)
+    {
+        var extraTokenPattern = string.Join("|", extraTokens.Select(Regex.Escape));
+        ExtraTokenRegex = new Regex(extraTokenPattern, RegexOptions.Compiled);
     }
 
     public static int CalculateNewSize(string sizeTag)
@@ -122,25 +102,20 @@ public class StringTokenReplacer
             return key;
         });
 
-     
-
         result.Replace(NumericValueRegex, match =>
         {
             placeholderMap.Add(index, match.Value);
             return $"{{{index++}}}";
-        });      
-
-        result.Replace(TokenRegex, match =>
-        {
-            placeholderMap.Add(index, match.Value);
-            return $"{{{index++}}}";
         });
 
-        result.Replace(EmojiRegex, match =>
+        if (extraStringTokenReplacer.Count > 0)
         {
-            placeholderMap.Add(index, match.Value);
-            return $"{{{index++}}}";
-        });
+            result.Replace(ExtraTokenRegex, match =>
+            {
+                placeholderMap.Add(index, match.Value);
+                return $"{{{index++}}}";
+            });
+        }
 
         return result.ToString();
     }
@@ -170,6 +145,7 @@ public class StringTokenReplacer
 
     public static string CleanTranslatedForApplyRules(string input)
     {
-        return EmojiRegex.Replace(input, "");
+        return input;
+        //return EmojiRegex.Replace(input, "");
     }
 }

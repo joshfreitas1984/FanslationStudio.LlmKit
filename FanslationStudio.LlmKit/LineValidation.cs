@@ -90,14 +90,14 @@ public static partial class LineValidation
             if (result.Contains('\"') && !raw.Contains('\"'))
                 result = result.Replace("\"", "");
 
-            if (!StringTokenReplacer.EmojiItems.Any(phrase => result.IndexOf(phrase, StringComparison.OrdinalIgnoreCase) >= 0))
-            {
-                if (result.Contains('[') && !raw.Contains('['))
-                    result = result.Replace("[", "");
+            //if (!StringTokenReplacer.EmojiItems.Any(phrase => result.IndexOf(phrase, StringComparison.OrdinalIgnoreCase) >= 0))
+            //{
+                //if (result.Contains('[') && !raw.Contains('['))
+                //    result = result.Replace("[", "");
 
-                if (result.Contains(']') && !raw.Contains(']'))
-                    result = result.Replace("]", "");
-            }
+                //if (result.Contains(']') && !raw.Contains(']'))
+                //    result = result.Replace("]", "");
+            //}
 
             if (result.Contains('`') && !raw.Contains('`'))
                 result = result.Replace("`", "'");

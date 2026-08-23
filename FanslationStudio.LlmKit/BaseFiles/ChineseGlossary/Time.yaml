@@ -26,68 +26,80 @@
   result: Hour of Zi
   direct: 11:00 PM - 1:00 AM
   literal: zi shi
+  badtrans: false
 - raw: 丑时
   rawSimplified: 丑时
   rawTraditional: 丑時
   result: Hour of Chou
   direct: 1:00 AM - 3:00 AM
   literal: chou shi
+  badtrans: false
 - raw: 寅时
   rawSimplified: 寅时
   rawTraditional: 寅時
   result: Hour of Yin
   direct: 3:00 AM - 5:00 AM
   literal: yin shi
+  badtrans: false
 - raw: 卯时
   rawSimplified: 卯时
   rawTraditional: 卯時
   result: Hour of Mao
   direct: 5:00 AM - 7:00 AM
   literal: mao shi
+  badtrans: false
 - raw: 辰时
   rawSimplified: 辰时
   rawTraditional: 辰時
   result: Hour of Chen
   direct: 7:00 AM - 9:00 AM
   literal: chen shi
+  badtrans: false
 - raw: 巳时
   rawSimplified: 巳时
   rawTraditional: 巳時
   result: Hour of Si
   direct: 9:00 AM - 11:00 AM
   literal: si shi
+  badtrans: false
 - raw: 午时
   rawSimplified: 午时
   rawTraditional: 午時
   result: Hour of Wu
   direct: 11:00 AM - 1:00 PM
+  badtrans: false
 - raw: 未时
   rawSimplified: 未时
   rawTraditional: 未時
   result: Hour of Wei
   direct: 1:00 PM - 3:00 PM
   literal: wei shi
+  badtrans: false
 - raw: 申时
   rawSimplified: 申时
   rawTraditional: 申時
   result: Hour of Shen
   direct: 3:00 PM - 5:00 PM
   literal: shen shi
+  badtrans: false
 - raw: 酉时
   rawSimplified: 酉时
   rawTraditional: 酉時
   result: Hour of You
   direct: 5:00 PM - 7:00 PM
   literal: you shi
+  badtrans: false
 - raw: 戌时
   rawSimplified: 戌时
   rawTraditional: 戌時
   result: Hour of Xu
   direct: 7:00 PM - 9:00 PM
   literal: xu shi
+  badtrans: false
 - raw: 亥时
   rawSimplified: 亥时
   rawTraditional: 亥時
   result: Hour of Hai
   direct: 9:00 PM - 11:00 PM
   literal: hai shi
+  badtrans: false

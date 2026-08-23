@@ -39,7 +39,7 @@ public class DefaultExcludingTypeInspector : TypeInspectorSkeleton
 
     public override string GetEnumName(Type enumType, string name)
     {
-       return _innerTypeInspector.GetEnumName(enumType, name);
+        return _innerTypeInspector.GetEnumName(enumType, name);
     }
 
     public override string GetEnumValue(object enumValue)
@@ -83,13 +83,30 @@ public class DefaultExcludingTypeInspector : TypeInspectorSkeleton
             var currentValue = property.Read(container!);
 
             // Only include properties with values different from default
-            if (!Equals(currentValue.Value, defaultValue.Value))
+            if (!ValuesAreEqual(currentValue.Value, defaultValue.Value))
             {
                 filteredProperties.Add(property);
             }
         }
 
         return filteredProperties;
+    }
+
+    private static bool ValuesAreEqual(object? current, object? defaultVal)
+    {
+        // Collections (e.g. List<T>) don't override Equals, so two distinct-but-empty instances
+        // would otherwise always be considered "different" and get serialized (e.g. "templates: []"
+        // noise on every line even when nothing was ever added to it). Treat two empty collections
+        // as equal to the default so they're omitted, same as any other unset/default field.
+        if (current is System.Collections.ICollection currentCollection
+            && defaultVal is System.Collections.ICollection defaultCollection
+            && currentCollection.Count == 0
+            && defaultCollection.Count == 0)
+        {
+            return true;
+        }
+
+        return Equals(current, defaultVal);
     }
 
     private bool HasDefaultConstructor(Type type)
