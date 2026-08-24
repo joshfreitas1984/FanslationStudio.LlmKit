@@ -306,7 +306,7 @@ public static class TranslationWorkflow
             if (split.Translated != manual.Result)
             {
                 logLines.Add($"Manually Translated {textFile.Path} \n{split.Text}\n{split.Translated}");
-                split.Translated = LineValidation.CleanupLineBeforeSaving(LineValidation.PrepareResult(preparedRaw, manual.Result), split.Text, textFile, new StringTokenReplacer());
+                split.Translated = LineValidation.CleanupLineBeforeSaving(LineValidation.PrepareResult(preparedRaw, manual.Result, textFile, split.Split), split.Text, textFile, new StringTokenReplacer());
                 split.ResetFlags();
                 return true;
             }
@@ -391,7 +391,7 @@ public static class TranslationWorkflow
 
         // Remove Invalid ones -- Have to use pure raw because translated is untokenised
         var translated2 = StringTokenReplacer.CleanTranslatedForApplyRules(split.Translated);
-        var result = LineValidation.CheckTransalationSuccessful(modelConfig, split.Text, translated2, textFile);
+        var result = LineValidation.CheckTransalationSuccessful(modelConfig, split.Text, translated2, textFile, split.Split);
         if (!result.Valid)
         {
             logLines.Add($"Invalid {textFile.Path} Failures:{result.CorrectionPrompt}\n{split.Translated}");
@@ -532,7 +532,7 @@ public static class TranslationWorkflow
         var config = ConfigurationExtensions.GetConfiguration(workingDirectory);
         var serializer = YamlHelper.CreateSerializer();
 
-        await FileIteration.IterateTranslatedFilesInParallelAsync(workingDirectory, 
+        await FileIteration.IterateTranslatedFilesInParallelAsync(workingDirectory,
             textFiles,
             async (outputFile, textFileToTranslate, fileLines) =>
         {
@@ -545,14 +545,14 @@ public static class TranslationWorkflow
         });
     }
 
-    public static async Task SetSplitAsInvalid(string workingDirectory, 
+    public static async Task SetSplitAsInvalid(string workingDirectory,
         TextFileToSplit[] textFiles,
         List<string> badStrings)
     {
         var config = ConfigurationExtensions.GetConfiguration(workingDirectory);
         var serializer = YamlHelper.CreateSerializer();
 
-        await FileIteration.IterateTranslatedFilesInParallelAsync(workingDirectory, 
+        await FileIteration.IterateTranslatedFilesInParallelAsync(workingDirectory,
             textFiles,
             async (outputFile, textFileToTranslate, fileLines) =>
         {
@@ -580,7 +580,7 @@ public static class TranslationWorkflow
     {
         var serializer = YamlHelper.CreateSerializer();
 
-        await FileIteration.IterateTranslatedFilesInParallelAsync(workingDirectory, 
+        await FileIteration.IterateTranslatedFilesInParallelAsync(workingDirectory,
             textFiles,
             async (outputFile, textFileToTranslate, fileLines) =>
         {

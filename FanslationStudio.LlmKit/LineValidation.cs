@@ -91,7 +91,47 @@ public static partial class LineValidation
     /// </summary>
     public static Func<string, string, string>? CustomPostRepair { get; set; }
 
-    public static string PrepareResult(string raw, string llmResult)
+    /// <summary>
+    /// Optional caller-supplied hook invoked at the very end of <see cref="CheckTransalationSuccessful"/>,
+    /// only when every built-in check above has already passed. Lets a game-specific project (e.g.
+    /// Tests/GameFileHandling.cs) add validation rules that only make sense for one specific column
+    /// of one specific file - e.g. PlotData.csv's column 9 ("选项"/Choice) is a compound field
+    /// ('|'-separated choice options, each further ';'-separated by
+    /// <see cref="Utility.CompoundFieldSplitter"/> into literal template text) where an LLM
+    /// bleeding a stray '|' into a translated fragment would silently desync
+    /// GameDataController.SetChoiceDataTexts's indexing - but a plain "'|' appeared in the
+    /// translation" rule would be wrong to apply file-wide/globally, since other columns (or other
+    /// games entirely) may have '|' appear legitimately in natural translated text.
+    /// Receives (textFile, column, raw, result) - column is the zero-based CSV column index the
+    /// fragment came from when known (see <see cref="Support.TranslationSplit.Split"/>), or null
+    /// when validation is running outside a column context (e.g. direct unit tests). Return null
+    /// when the hook finds nothing wrong; return a non-null correction-prompt-style reason string
+    /// to flag the result as invalid and feed that reason back into the retry/correction loop, same
+    /// as the built-in checks above. Left null (no-op) unless a caller opts in; this is
+    /// intentionally left game-agnostic here in the shared library, same as
+    /// <see cref="CustomPostRepair"/> and <see cref="Utility.CompoundFieldSplitterOptions.PlaceholderPatterns"/>.
+    /// </summary>
+    public static Func<TextFileToSplit, int?, string, string, string?>? CustomColumnValidator { get; set; }
+
+    /// <summary>
+    /// Optional caller-supplied hook invoked at the end of <see cref="PrepareResult"/>, before
+    /// <see cref="CustomColumnValidator"/>/<see cref="CheckTransalationSuccessful"/> ever run. Lets
+    /// a game-specific project deterministically strip/repair characters that can NEVER legitimately
+    /// appear in a translated fragment for one specific file+column - e.g. PlotData.csv's column 9
+    /// choice-option fragments are always a single isolated Chinese run with no '|'/';' in the raw
+    /// text at all (those are structural separators <see cref="Utility.CompoundFieldSplitter"/>
+    /// deliberately never absorbs into a fragment), so any '|'/';' present in the *translated*
+    /// fragment is unambiguously an LLM artifact and can be stripped outright rather than merely
+    /// detected-and-retried via <see cref="CustomColumnValidator"/>. This prevents the structural
+    /// corruption at the source instead of relying on a retry loop to eventually avoid it.
+    /// Receives (textFile, column, raw, result) with the same semantics as
+    /// <see cref="CustomColumnValidator"/>, and must return the (possibly repaired) result. Left
+    /// null (no-op) unless a caller opts in; intentionally left game-agnostic here in the shared
+    /// library, same as <see cref="CustomPostRepair"/>.
+    /// </summary>
+    public static Func<TextFileToSplit?, int?, string, string, string>? CustomColumnRepair { get; set; }
+
+    public static string PrepareResult(string raw, string llmResult, TextFileToSplit? textFile = null, int? column = null)
     {
         // Fix up anything we know the LLM has messed up but can autocorrect before validation
 
@@ -105,6 +145,9 @@ public static partial class LineValidation
 
         if (CustomPostRepair != null)
             result = CustomPostRepair(raw, result);
+
+        if (CustomColumnRepair != null)
+            result = CustomColumnRepair(textFile, column, raw, result);
 
         return result;
     }
@@ -248,7 +291,7 @@ public static partial class LineValidation
         return result;
     }
 
-    public static ValidationResult CheckTransalationSuccessful(ModelExecutionConfig config, string raw, string result, TextFileToSplit textFile)
+    public static ValidationResult CheckTransalationSuccessful(ModelExecutionConfig config, string raw, string result, TextFileToSplit textFile, int? column = null)
     {
         var response = true;
         var correctionPrompts = new StringBuilder();
@@ -462,6 +505,16 @@ public static partial class LineValidation
                 || (raw.Length == 2 && result.Length > 12)
                 || (raw.Length == 3 && result.Length > 17))
                 response = false;
+        }
+
+        if (CustomColumnValidator != null)
+        {
+            var customFailureReason = CustomColumnValidator(textFile, column, raw, result);
+            if (customFailureReason != null)
+            {
+                response = false;
+                correctionPrompts.AddPromptWithValues(config, "CorrectAdditionalPrompt", customFailureReason);
+            }
         }
 
         return new ValidationResult

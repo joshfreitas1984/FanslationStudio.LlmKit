@@ -227,7 +227,7 @@ public static class TranslationService
                             split.Translated = translationCache[split.Text];
                         else
                         {
-                            var result = await TranslateSplitAsync(config, split.Text, client, textFileToTranslate);
+                            var result = await TranslateSplitAsync(config, split.Text, client, textFileToTranslate, column: split.Split);
                             split.Translated = result.Valid ? result.Result : string.Empty;
                         }
 
@@ -432,7 +432,7 @@ public static class TranslationService
                     split.Translated = translationCache[split.Text];
                 else
                 {
-                    var result = await TranslateSplitAsync(config, split.Text, client, file.TextFile);
+                    var result = await TranslateSplitAsync(config, split.Text, client, file.TextFile, column: split.Split);
                     split.Translated = result.Valid ? result.Result : string.Empty;
 
                     if (!result.Valid)
@@ -596,12 +596,12 @@ public static class TranslationService
     /// performance bug in an earlier version of this method.
     /// </summary>
     private static async Task<ValidationResult[]> TranslatePiecesWithRetryAsync(IReadOnlyList<string> pieces,
-        LlmConfig config, HttpClient client, TextFileToSplit textFile)
+        LlmConfig config, HttpClient client, TextFileToSplit textFile, int? column = null)
     {
-        return await Task.WhenAll(pieces.Select(piece => TranslateSplitAsync(config, piece, client, textFile)));
+        return await Task.WhenAll(pieces.Select(piece => TranslateSplitAsync(config, piece, client, textFile, column: column)));
     }
 
-    public static async Task<(bool split, string result)> SplitOnCharsIfNeededAsync(string splitCharacters, LlmConfig config, string raw, HttpClient client, TextFileToSplit textFile)
+    public static async Task<(bool split, string result)> SplitOnCharsIfNeededAsync(string splitCharacters, LlmConfig config, string raw, HttpClient client, TextFileToSplit textFile, int? column = null)
     {
         if (raw.Contains(splitCharacters))
         {
@@ -619,7 +619,7 @@ public static class TranslationService
             // Pieces are independent of each other - translate them concurrently, and retry only
             // the pieces that fail validation instead of discarding the whole cell the first time
             // any single piece fails. Order is preserved throughout.
-            var translations = await TranslatePiecesWithRetryAsync(splits, config, client, textFile);
+            var translations = await TranslatePiecesWithRetryAsync(splits, config, client, textFile, column);
 
             // If any piece still fails after retries, we have to kill the lot
             if (translations.Any(t => !t.Valid) && !config.SkipLineValidation)
@@ -643,7 +643,8 @@ public static class TranslationService
 
     public static async Task<(bool split, string result)> SplitBracketsRegexIfNeededAsync(LlmConfig config,
         string raw, HttpClient client,
-        TextFileToSplit textFile)
+        TextFileToSplit textFile,
+        int? column = null)
     {
         // Collect all matches across all patterns and sort by position so multiple bracket types in
         // the same string are all handled in a single pass (e.g. "天竺国《无量寿经》【副本】4000钱")
@@ -672,7 +673,7 @@ public static class TranslationService
         // concurrently, with failed pieces retried without discarding pieces that already
         // succeeded).
         var innerTranslations = await TranslatePiecesWithRetryAsync(
-            nonOverlappingMatches.Select(match => match.Value[1..^1]).ToList(), config, client, textFile);
+            nonOverlappingMatches.Select(match => match.Value[1..^1]).ToList(), config, client, textFile, column);
 
         if (innerTranslations.Any(t => !t.Valid) && !config.SkipLineValidation)
             return (true, string.Empty);
@@ -704,7 +705,7 @@ public static class TranslationService
         // already retries internally (up to RetryCount whole-cell attempts, plus up to RetryCount
         // sentence-correction attempts) before returning, so retrying its result again here would
         // square the worst-case call count instead of adding to it.
-        var fullTrans = await TranslateSplitAsync(config, template, client, textFile);
+        var fullTrans = await TranslateSplitAsync(config, template, client, textFile, column: column);
 
         if (!fullTrans.Valid && !config.SkipLineValidation)
             return (true, string.Empty);
@@ -740,7 +741,8 @@ public static class TranslationService
         string? raw,
         HttpClient client,
         TextFileToSplit textFile,
-        string additionalPrompts = "")
+        string additionalPrompts = "",
+        int? column = null)
     {
         if (string.IsNullOrEmpty(raw))
             return new ValidationResult(true, string.Empty); //Is ok because raw was empty
@@ -766,14 +768,14 @@ public static class TranslationService
         if (!Regex.IsMatch(preparedRaw, pattern))
             return new ValidationResult(true, LineValidation.CleanupLineBeforeSaving(preparedRaw, preparedRaw, textFile, tokenReplacer));
 
-        var (regexSplit, regexResult) = await SplitBracketsRegexIfNeededAsync(config, raw, client, textFile);
+        var (regexSplit, regexResult) = await SplitBracketsRegexIfNeededAsync(config, raw, client, textFile, column);
         if (regexSplit)
             return new ValidationResult(LineValidation.CleanupLineBeforeSaving(regexResult, preparedRaw, textFile, tokenReplacer));
 
         // We do segementation here since saves context window by splitting // "。" doesnt work like u think it would        
         foreach (var splitCharacters in config.SplitCharactersList)
         {
-            var (split, result) = await SplitOnCharsIfNeededAsync(splitCharacters, config, preparedRaw, client, textFile);
+            var (split, result) = await SplitOnCharsIfNeededAsync(splitCharacters, config, preparedRaw, client, textFile, column);
 
             // Because its recursive we want to bail out on the first successful one
             if (split)
@@ -782,8 +784,8 @@ public static class TranslationService
 
         if (ColorTagHelpers.StartsWithHalfColorTag(preparedRaw, out string start, out string end))
         {
-            var startResult = await TranslateSplitAsync(config, start, client, textFile);
-            var endResult = await TranslateSplitAsync(config, end, client, textFile);
+            var startResult = await TranslateSplitAsync(config, start, client, textFile, column: column);
+            var endResult = await TranslateSplitAsync(config, end, client, textFile, column: column);
             var combinedResult = $"{startResult.Result}{endResult.Result}";
 
             if (!config.SkipLineValidation && (!startResult.Valid || !endResult.Valid))
@@ -796,7 +798,7 @@ public static class TranslationService
         {
             var leadingMark = preparedRaw[0];
             var remainder = preparedRaw[1..];
-            var remainderResult = await TranslateSplitAsync(config, remainder, client, textFile);
+            var remainderResult = await TranslateSplitAsync(config, remainder, client, textFile, column: column);
 
             if (!config.SkipLineValidation && !remainderResult.Valid)
                 return new ValidationResult(false, string.Empty);
@@ -870,8 +872,8 @@ public static class TranslationService
                 }
 
                 var llmResult = await TranslateMessagesAsync(client, config, executingModel, messages);
-                preparedResult = LineValidation.PrepareResult(preparedRaw, llmResult);
-                validationResult = LineValidation.CheckTransalationSuccessful(executingModel, preparedRaw, preparedResult, textFile);
+                preparedResult = LineValidation.PrepareResult(preparedRaw, llmResult, textFile, column);
+                validationResult = LineValidation.CheckTransalationSuccessful(executingModel, preparedRaw, preparedResult, textFile, column);
                 validationResult.Result = LineValidation.CleanupLineBeforeSaving(validationResult.Result, preparedRaw, textFile, tokenReplacer);
 
                 if (config.SkipLineValidation)
@@ -899,8 +901,8 @@ public static class TranslationService
                                 Interlocked.Increment(ref _retryAttemptCounter);
 
                             correctedResult = await CorrectSentenceBySentenceAsync(client, config, executingModel, preparedRaw, correctedResult, textFile);
-                            preparedResult = LineValidation.PrepareResult(preparedRaw, correctedResult);
-                            validationResult = LineValidation.CheckTransalationSuccessful(executingModel, preparedRaw, preparedResult, textFile);
+                            preparedResult = LineValidation.PrepareResult(preparedRaw, correctedResult, textFile, column);
+                            validationResult = LineValidation.CheckTransalationSuccessful(executingModel, preparedRaw, preparedResult, textFile, column);
                             validationResult.Result = LineValidation.CleanupLineBeforeSaving(validationResult.Result, preparedRaw, textFile, tokenReplacer);
 
                             if (config.SkipLineValidation)
