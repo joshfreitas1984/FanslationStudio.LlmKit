@@ -191,6 +191,8 @@
   rawSimplified: 内功
   rawTraditional: 內功
   result: Neigong
+  allowalt:
+    - Internal Skill
   context: Neigong refers to the practice of cultivating internal energy through breathing techniques, meditation, and specialized training. It enhances endurance, strength, and resilience. Examples include Qi cultivation and techniques like Taichi or Qigong.
 - raw: 外功
   result: External Skill

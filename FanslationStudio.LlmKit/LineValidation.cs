@@ -16,8 +16,11 @@ public static partial class LineValidation
     // Compiled / source-generated regexes — one instance shared across all calls
     public static Regex ChineseCharPatternCompiled => ChineseCharRegex();
 
+    // LLM meta-commentary/instruction-leak signatures - the model narrating its own
+    // translation process instead of just returning the translation   
     private static readonly string[] InvalidPhrases =
     [
+        "etc.",
         "provide the text",
         "Certainly! Please provide the Chinese",
         "Certainly! Please provide the specific Chinese",
@@ -32,6 +35,12 @@ public static partial class LineValidation
         "'''",
         "<p", "</p", "<em", "</em", "<|", "<strong", "</strong",
         "\\U",
+        "cultural nuance",
+        "gender‑neutral language",
+        "gender-neutral language",
+        "Output only the",
+        "the translation remains",
+        "fully corrected English translation",
     ];
 
     private static readonly (string raw, string trans)[] CheckForRemoval = [];
@@ -201,6 +210,8 @@ public static partial class LineValidation
             result = ReplaceIncorrectLowercaseWords(result);
             result = EncaseColorsForWholeLines(raw, result);
             result = EncaseSquareBracketsForWholeLines(raw, result);
+            result = FixUnbalancedParentheses(raw, result);
+            result = FixUnbalancedQuotes(raw, result);
 
             if (string.IsNullOrEmpty(result))
             {
@@ -373,10 +384,24 @@ public static partial class LineValidation
 
         if (result.Contains('\n') && !raw.Contains('\n'))
         {
-            //response = false;
-            //correctionPrompts.AddPromptWithValues(config, "CorrectAdditionalPrompt", "\\n");
+            // A genuine embedded newline (as opposed to the literal two-char "\n" escape used
+            // throughout these CSVs) is a strong signal the model duplicated/self-corrected
+            // mid-response (e.g. "Wan, extremely sorry!\nExtremely sorry!\n...") rather than a
+            // deliberate paragraph break - replacing it with a space alone would just cosmetically
+            // join the duplicated text instead of fixing it, and it also breaks CSV column counts
+            // once written out. Flag as invalid so it gets retried instead of silently patched.
+            response = false;
+            correctionPrompts.AddPromptWithValues(config, "CorrectAdditionalPrompt", "\\n");
+        }
 
-            result = result.Replace("\n", " ");
+        if (result.Contains('\r') && !raw.Contains('\r'))
+        {
+            // Same duplication/self-correction signal as the embedded '\n' check above (e.g.
+            // "Wan, extremely sorry! \r Extremely sorry!") - a genuine carriage return character
+            // has no business appearing in these single-line CSV values, so flag as invalid and
+            // retry rather than silently squashing the duplicated text into one line.
+            response = false;
+            correctionPrompts.AddPromptWithValues(config, "CorrectAdditionalPrompt", "\\r");
         }
 
         if (ChineseCharRegex().IsMatch(result) && !ChinesePlaceholderRegex().IsMatch(result))
@@ -489,6 +514,109 @@ public static partial class LineValidation
         }
 
         return translated;
+    }
+
+    /// <summary>
+    /// A raw cell that only contains one side of a parenthetical (e.g. "（卓远望...离去，" - an
+    /// opening "（" with no closing "）") means the parenthetical aside continues in a different
+    /// cell/row of the same conversation rather than being unbalanced/malformed in the source data.
+    /// Two symmetric failure modes have been observed: the model "helpfully" closes the bracket it
+    /// opened (or opens one to match a closing bracket it's translating) even though nothing in the
+    /// raw asked it to, producing a self-contained, balanced-looking "(...)"; or the model drops
+    /// the dangling bracket character entirely, losing the marker altogether. Either way, the
+    /// translated output should end up with exactly the same one-sided bracket the raw has - no
+    /// spuriously added counterpart, and the original marker preserved if the model dropped it.
+    /// </summary>
+    public static string FixUnbalancedParentheses(string raw, string result)
+    {
+        if (string.IsNullOrEmpty(result))
+            return result;
+
+        var rawHasOpen = raw.Contains('(') || raw.Contains('（');
+        var rawHasClose = raw.Contains(')') || raw.Contains('）');
+
+        // Balanced (or absent) in raw - nothing to reconcile.
+        if (rawHasOpen == rawHasClose)
+            return result;
+
+        if (rawHasOpen && !rawHasClose)
+        {
+            // Raw only opens a parenthetical (it closes in a later cell) - remove any closing
+            // paren the model added on its own since there's nothing here for it to close.
+            if (result.Contains(')'))
+                result = result.Remove(result.LastIndexOf(')'), 1);
+
+            // Make sure the dangling opening paren itself survived translation.
+            if (!result.Contains('('))
+                result = $"({result}";
+        }
+        else if (rawHasClose && !rawHasOpen)
+        {
+            // Raw only closes a parenthetical (it opened in an earlier cell) - remove any
+            // opening paren the model added on its own.
+            if (result.Contains('('))
+                result = result.Remove(result.IndexOf('('), 1);
+
+            // Make sure the dangling closing paren itself survived translation.
+            if (!result.Contains(')'))
+                result = $"{result})";
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Same one-sided-continues-in-another-cell problem as <see cref="FixUnbalancedParentheses"/>,
+    /// but for the game's quote/title markers - raw uses "“"/"”" for quoted speech and
+    /// "《"/"》" for work/technique titles, and both consistently get translated to a plain
+    /// single-quote pair (e.g. raw "《合盘掌》" -&gt; translated "'He Pan Palm'"), so a raw cell with
+    /// only one side of either pair means the model shouldn't have produced a self-contained
+    /// 'balanced' quote in the translation. As with parentheses, two symmetric failure modes have
+    /// been observed: the model adds a spurious matching quote at the other end, or it drops the
+    /// dangling quote marker entirely. Unlike parentheses, ASCII "'" is ambiguous with
+    /// contraction/possessive apostrophes ("don't", "it's"), so a candidate quote mark only counts
+    /// as a genuine boundary quote when it doesn't have letters on both sides.
+    /// </summary>
+    public static string FixUnbalancedQuotes(string raw, string result)
+    {
+        if (string.IsNullOrEmpty(result))
+            return result;
+
+        var rawHasOpen = raw.Contains('“') || raw.Contains('《');
+        var rawHasClose = raw.Contains('”') || raw.Contains('》');
+
+        // Balanced (or absent) in raw - nothing to reconcile.
+        if (rawHasOpen == rawHasClose)
+            return result;
+
+        bool IsBoundaryQuote(int i) =>
+            result[i] == '\''
+            && !(i > 0 && char.IsLetter(result[i - 1]) && i < result.Length - 1 && char.IsLetter(result[i + 1]));
+
+        if (rawHasOpen && !rawHasClose)
+        {
+            // Dangling open marker (closes in a later cell) - remove a spuriously added closing
+            // quote at the end, since nothing here should close.
+            if (result.Length > 0 && IsBoundaryQuote(result.Length - 1))
+                result = result[..^1];
+
+            // Make sure the dangling opening quote itself survived translation.
+            if (result.Length == 0 || !IsBoundaryQuote(0))
+                result = $"'{result}";
+        }
+        else if (rawHasClose && !rawHasOpen)
+        {
+            // Dangling close marker (opened in an earlier cell) - remove a spuriously added
+            // opening quote at the start.
+            if (result.Length > 0 && IsBoundaryQuote(0))
+                result = result[1..];
+
+            // Make sure the dangling closing quote itself survived translation.
+            if (result.Length == 0 || !IsBoundaryQuote(result.Length - 1))
+                result = $"{result}'";
+        }
+
+        return result;
     }
 
     public static string RemoveDiacritics(string text)

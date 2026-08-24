@@ -2,6 +2,7 @@
 - raw: 小二
   result: Waiter
   direct: Little Two
+  badtrans: false
   literal: Xiao Er
 - raw: 丹师
   rawSimplified: 丹师
@@ -408,6 +409,9 @@
   rawSimplified: 副帮主
   rawTraditional: 副幫主
   result: Deputy Leader
+  allowalt:
+    - Deputy Sect Leader
+    - Deputy Gang Leader
 - raw: 锅头
   rawSimplified: 锅头
   rawTraditional: 鍋頭
