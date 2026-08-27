@@ -185,8 +185,30 @@ public static partial class CompoundFieldSplitter
         if (string.IsNullOrEmpty(cell))
             return (cell, fragments);
 
+        // Escape any literal '{'/'}' already present in the cell - e.g. this game's own
+        // String.Format placeholders (like "{0}年{1}月{2}日" or "{0}存档成功！") surviving
+        // verbatim in a DynamicStringsIL2CPP dump line - to '⟦'/'⟧' (U+27E6/U+27E7, "mathematical
+        // white square brackets") before generating our own "{n}" fragment placeholders below.
+        // Without this, a literal "{0}" already in the source text is byte-for-byte
+        // indistinguishable from a synthesized fragment placeholder once both land in the same
+        // template string, so Reconstruct's per-index string.Replace($"{{{i}}}", ...) stomps the
+        // literal occurrence too (or vice versa) - confirmed to turn "{0}年{1}月{2}日" into
+        // "年年月月日日" and "{0}存档成功！" into a duplicated "存档成功！存档成功！". (Doubling the
+        // ASCII braces instead, e.g. "{0}" -> "{{0}}", does NOT work - "{{0}}" still *contains*
+        // the literal substring "{0}", so Reconstruct's plain substring replace would still
+        // corrupt it. Fullwidth brace lookalikes, e.g. '｛'/'｝', don't work either - they fall
+        // inside \p{IsHalfwidthandFullwidthForms}, which TranslatableRunRegex/BuildRunRegexForOptions
+        // below deliberately absorb into CJK runs, so they'd get swallowed into the fragment text
+        // itself instead of staying a literal boundary marker.) '⟦'/'⟧' sit outside every Unicode
+        // block CjkTextChars absorbs, stay visually obvious as "this used to be a brace" in
+        // exported YAML (unlike an invisible sentinel character), and can never collide with an
+        // ASCII "{n}" placeholder search since they're entirely different code points - they're
+        // restored to real ASCII braces by <see cref="Reconstruct"/> only after fragment
+        // substitution has happened.
+        var escapedCell = cell.Replace("{", "⟦").Replace("}", "⟧");
+
         var runRegex = GetTranslatableRunRegex(options ?? CompoundFieldSplitterOptions.Default);
-        var rawTemplate = runRegex.Replace(cell, match =>
+        var rawTemplate = runRegex.Replace(escapedCell, match =>
         {
             if (!ChineseCharRegex().IsMatch(match.Value))
                 return match.Value; // pure digits/decimal point run - not translatable, leave as-is
@@ -198,6 +220,8 @@ public static partial class CompoundFieldSplitter
 
         return MergeAdjacentFragments(rawTemplate, fragments);
     }
+
+
 
     /// <summary>
     /// Merges fragments that end up directly touching in the template with an empty literal gap
@@ -304,12 +328,18 @@ public static partial class CompoundFieldSplitter
     public static string Reconstruct(string template, IReadOnlyList<string> translatedFragments)
     {
         if (translatedFragments.Count == 0)
-            return template;
+            return UnescapeBraces(template);
 
         var result = template;
         for (int i = 0; i < translatedFragments.Count; i++)
             result = result.Replace($"{{{i}}}", translatedFragments[i]);
 
-        return result;
+        return UnescapeBraces(result);
     }
+
+    // Reverses the '⟦'/'⟧' escaping Decompose applies to literal '{'/'}' characters, restoring
+    // the original ASCII braces now that fragment placeholder substitution is done and there's no
+    // more risk of confusing the two.
+    private static string UnescapeBraces(string s) =>
+        s.Replace("⟦", "{").Replace("⟧", "}");
 }

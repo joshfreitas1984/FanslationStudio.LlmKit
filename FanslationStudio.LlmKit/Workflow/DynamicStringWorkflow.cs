@@ -4,41 +4,48 @@ using FanslationStudio.LlmKit.Utility;
 namespace FanslationStudio.LlmKit.Workflow;
 
 /// <summary>
-/// Standard, game-agnostic handling for <see cref="TextFileType.PrefabText"/> files - hardcoded
-/// UI/prefab text baked directly into MonoBehaviour/TMP_Text components rather than a game-data
-/// CSV (see the consuming project's asset-dumping test, e.g. DragonHeirOverLlm's
-/// AssetDumperWorkflowTests, which produces the plain "one distinct string per line" input file
-/// this reads). Each line is decomposed via <see cref="CompoundFieldSplitter.Decompose"/> exactly
-/// like a RegularDb CSV cell (the line is treated as the file's only "column", index 0) - a line
-/// with a single Chinese run spanning its whole length still gets recorded as one plain whole-line
-/// TranslationSplit with no template, but a line packing multiple Chinese runs together with
-/// structural separators/placeholders gets a FieldTemplate + per-fragment TranslationSplits just
-/// like a compound CSV column would.
+/// Standard, game-agnostic handling for <see cref="TextFileType.DynamicStringsIL2CPP"/> files -
+/// hardcoded, runtime-assembled string literal fragments baked directly into IL2CPP game code
+/// (e.g. a String.Concat/String.Format call mixing a Chinese literal like "架势" with data such as
+/// a save-slot's task text), discovered by manually inspecting the consuming project's decompiled
+/// output (see DragonHeirOverLlm's Converter/README.md and
+/// ".github/instructions/dragonheirplugin.instructions.md"'s "dynamic/hardcoded in-code string
+/// translation plan") rather than by an automated runtime/offline asset scan like
+/// <see cref="PrefabTextWorkflow"/> uses - IL2CPP dummy assemblies have no real IL bodies for a
+/// Cecil-based scan to find, so the dump input file here is hand-curated, not machine-generated.
+///
+/// Mechanically this mirrors <see cref="PrefabTextWorkflow"/> almost exactly (flat list of
+/// distinct raw strings -&gt; standard Export/Converted/translate pipeline -&gt; flat raw/result
+/// YAML) - kept as a separate type rather than reusing PrefabTextWorkflow directly because the
+/// runtime consumption model differs: a PrefabText result is looked up by an exact *whole-string*
+/// match against a UI component's full text, whereas a DynamicStringsIL2CPP result is applied as
+/// an exact *substring* replacement against a small hardcoded fragment of a larger, otherwise
+/// data-driven runtime string (see DragonHeirPlugin/DynamicStringPatches.cs) - keeping the two
+/// TextFileType/Workflow pairs distinct avoids conflating those two different semantics even
+/// though the underlying Export/Package mechanics are identical.
 /// </summary>
-public static class PrefabTextWorkflow
+public static class DynamicStringWorkflow
 {
     /// <summary>
-    /// Reads a plain-text file (one distinct string per line, blank lines ignored) from
-    /// Raw/Dumped/PrefabText/{textFile.Path} and produces the same TranslationLine YAML shape the
-    /// CSV export path uses, so it flows through the existing Converted/merge/translate pipeline
-    /// (GameFileHandlingBase.MergeFilesIntoTranslatedAsync, Workflow/TranslationWorkflow.cs, etc.)
-    /// completely unchanged.
-    ///
-    /// Each line is run through <see cref="CompoundFieldSplitter.Decompose"/> exactly like a
-    /// RegularDb CSV cell (treated as the line's only "column", index 0), rather than always being
-    /// recorded as a single whole-line fragment. This means a PrefabText line that packs multiple
-    /// Chinese runs together with structural separators/placeholders follows the exact same
-    /// splitting rules (placeholder gluing via <paramref name="options"/>, digit/percent/CJK
-    /// punctuation absorption, adjacent-fragment merging, etc.) as any other compound field, and a
-    /// line that decomposes to nothing but a single whole-line fragment
-    /// (<see cref="CompoundFieldSplitter.IsTrivialTemplate"/>) still gets recorded as a plain
-    /// whole-line split with no template, same as a trivial CSV column - avoiding template noise
-    /// for the common case.
+    /// Reads a plain-text file (one distinct hardcoded literal fragment per line, blank lines
+    /// ignored) from Raw/Dumped/DynamicStrings/{textFile.Path} and produces the same
+    /// TranslationLine YAML shape the CSV/PrefabText export paths use, so it flows through the
+    /// existing Converted/merge/translate pipeline unchanged. A literal two-character "\n"
+    /// escape sequence in a dumped line - written by the Converter's static-extraction candidate
+    /// scan (StringMapExtractor.ExtractDynamicStringCandidates) to represent a real embedded
+    /// newline without breaking the "one candidate per line" file format - is unescaped back to a
+    /// real newline before decomposing/recording Raw, so the resulting Raw value matches the
+    /// actual multi-line string as it's compiled into the game (needed for the runtime substring
+    /// match in DragonHeirPlugin/DynamicStringPatches.cs to ever fire) and so
+    /// CompoundFieldSplitter.Decompose can treat the newline as the natural fragment boundary it
+    /// already recognises (a real "\n" is not in CjkTextChars, so it's never absorbed into a
+    /// fragment - each line still gets translated as its own unit via the resulting per-fragment
+    /// splits/template).
     /// </summary>
-    public static void ExportPrefabTextToCustomFormat(
+    public static void ExportDynamicStringsToCustomFormat(
         string workingDirectory, TextFileToSplit textFile, CompoundFieldSplitterOptions? options = null)
     {
-        var dumpedPath = $"{workingDirectory}/Raw/Dumped/PrefabText/{textFile.Path}";
+        var dumpedPath = $"{workingDirectory}/Raw/Dumped/DynamicStrings/{textFile.Path}";
         var exportPath = $"{workingDirectory}/Raw/Export";
         var convertedPath = $"{workingDirectory}/Converted";
 
@@ -46,15 +53,16 @@ public static class PrefabTextWorkflow
         Directory.CreateDirectory(convertedPath);
 
         var foundLines = File.ReadAllLines(dumpedPath)
-            .Where(line => !string.IsNullOrEmpty(line))
-            .Select(line =>
+            .Where(dumpedLine => !string.IsNullOrEmpty(dumpedLine))
+            .Select(dumpedLine =>
             {
+                // Reverse StringMapExtractor.EscapeNewlinesForFlatFile's "\n" escape - see the
+                // XML doc above for why this needs to happen before Decompose/Raw are computed.
+                var line = dumpedLine.Replace("\\n", "\n");
                 var (template, fragments) = CompoundFieldSplitter.Decompose(line, options);
 
                 if (fragments.Count == 0)
                 {
-                    // No Chinese text found - shouldn't normally happen for a dumped Chinese string,
-                    // but fall back to the previous whole-line behavior rather than dropping the line.
                     return new TranslationLine
                     {
                         Raw = line,
@@ -84,33 +92,25 @@ public static class PrefabTextWorkflow
         var yaml = serializer.Serialize(foundLines);
         File.WriteAllText($"{exportPath}/{textFile.Path}.yaml", yaml);
 
-        // Add missing converted file if it doesn't exist yet - matches the CSV export path's
-        // behavior of never overwriting an already-accumulated Converted/*.yaml.
         if (!File.Exists($"{convertedPath}/{textFile.Path}.yaml"))
             File.Copy($"{exportPath}/{textFile.Path}.yaml", $"{convertedPath}/{textFile.Path}.yaml");
     }
 
     /// <summary>
-    /// Packages a translated PrefabText file into the flat raw/result YAML shape a runtime plugin
-    /// can look up by exact raw-string match:
+    /// Packages a translated DynamicStringsIL2CPP file into the flat raw/result YAML shape a
+    /// runtime plugin applies as a global substring-replacement dictionary:
     /// <code>
-    /// - raw: 地图一览
-    ///   result: Map Overview
+    /// - raw: 架势
+    ///   result: Posture
     /// </code>
-    /// A line decomposed into a compound-field template (see <see cref="ExportPrefabTextToCustomFormat"/>)
-    /// is rebuilt via <see cref="CompoundFieldSplitter.Reconstruct"/> from its translated fragments,
-    /// exactly like a RegularDb CSV cell - if any fragment is untranslated, flagged for
-    /// retranslation, or unsafe, the whole line falls back to its original raw text rather than
-    /// reconstructing a partially-translated result (matching the CSV reconstruction path in
-    /// GameFileHandling.PackageFinalTranslationAsync). A trivial (non-templated) line falls back to
-    /// its single split's original text under the same conditions.
+    /// Same fallback-to-raw-on-failure semantics as <see cref="PrefabTextWorkflow.PackagePrefabTextAsync"/>.
     /// </summary>
-    public static async Task<(int Passed, int Failed)> PackagePrefabTextAsync(string workingDirectory, TextFileToSplit textFile)
+    public static async Task<(int Passed, int Failed)> PackageDynamicStringsAsync(string workingDirectory, TextFileToSplit textFile)
     {
         var outputPath = $"{workingDirectory}/Mod";
         Directory.CreateDirectory(outputPath);
 
-        var results = new List<PrefabTextResult>();
+        var results = new List<DynamicStringResult>();
         var passedCount = 0;
         var failedCount = 0;
 
@@ -122,7 +122,7 @@ public static class PrefabTextWorkflow
                 if (result == null)
                     continue;
 
-                results.Add(new PrefabTextResult(line.Raw, result));
+                results.Add(new DynamicStringResult(line.Raw, result));
 
                 if (failed)
                     failedCount++;
@@ -143,7 +143,7 @@ public static class PrefabTextWorkflow
     /// Reconstructs a single line's packaged output. The returned <c>Failed</c> flag reflects
     /// whether the line fell back to its original raw text because a fragment/split was
     /// unsafe, flagged for retranslation, or missing its translation - this must be reported by
-    /// the caller as an actual failure (see <see cref="PackagePrefabTextAsync"/>) rather than
+    /// the caller as an actual failure (see <see cref="PackageDynamicStringsAsync"/>) rather than
     /// silently folded into the same bucket as a genuinely successful line, since both cases
     /// otherwise look identical in the packaged raw/result YAML.
     /// </summary>

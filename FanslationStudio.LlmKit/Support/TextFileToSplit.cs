@@ -8,6 +8,17 @@ public enum TextFileType
     RegularDb,
     PrefabText,
     DynamicStrings,
+    /// <summary>
+    /// Hardcoded, runtime-assembled string literals baked directly into IL2CPP game code (e.g. a
+    /// String.Concat/String.Format call mixing Chinese literal fragments with data), discovered
+    /// via the consuming project's decompiled-code inspection (see DragonHeirOverLlm's
+    /// Converter output + "dynamic/hardcoded in-code string translation plan"). Distinct from the
+    /// older <see cref="DynamicStrings"/> value, which targeted a Mono/Cecil-transpiler based
+    /// dump+patch approach that does not work against IL2CPP (dummy assemblies have no real IL
+    /// bodies to transpile) - this value is for the newer, IL2CPP-safe Harmony-postfix +
+    /// exact-substring-replace approach instead (see DynamicStringWorkflow).
+    /// </summary>
+    DynamicStringsIL2CPP,
     LocalTextString
 }
 
