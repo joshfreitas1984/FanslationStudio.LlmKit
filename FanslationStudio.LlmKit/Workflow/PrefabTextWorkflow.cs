@@ -8,10 +8,12 @@ namespace FanslationStudio.LlmKit.Workflow;
 /// UI/prefab text baked directly into MonoBehaviour/TMP_Text components rather than a game-data
 /// CSV (see the consuming project's asset-dumping test, e.g. DragonHeirOverLlm's
 /// AssetDumperWorkflowTests, which produces the plain "one distinct string per line" input file
-/// this reads). Unlike RegularDb files (CSV rows decomposed into per-column fragments via
-/// CompoundFieldSplitter), a dumped prefab-text file has no row/column structure - each line IS
-/// the whole translatable unit, so it gets exactly one whole-line TranslationSplit and never a
-/// FieldTemplate.
+/// this reads). Each line is decomposed via <see cref="CompoundFieldSplitter.Decompose"/> exactly
+/// like a RegularDb CSV cell (the line is treated as the file's only "column", index 0) - a line
+/// with a single Chinese run spanning its whole length still gets recorded as one plain whole-line
+/// TranslationSplit with no template, but a line packing multiple Chinese runs together with
+/// structural separators/placeholders gets a FieldTemplate + per-fragment TranslationSplits just
+/// like a compound CSV column would.
 /// </summary>
 public static class PrefabTextWorkflow
 {
@@ -21,8 +23,20 @@ public static class PrefabTextWorkflow
     /// CSV export path uses, so it flows through the existing Converted/merge/translate pipeline
     /// (GameFileHandlingBase.MergeFilesIntoTranslatedAsync, Workflow/TranslationWorkflow.cs, etc.)
     /// completely unchanged.
+    ///
+    /// Each line is run through <see cref="CompoundFieldSplitter.Decompose"/> exactly like a
+    /// RegularDb CSV cell (treated as the line's only "column", index 0), rather than always being
+    /// recorded as a single whole-line fragment. This means a PrefabText line that packs multiple
+    /// Chinese runs together with structural separators/placeholders follows the exact same
+    /// splitting rules (placeholder gluing via <paramref name="options"/>, digit/percent/CJK
+    /// punctuation absorption, adjacent-fragment merging, etc.) as any other compound field, and a
+    /// line that decomposes to nothing but a single whole-line fragment
+    /// (<see cref="CompoundFieldSplitter.IsTrivialTemplate"/>) still gets recorded as a plain
+    /// whole-line split with no template, same as a trivial CSV column - avoiding template noise
+    /// for the common case.
     /// </summary>
-    public static void ExportPrefabTextToCustomFormat(string workingDirectory, TextFileToSplit textFile)
+    public static void ExportPrefabTextToCustomFormat(
+        string workingDirectory, TextFileToSplit textFile, CompoundFieldSplitterOptions? options = null)
     {
         var dumpedPath = $"{workingDirectory}/Raw/Dumped/PrefabText/{textFile.Path}";
         var exportPath = $"{workingDirectory}/Raw/Export";
@@ -33,10 +47,36 @@ public static class PrefabTextWorkflow
 
         var foundLines = File.ReadAllLines(dumpedPath)
             .Where(line => !string.IsNullOrEmpty(line))
-            .Select(line => new TranslationLine
+            .Select(line =>
             {
-                Raw = line,
-                Splits = [new TranslationSplit(0, 0, line)],
+                var (template, fragments) = CompoundFieldSplitter.Decompose(line, options);
+
+                if (fragments.Count == 0)
+                {
+                    // No Chinese text found - shouldn't normally happen for a dumped Chinese string,
+                    // but fall back to the previous whole-line behavior rather than dropping the line.
+                    return new TranslationLine
+                    {
+                        Raw = line,
+                        Splits = [new TranslationSplit(0, 0, line)],
+                    };
+                }
+
+                if (CompoundFieldSplitter.IsTrivialTemplate(template, fragments.Count))
+                {
+                    return new TranslationLine
+                    {
+                        Raw = line,
+                        Splits = [new TranslationSplit(0, 0, fragments[0])],
+                    };
+                }
+
+                return new TranslationLine
+                {
+                    Raw = line,
+                    Templates = [new FieldTemplate(0, template)],
+                    Splits = fragments.Select((fragment, index) => new TranslationSplit(0, index, fragment)).ToList(),
+                };
             })
             .ToList();
 
@@ -57,8 +97,13 @@ public static class PrefabTextWorkflow
     /// - raw: 地图一览
     ///   result: Map Overview
     /// </code>
-    /// A line with no usable translation (untranslated, flagged for retranslation, or unsafe)
-    /// falls back to its original text so the output always has an entry for every dumped string.
+    /// A line decomposed into a compound-field template (see <see cref="ExportPrefabTextToCustomFormat"/>)
+    /// is rebuilt via <see cref="CompoundFieldSplitter.Reconstruct"/> from its translated fragments,
+    /// exactly like a RegularDb CSV cell - if any fragment is untranslated, flagged for
+    /// retranslation, or unsafe, the whole line falls back to its original raw text rather than
+    /// reconstructing a partially-translated result (matching the CSV reconstruction path in
+    /// GameFileHandling.PackageFinalTranslationAsync). A trivial (non-templated) line falls back to
+    /// its single split's original text under the same conditions.
     /// </summary>
     public static async Task PackagePrefabTextAsync(string workingDirectory, TextFileToSplit textFile)
     {
@@ -71,15 +116,9 @@ public static class PrefabTextWorkflow
         {
             foreach (var line in fileLines)
             {
-                var split = line.Splits.FirstOrDefault();
-                if (split == null)
-                    continue;
-
-                var result = !string.IsNullOrEmpty(split.Translated) && !split.FlaggedForRetranslation && split.SafeToTranslate
-                    ? split.Translated
-                    : split.Text;
-
-                results.Add(new PrefabTextResult(line.Raw, result));
+                var result = ReconstructLine(line, textFile);
+                if (result != null)
+                    results.Add(new PrefabTextResult(line.Raw, result));
             }
 
             await Task.CompletedTask;
@@ -87,5 +126,38 @@ public static class PrefabTextWorkflow
 
         var serializer = YamlHelper.CreateSerializer();
         await File.WriteAllTextAsync($"{outputPath}/{textFile.Path}.yaml", serializer.Serialize(results));
+    }
+
+    private static string? ReconstructLine(TranslationLine line, TextFileToSplit textFile)
+    {
+        var template = line.Templates.FirstOrDefault(t => t.Split == 0);
+        if (template != null)
+        {
+            var fragments = line.Splits.Where(s => s.Split == 0).OrderBy(s => s.SubIndex).ToList();
+            var translatedFragments = new List<string>();
+
+            foreach (var fragment in fragments)
+            {
+                if (!textFile.PackageOutput || fragment.FlaggedForRetranslation || !fragment.SafeToTranslate)
+                    return line.Raw;
+
+                if (!string.IsNullOrEmpty(fragment.Translated))
+                    translatedFragments.Add(fragment.Translated);
+                else if (!string.IsNullOrEmpty(fragment.Text))
+                    return line.Raw;
+                else
+                    translatedFragments.Add(fragment.Text);
+            }
+
+            return CompoundFieldSplitter.Reconstruct(template.Template, translatedFragments);
+        }
+
+        var split = line.Splits.FirstOrDefault(s => s.Split == 0);
+        if (split == null)
+            return null;
+
+        return !string.IsNullOrEmpty(split.Translated) && !split.FlaggedForRetranslation && split.SafeToTranslate
+            ? split.Translated
+            : split.Text;
     }
 }
