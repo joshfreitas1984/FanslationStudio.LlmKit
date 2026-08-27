@@ -99,4 +99,14 @@ public class GlossaryLine
 
         return prompt.ToString();
     }
+
+    /// <summary>
+    /// True if this line is scoped to specific output files ("only") or explicitly excludes some
+    /// ("exclude"). Used to keep file-scoped entries out of the run-wide translation cache (see
+    /// TranslationService.FillTranslationCacheAsync/TranslateViaLlmAsyncBatched/Pooled) - that
+    /// cache is a single flat Raw->Result map shared across every output file, so a translation
+    /// tied to one file's context would otherwise silently leak into every other file.
+    /// </summary>
+    [YamlIgnore]
+    public bool IsFileRestricted => OnlyOutputFiles.Count > 0 || ExcludeOutputFiles.Count > 0;
 }

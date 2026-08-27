@@ -47,19 +47,125 @@ public static class TranslationService
     // model", so escalation's actual cost/benefit is visible instead of folded into one number.
     private static int _escalationAttemptCounter;
 
+    /// <summary>
+    /// Builds <see cref="RuntimeValues.FileRestrictedEntriesByText"/> once per run - see that
+    /// property's doc comment. Called once from <see cref="FillTranslationCacheAsync"/>
+    /// (itself only called once per run via PrepareTranslationRunAsync), never per-split.
+    /// </summary>
+    private static void BuildFileRestrictedIndex(LlmConfig config)
+    {
+        var index = new Dictionary<string, List<GlossaryLine>>();
+
+        void AddKey(string? key, GlossaryLine line)
+        {
+            if (string.IsNullOrEmpty(key))
+                return;
+
+            if (!index.TryGetValue(key, out var entries))
+                index[key] = entries = [];
+
+            entries.Add(line);
+        }
+
+        void AddIfRestricted(GlossaryLine line)
+        {
+            if (!line.IsFileRestricted)
+                return;
+
+            AddKey(line.Raw, line);
+            AddKey(line.RawSimplified, line);
+            AddKey(line.RawTraditional, line);
+        }
+
+        foreach (var line in config.Runtime.GlossaryLines)
+            AddIfRestricted(line);
+
+        foreach (var line in config.Runtime.ManualTranslations)
+            AddIfRestricted(line);
+
+        config.Runtime.FileRestrictedEntriesByText = index;
+    }
+
+    /// <summary>
+    /// True if <paramref name="text"/> exactly matches a glossary or manual-translation entry that
+    /// is scoped to specific output files ("only"/"exclude" - see
+    /// <see cref="GlossaryLine.IsFileRestricted"/>). Such entries must never be read from or
+    /// written into the run-wide <see cref="translationCache"/>: that cache is a single flat
+    /// Raw->Result map shared by every output file, so caching a file-scoped translation would
+    /// silently apply it to every other file too. Splits that match a restricted entry always go
+    /// through the normal LLM/glossary-prompt path (or a direct manual-translation override
+    /// elsewhere) instead of the shared cache.
+    /// O(1) dictionary lookup against <see cref="RuntimeValues.FileRestrictedEntriesByText"/> -
+    /// this is called once or twice per split, across potentially thousands of splits and many
+    /// parallel workers, so it must not re-scan the glossary/manual lists each time.
+    /// </summary>
+    private static bool IsFileRestrictedText(string text, LlmConfig config) =>
+        config.Runtime.FileRestrictedEntriesByText.ContainsKey(text);
+
+    /// <summary>
+    /// If <paramref name="text"/> exactly matches a glossary or manual-translation entry whose
+    /// "only" list includes <paramref name="filePath"/>, returns that entry's Result directly -
+    /// deliberately bypassing both the LLM and the shared translationCache (see
+    /// IsFileRestrictedText). This lets an "only"-scoped entry act as a fixed, deterministic
+    /// override for exactly the file(s) it names, without spending an LLM call or leaking through
+    /// the run-wide cache into other files. O(1) dictionary lookup, same rationale as
+    /// IsFileRestrictedText above.
+    /// </summary>
+    private static bool TryGetOnlyFileDirectTranslation(string text, string filePath, LlmConfig config, out string result)
+    {
+        result = string.Empty;
+
+        if (!config.Runtime.FileRestrictedEntriesByText.TryGetValue(text, out var entries))
+            return false;
+
+        foreach (var entry in entries)
+        {
+            if (entry.OnlyOutputFiles.Count > 0 && entry.OnlyOutputFiles.Contains(filePath))
+            {
+                result = entry.Result;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public static async Task FillTranslationCacheAsync(string workingDirectory,
         int charsToCache, ConcurrentDictionary<string, string> cache,
         LlmConfig config, TextFileToSplit[] textFiles)
     {
-        // Add Manual adjustments 
+        // Build the O(1) file-restriction lookup once per run before any splits are processed -
+        // see BuildFileRestrictedIndex/RuntimeValues.FileRestrictedEntriesByText.
+        BuildFileRestrictedIndex(config);
+
+        // Add Manual adjustments
+        //
+        // Skip entries scoped via "only"/"exclude" - see IsFileRestrictedText above.
         foreach (var k in config.Runtime.ManualTranslations)
+        {
+            if (k.IsFileRestricted)
+                continue;
+
             cache.TryAdd(k.Raw, k.Result);
+        }
 
         // Add Glossary Lines to Cache
+        //
+        // The cache below is a single flat Raw->Result dictionary shared across every output
+        // file in the run (see TranslateViaLlmAsyncBatched/Pooled's cacheHit lookups), so it has
+        // no way to scope a hit to a specific file. A glossary line restricted via "only:" (see
+        // GlossaryLine.OnlyOutputFiles) is meant to apply exclusively to those listed output
+        // files - caching it here would let it silently satisfy translations for every other
+        // file too, corrupting unrelated files' output. Only cache glossary lines with no file
+        // restriction at all.
         foreach (var line in config.Runtime.GlossaryLines)
         {
+            if (line.IsFileRestricted)
+                continue;
+
             cache.TryAdd(line.Raw, line.Result);
         }
+
 
         // File with old files
         var oldFolder = $"{workingDirectory}/TestResults/OldFiles";
@@ -75,6 +181,11 @@ public static class TranslationService
             {
                 foreach (var split in line.Splits)
                 {
+                    // Skip splits whose text matches a file-restricted glossary/manual entry -
+                    // see IsFileRestrictedText.
+                    if (IsFileRestrictedText(split.Text, config))
+                        continue;
+
                     cache.TryAdd(split.Text, split.Translated);
                 }
             }
@@ -89,6 +200,11 @@ public static class TranslationService
                 foreach (var split in line.Splits)
                 {
                     if (string.IsNullOrEmpty(split.Translated) || split.FlaggedForRetranslation)
+                        continue;
+
+                    // Skip splits whose text matches a file-restricted glossary/manual entry -
+                    // see IsFileRestrictedText.
+                    if (IsFileRestrictedText(split.Text, config))
                         continue;
 
                     if (split.Text.Length <= charsToCache)
@@ -213,7 +329,12 @@ public static class TranslationService
                     if (string.IsNullOrEmpty(split.Text) || !split.SafeToTranslate)
                         return;
 
-                    var cacheHit = translationCache.ContainsKey(split.Text)
+                    // File-restricted glossary/manual entries (only:/exclude:) must never be read
+                    // from or written into this shared cache - see IsFileRestrictedText.
+                    var isFileRestricted = IsFileRestrictedText(split.Text, config);
+
+                    var cacheHit = !isFileRestricted
+                        && translationCache.ContainsKey(split.Text)
                         // We use this for name files etc which will be in cache
                         && textFileToTranslate.EnableGlossary;
 
@@ -225,6 +346,9 @@ public static class TranslationService
 
                         if (cacheHit)
                             split.Translated = translationCache[split.Text];
+                        else if (TryGetOnlyFileDirectTranslation(split.Text, textFileToTranslate.Path, config, out var directResult))
+                            // Exact "only" match for this file - use it directly, no LLM call.
+                            split.Translated = directResult;
                         else
                         {
                             var result = await TranslateSplitAsync(config, split.Text, client, textFileToTranslate, column: split.Split);
@@ -242,7 +366,7 @@ public static class TranslationService
                     else
                     {
                         //Two translations could be doing this at the same time
-                        if (!cacheHit && split.Text.Length <= charsToCache)
+                        if (!cacheHit && !isFileRestricted && split.Text.Length <= charsToCache)
                             translationCache.TryAdd(split.Text, split.Translated);
                     }
                 }));
@@ -418,7 +542,12 @@ public static class TranslationService
             if (string.IsNullOrEmpty(split.Text) || !split.SafeToTranslate)
                 return;
 
-            var cacheHit = translationCache.ContainsKey(split.Text)
+            // File-restricted glossary/manual entries (only:/exclude:) must never be read from or
+            // written into this shared cache - see IsFileRestrictedText.
+            var isFileRestricted = IsFileRestrictedText(split.Text, config);
+
+            var cacheHit = !isFileRestricted
+                && translationCache.ContainsKey(split.Text)
                 // We use this for name files etc which will be in cache
                 && file.TextFile.EnableGlossary;
 
@@ -430,6 +559,9 @@ public static class TranslationService
 
                 if (cacheHit)
                     split.Translated = translationCache[split.Text];
+                else if (TryGetOnlyFileDirectTranslation(split.Text, file.TextFile.Path, config, out var directResult))
+                    // Exact "only" match for this file - use it directly, no LLM call.
+                    split.Translated = directResult;
                 else
                 {
                     var result = await TranslateSplitAsync(config, split.Text, client, file.TextFile, column: split.Split);
@@ -495,7 +627,7 @@ public static class TranslationService
 
             if (string.IsNullOrEmpty(split.Translated))
                 Interlocked.Increment(ref incorrectLineCount);
-            else if (!cacheHit && split.Text.Length <= TranslationCacheMaxChars)
+            else if (!cacheHit && !isFileRestricted && split.Text.Length <= TranslationCacheMaxChars)
                 //Two translations could be doing this at the same time
                 translationCache.TryAdd(split.Text, split.Translated);
         });
@@ -806,9 +938,14 @@ public static class TranslationService
             return new ValidationResult(LineValidation.CleanupLineBeforeSaving($"{leadingMark}{remainderResult.Result}", preparedRaw, textFile, tokenReplacer));
         }
 
-        var cacheHit = config.Runtime.TranslationCache.ContainsKey(preparedRaw);
+        var cacheHit = !IsFileRestrictedText(preparedRaw, config)
+            && config.Runtime.TranslationCache.ContainsKey(preparedRaw);
         if (cacheHit)
             return new ValidationResult(LineValidation.CleanupLineBeforeSaving(config.Runtime.TranslationCache[preparedRaw], preparedRaw, textFile, tokenReplacer));
+
+        if (TryGetOnlyFileDirectTranslation(preparedRaw, textFile.Path, config, out var directResult))
+            // Exact "only" match for this file - use it directly, no LLM call.
+            return new ValidationResult(LineValidation.CleanupLineBeforeSaving(directResult, preparedRaw, textFile, tokenReplacer));
 
         // Calculate Executing model based on text
         var modelConfig = LlmHelpers.CalculateModelConfig(config, preparedRaw);

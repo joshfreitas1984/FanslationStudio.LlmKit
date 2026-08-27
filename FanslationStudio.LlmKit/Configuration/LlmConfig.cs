@@ -94,6 +94,18 @@ public class RuntimeValues
     // in TranslationService.TranslateViaLlmAsync (a plain Dictionary is not thread-safe for
     // concurrent reads/writes and could corrupt its internal state or throw under contention).
     public ConcurrentDictionary<string, string> TranslationCache { get; set; } = new();
+
+    /// <summary>
+    /// Index of every "only"/"exclude"-restricted <see cref="GlossaryLines"/>/
+    /// <see cref="ManualTranslations"/> entry, keyed by each of its Raw/RawSimplified/
+    /// RawTraditional variants, built once per run by
+    /// <see cref="TranslationService.FillTranslationCacheAsync"/>. Exists so
+    /// <see cref="TranslationService"/> can check "is this split's text file-restricted?" and
+    /// "does this split have a direct 'only' override for this file?" in O(1) per split instead of
+    /// re-scanning the (potentially large) glossary/manual lists with LINQ on every single split,
+    /// across every parallel worker, for the lifetime of the run.
+    /// </summary>
+    public Dictionary<string, List<GlossaryLine>> FileRestrictedEntriesByText { get; set; } = new();
 }
 
 public class ModelUrlConfig

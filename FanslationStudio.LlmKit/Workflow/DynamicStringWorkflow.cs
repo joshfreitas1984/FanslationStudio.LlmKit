@@ -122,7 +122,11 @@ public static class DynamicStringWorkflow
                 if (result == null)
                     continue;
 
-                results.Add(new DynamicStringResult(line.Raw, result));
+                // A raw string still containing a literal "{n}" placeholder (e.g.
+                // "{0}年{1}月{2}日") is a String.Format-style template - see
+                // DynamicStringResult.IsTemplate for why this must be flagged explicitly rather
+                // than left for the runtime consumer to re-derive.
+                results.Add(new DynamicStringResult(line.Raw, result, IsFormatTemplate(line.Raw)));
 
                 if (failed)
                     failedCount++;
@@ -138,6 +142,14 @@ public static class DynamicStringWorkflow
 
         return (passedCount, failedCount);
     }
+
+    // Matches a real String.Format-style placeholder ("{0}", "{12}", ...) - deliberately more
+    // specific than a bare Raw.Contains('{') check so a raw fragment that happens to contain an
+    // unrelated literal '{' (e.g. stray markup) is never misclassified as a template.
+    private static readonly System.Text.RegularExpressions.Regex FormatPlaceholderRegex = new(
+        @"\{\d+\}", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    private static bool IsFormatTemplate(string raw) => FormatPlaceholderRegex.IsMatch(raw);
 
     /// <summary>
     /// Reconstructs a single line's packaged output. The returned <c>Failed</c> flag reflects

@@ -574,6 +574,34 @@ public static class TranslationWorkflow
         });
     }
 
+    public static async Task SetSplitAsInvalidByRegex(string workingDirectory,
+        TextFileToSplit[] textFiles,
+        List<string> badPatterns)
+    {
+        var serializer = YamlHelper.CreateSerializer();
+
+        await FileIteration.IterateTranslatedFilesInParallelAsync(workingDirectory,
+            textFiles,
+            async (outputFile, textFileToTranslate, fileLines) =>
+        {
+            var recordsModded = 0;
+
+            foreach (var line in fileLines)
+                foreach (var split in line.Splits)
+                {
+                    if (badPatterns.Any(p => Regex.IsMatch(split.Text, p)))
+                    {
+                        split.FlaggedForRetranslation = true;
+                        split.FlaggedMistranslation = "Bad Character";
+                        recordsModded++;
+                    }
+                }
+
+            await File.WriteAllTextAsync(outputFile, serializer.Serialize(fileLines));
+            Console.WriteLine($"Writing {recordsModded} records to {outputFile}");
+        });
+    }
+
     public static async Task CleanUpSomeRegexes(string workingDirectory,
         TextFileToSplit[] textFiles,
         List<(string pattern, string replacement)> regex)
