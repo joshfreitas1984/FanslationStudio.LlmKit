@@ -111,6 +111,7 @@ public static class DynamicStringWorkflow
         Directory.CreateDirectory(outputPath);
 
         var results = new List<DynamicStringResult>();
+        var seenBareRaw = new HashSet<string>();
         var passedCount = 0;
         var failedCount = 0;
 
@@ -118,7 +119,7 @@ public static class DynamicStringWorkflow
         {
             foreach (var line in fileLines)
             {
-                var (result, failed) = ReconstructLine(line, textFile);
+                var (result, failed, bareFragment) = ReconstructLine(line, textFile);
                 if (result == null)
                     continue;
 
@@ -127,6 +128,22 @@ public static class DynamicStringWorkflow
                 // DynamicStringResult.IsTemplate for why this must be flagged explicitly rather
                 // than left for the runtime consumer to re-derive.
                 results.Add(new DynamicStringResult(line.Raw, result, IsFormatTemplate(line.Raw)));
+
+                // Single-fragment templates (e.g. "打扰了;GovernPlotStart;1", split into label
+                // "打扰了" + literal ";GovernPlotStart;1") represent game data cells where the
+                // trailing literal is action/parameter metadata consumed and stripped off by the
+                // game's own parsing before the label ever reaches a TMP_Text/UI.Text component -
+                // only the bare label (never the full raw cell) is what actually gets rendered on
+                // screen (e.g. an NPC interaction button). The full-compound entry above can only
+                // ever match if the entire raw literal is baked into IL2CPP code verbatim and
+                // displayed as-is, so it silently never fires for these split-and-consumed cells.
+                // Emitting the bare label as its own dictionary entry too lets the runtime
+                // substring match fire either way, without needing to know which case applies.
+                if (bareFragment is { } fragment && fragment.Raw != fragment.Result
+                    && seenBareRaw.Add(fragment.Raw))
+                {
+                    results.Add(new DynamicStringResult(fragment.Raw, fragment.Result));
+                }
 
                 if (failed)
                     failedCount++;
@@ -143,11 +160,25 @@ public static class DynamicStringWorkflow
         return (passedCount, failedCount);
     }
 
-    // Matches a real String.Format-style placeholder ("{0}", "{12}", ...) - deliberately more
-    // specific than a bare Raw.Contains('{') check so a raw fragment that happens to contain an
-    // unrelated literal '{' (e.g. stray markup) is never misclassified as a template.
+    // Matches a real String.Format-style placeholder ("{0}", "{12}", ...) OR one of the game's own
+    // "#Token#"/"#$Token#" localization markers (e.g. "#TargetInteractName#", "#$PlayerName#") -
+    // both are substituted with real data by something other than a literal copy of Raw before a
+    // composite string ever reaches DragonHeirPlugin/DynamicStringPatches.cs's Concat/Format
+    // postfix or TMP_Text/UI.Text setter, so both need the same structural (regex-shape) matching
+    // at runtime rather than a literal substring match against Raw. Deliberately more specific
+    // than a bare Raw.Contains('{')/Contains('#') check so a raw fragment that happens to contain
+    // an unrelated literal '{' or '#' (e.g. stray markup) is never misclassified as a template.
+    // Kept in sync with DynamicStringPatches.cs's PlaceholderOrTokenRegex on the plugin side -
+    // CONFIRMED BUG (2026-08-28): a Raw containing ONLY a "#Token#" marker (no "{n}") was never
+    // flagged IsTemplate here, so it never reached the plugin's already-correct "#Token#"-aware
+    // _compiledTemplates matcher at all - it landed in the plain bare-fragment dictionary instead,
+    // where the full raw string (still containing the literal, never-actually-present "#Token#"
+    // text) could never match, silently falling through to bare-fragment substring corruption
+    // (e.g. "久闻#TargetInteractName#武功高强，不知是否愿意赐教一二。" rendering as
+    // "久聞MasterMartial arts高強，不知是否愿意賜教One二0" instead of the correct whole-sentence
+    // translation already present in the packaged dictionary).
     private static readonly System.Text.RegularExpressions.Regex FormatPlaceholderRegex = new(
-        @"\{\d+\}", System.Text.RegularExpressions.RegexOptions.Compiled);
+        @"\{\d+\}|#\$?[A-Za-z0-9_]+#", System.Text.RegularExpressions.RegexOptions.Compiled);
 
     private static bool IsFormatTemplate(string raw) => FormatPlaceholderRegex.IsMatch(raw);
 
@@ -158,8 +189,14 @@ public static class DynamicStringWorkflow
     /// the caller as an actual failure (see <see cref="PackageDynamicStringsAsync"/>) rather than
     /// silently folded into the same bucket as a genuinely successful line, since both cases
     /// otherwise look identical in the packaged raw/result YAML.
+    ///
+    /// <paramref name="BareFragment"/> is populated only when the line is a single-fragment
+    /// template (exactly one translatable split, e.g. "打扰了;GovernPlotStart;1" -> label
+    /// "打扰了" + literal ";GovernPlotStart;1") - see the call site in
+    /// <see cref="PackageDynamicStringsAsync"/> for why this extra bare label/translation pair
+    /// needs to be packaged as its own dictionary entry alongside the full reconstructed line.
     /// </summary>
-    private static (string? Result, bool Failed) ReconstructLine(TranslationLine line, TextFileToSplit textFile)
+    private static (string? Result, bool Failed, (string Raw, string Result)? BareFragment) ReconstructLine(TranslationLine line, TextFileToSplit textFile)
     {
         var template = line.Templates.FirstOrDefault(t => t.Split == 0);
         if (template != null)
@@ -170,26 +207,31 @@ public static class DynamicStringWorkflow
             foreach (var fragment in fragments)
             {
                 if (!textFile.PackageOutput || fragment.FlaggedForRetranslation || !fragment.SafeToTranslate)
-                    return (line.Raw, true);
+                    return (line.Raw, true, null);
 
                 if (!string.IsNullOrEmpty(fragment.Translated))
                     translatedFragments.Add(fragment.Translated);
                 else if (!string.IsNullOrEmpty(fragment.Text))
-                    return (line.Raw, true);
+                    return (line.Raw, true, null);
                 else
                     translatedFragments.Add(fragment.Text);
             }
 
-            return (CompoundFieldSplitter.Reconstruct(template.Template, translatedFragments), false);
+            var reconstructed = CompoundFieldSplitter.Reconstruct(template.Template, translatedFragments);
+            var bareFragment = fragments.Count == 1
+                ? (fragments[0].Text, translatedFragments[0])
+                : ((string Raw, string Result)?)null;
+
+            return (reconstructed, false, bareFragment);
         }
 
         var split = line.Splits.FirstOrDefault(s => s.Split == 0);
         if (split == null)
-            return (null, false);
+            return (null, false, null);
 
         if (!string.IsNullOrEmpty(split.Translated) && !split.FlaggedForRetranslation && split.SafeToTranslate)
-            return (split.Translated, false);
+            return (split.Translated, false, null);
 
-        return (split.Text, true);
+        return (split.Text, true, null);
     }
 }
