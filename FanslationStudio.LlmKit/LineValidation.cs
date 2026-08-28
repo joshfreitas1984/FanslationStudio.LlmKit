@@ -513,7 +513,20 @@ public static partial class LineValidation
             if (customFailureReason != null)
             {
                 response = false;
-                correctionPrompts.AddPromptWithValues(config, "CorrectAdditionalPrompt", customFailureReason);
+
+                // The reason string's directionality determines which correction prompt actually
+                // describes the defect: a hook reporting a token present in raw but missing from
+                // result (e.g. a dropped "#PlayerName#"-style placeholder) is a REMOVAL, not an
+                // addition - sending "CorrectAdditionalPrompt" ("has been added to the result but
+                // was not in the original text") for a missing token tells the model the exact
+                // opposite of what's wrong and confuses the retry loop. Only fall back to
+                // "CorrectAdditionalPrompt" when the reason genuinely describes something extra
+                // that appeared in result but wasn't in raw; default to "CorrectRemovalPrompt" for
+                // anything else, since most custom-column hooks report a missing/dropped token.
+                if (result.Contains(customFailureReason) && !raw.Contains(customFailureReason))
+                    correctionPrompts.AddPromptWithValues(config, "CorrectAdditionalPrompt", customFailureReason);
+                else
+                    correctionPrompts.AddPromptWithValues(config, "CorrectRemovalPrompt", customFailureReason);
             }
         }
 

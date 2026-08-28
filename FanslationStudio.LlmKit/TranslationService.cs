@@ -501,7 +501,7 @@ public static class TranslationService
         // after retries are exhausted) failed validation, so a run can be inspected without
         // waiting for it to finish - flushed to disk periodically (see WriteUnprocessableItemsLog
         // below, called at the same cadence as the progress log) as well as once more at the end.
-        var unprocessableItems = new ConcurrentBag<(string FilePath, string Raw, string Reason)>();
+        var unprocessableItems = new ConcurrentBag<(string FilePath, string Raw, string Result, string Reason)>();
         var unprocessableLogPath = $"{workingDirectory}/TestResults/UnprocessableItems.log";
 
         // Unique-per-file splits (same dedup semantics as the batched scheduler), flattened across
@@ -573,7 +573,7 @@ public static class TranslationService
                             ? "(no correction prompt captured - likely an HttpRequestException/connection failure, see console for 'Request error' lines)"
                             : result.CorrectionPrompt;
                         var escalationNote = result.EscalationAttempted ? " [escalation attempted: yes]" : " [escalation attempted: no]";
-                        unprocessableItems.Add((file.TextFile.Path, split.Text, reason + escalationNote));
+                        unprocessableItems.Add((file.TextFile.Path, split.Text, result.Result, reason + escalationNote));
                     }
                 }
 
@@ -657,7 +657,7 @@ public static class TranslationService
     /// the end) so the log can be inspected while a long run is still in progress. Overwrites
     /// rather than appends, so it always reflects this run's items so far, never a stale prior run.
     /// </summary>
-    private static void WriteUnprocessableItemsLog(string logPath, ConcurrentBag<(string FilePath, string Raw, string Reason)> unprocessableItems)
+    private static void WriteUnprocessableItemsLog(string logPath, ConcurrentBag<(string FilePath, string Raw, string Result, string Reason)> unprocessableItems)
     {
         if (unprocessableItems.IsEmpty)
             return;
@@ -669,7 +669,7 @@ public static class TranslationService
         var logContent = string.Join("\n\n", unprocessableItems
             .OrderBy(x => x.FilePath)
             .ThenBy(x => x.Raw)
-            .Select(x => $"[{x.FilePath}] RAW: {x.Raw}\n  REASON: {x.Reason}"));
+            .Select(x => $"[{x.FilePath}] RAW: {x.Raw}\n  RESULT: {x.Result}\n  REASON: {x.Reason}"));
         File.WriteAllText(logPath, logContent);
     }
 

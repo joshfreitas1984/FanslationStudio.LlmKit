@@ -103,8 +103,10 @@ quote-escaping (`""`) and only re-quote a field on rebuild if it actually needs 
 
 - Matches runs via `(?:[+\-](?=[0-9]))?[<CjkTextChars>]+(?:%[<CjkTextChars>]*)*` where
   `<CjkTextChars>` =
-  `\p{IsCJKUnifiedIdeographs}0-9.\p{IsCJKSymbolsandPunctuation}\p{IsHalfwidthandFullwidthForms}\u2018\u2019\u201C\u201D`,
-  then **discards** any matched run that turns out to be pure digits/sign/percent/punctuation with
+  `\p{IsCJKUnifiedIdeographs}0-9.\p{IsCJKSymbolsandPunctuation}\p{IsHalfwidthandFullwidthForms}\u2018\u2019\u201C\u201D-[\uFF1A]`
+  (the trailing `-[\uFF1A]` is .NET regex character-class subtraction, carving the fullwidth colon
+  `：` back OUT of `\p{IsHalfwidthandFullwidthForms}` — see the colon bullet below), then
+  **discards** any matched run that turns out to be pure digits/sign/percent/punctuation with
   no actual Chinese character (that's just a number/format string and is left as literal template
   text, e.g. `1000-12-0-0/1/2/3/4/5`, or `威望+10` where `+10` has nothing following it to glue to).
 - **Digits/decimal points glued directly to Chinese with no separator stay in the same fragment**
@@ -120,9 +122,17 @@ quote-escaping (`""`) and only re-quote a field on rebuild if it actually needs 
 - **A trailing `%` is absorbed the same way, and matching then keeps extending through further
   CJK/digit text after it** — e.g. `同盟区域50%后进入门派/自宅` decomposes to fragments
   `同盟区域50%后进入门派` and `自宅` (template `{0}/{1}`), not split at the `%`.
-- **Any full-width/CJK punctuation (`，` `。` `？` `！` `：` `；` `、` `（）` `～` etc. — i.e. the
+- **Any full-width/CJK punctuation (`，` `。` `？` `！` `；` `、` `（）` `～` etc. — i.e. the
   Unicode "CJK Symbols and Punctuation" and "Halfwidth and Fullwidth Forms" blocks) is absorbed
-  into the run and never acts as a fragment boundary.** Curly Chinese quotation marks `“` `”` `‘`
+  into the run and never acts as a fragment boundary — EXCEPT the fullwidth colon `：` (U+FF1A),
+  fixed Aug 2026 (see `FullwidthColonActsAsFragmentBoundary` in
+  `Tests/CompoundFieldSplitterTests.cs`): unlike other CJK punctuation, a colon consistently
+  introduces a specific named/enumerated payload (e.g. `正是于巴蜀一带小有名气的门派：仙霞派。`
+  naming a sect, or `<b>仙霞</b>：所有经验获取+5%。` naming an effect) where the text after it
+  benefits from being its own fragment/template boundary (`{0}：{1}`) rather than being folded into
+  one whole-sentence fragment every time — so it's carved out of `CjkTextChars` via character-class
+  subtraction instead of being absorbed like every other CJK punctuation mark.** Curly Chinese
+  quotation marks `“` `”` `‘`
   `’` (`U+201C`/`U+201D`/`U+2018`/`U+2019`) are **also** explicitly absorbed even though they live
   in the Unicode "General Punctuation" block, not the two CJK blocks above — this game uses them as
   ordinary in-sentence quotation marks (e.g. `...摊开，都翻到小数字为"一"的那一页）`), and without
@@ -164,8 +174,9 @@ Known game-data compound patterns worth recognizing when reasoning about `Decomp
 - `|` — "OR" role requirement (alternative roles).
 - `/` — list of numeric values inside a compound numeric sub-field, or a genuine ASCII clause
   boundary between two otherwise-unrelated sentences (e.g. `.../自宅`).
-- Full-width/CJK punctuation (`，。？！：；、（）` etc.) — never a boundary; always part of natural
-  sentence text and stays glued to whichever fragment it's adjacent to.
+- Full-width/CJK punctuation (`，。？！；、（）` etc.) — never a boundary; always part of natural
+  sentence text and stays glued to whichever fragment it's adjacent to. **Exception: the fullwidth
+  colon `：` IS a boundary** (see above) — it always splits into a `{0}：{1}`-shaped template.
 
 ### Game-specific placeholder tokens (`CompoundFieldSplitterOptions`)
 
@@ -333,6 +344,36 @@ single-value columns.
   existing retry counters. `LlmHelpers.CalculateModelConfig` is unrelated to this and still a stub
   (`// TODO: Implement properly`, always returns `config.Runtime.Models.First().Value`) - that
   governs which model a split starts with, not escalation after failure.
+- **FIXED (2026-08-28) — correction-suffix prompt leak causing repeated `Unprocessable` entries:**
+  `UnprocessableItems.log` showed the `RESULT` for many splits starting with a verbatim (or
+  lightly paraphrased) echo of `BaseFiles/Qwen25/Prompts/BaseCorrectionSuffixPrompt.txt`'s old
+  content — a bulleted "While correcting, also verify: - Meaning/tone/cultural nuance - Gender-
+  neutral language - Pinyin names/titles ... Output only the fully corrected English translation."
+  checklist, followed by the actual (often perfectly fine) translation. Root cause:
+  `CalulateCorrectionPrompt` (`TranslationService.cs`) appends this suffix to every correction
+  user-message sent on retry, and the local `qwen2.5:7b` model has a strong tendency to restate a
+  bulleted checklist phrased as a meta-instruction ("verify: ...") back into its own output instead
+  of silently complying — a small-model instruction-leak/echo failure mode, not a one-off fluke.
+  This was made worse by two compounding factors: (1) the checklist content was pure duplication of
+  `BaseSystemPrompt.txt` rules 2/4/5/6 (tone/cultural nuance, gender-neutral language, Pinyin
+  names, titles) which are already stated once in the system prompt, so repeating it on every
+  correction round bought nothing but extra leak surface; (2) the consuming `DragonHeirOverLlm`
+  repo runs with `retryCount: 1` (see note above), so once the leaked echo itself got flagged
+  invalid by `LineValidation.InvalidPhrases` (it does contain `"cultural nuance"`, `"gender-neutral
+  language"`, `"Output only the"`), there was no budget left to recover and the split was marked
+  permanently `Unprocessable`. Fix: reworded `BaseCorrectionSuffixPrompt.txt` (both the
+  `BaseFiles/Qwen25/Prompts/` copy that's actually loaded when `customPromptsPath` is unset, and
+  the `Files/Prompts/` workspace copy used by this repo's own test runs) to drop the bulleted
+  checklist entirely and replace it with a single terse, non-restatable line: `"Output only the
+  corrected English translation. Do not repeat, quote, or reference any part of these
+  instructions, and do not include explanations, notes, or any Chinese text."` — this keeps the
+  original intent (no explanations/notes/Chinese leakage) while removing the specific
+  checklist-shaped text the model was echoing, and explicitly tells it not to restate instructions.
+  `InvalidPhrases` in `LineValidation.cs` is left untouched as a safety net (still catches `"Output
+  only the"` etc. if a leak recurs in some other form) — this was a prompt-wording fix, not a
+  validation-logic fix. If leaks of this shape reappear after this change, suspect a *different*
+  prompt file (e.g. `BaseSystemPrompt.txt` itself, or `BaseGlossaryPrompt`/`BaseSystemSuffixPrompt`)
+  rather than assuming the same root cause.
 
 ## Testing conventions
 

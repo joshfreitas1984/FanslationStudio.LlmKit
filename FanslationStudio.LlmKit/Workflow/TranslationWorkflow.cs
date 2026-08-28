@@ -352,13 +352,20 @@ public static class TranslationWorkflow
         var modelConfig = LlmHelpers.CalculateModelConfig(config, preparedRaw);
 
         // Characters
+        // Some fragments legitimately start with a stray closing quote mark ("”"/"'"/"\"") split
+        // off a larger quoted sentence whose opening quote lives in the surrounding template
+        // literal (e.g. "“⟦0⟧{0}" + fragment "”竟有这等境界...") - the LLM correctly renders that
+        // closing quote as a trailing apostrophe/quote AFTER the ellipsis ("...'"), which the plain
+        // EndsWith("...") checks below don't recognize, incorrectly flagging a fine translation as
+        // having dropped the ellipsis. Strip any trailing quote-like characters before comparing.
+        var translatedForEllipsisCheck = split.Translated.TrimEnd('\'', '"', '’', '‘', '”', '“');
         if (preparedRaw.EndsWith("...")
             && preparedRaw.Length < 15
-            && !split.Translated.EndsWith("...")
-            && !split.Translated.EndsWith("...?")
-            && !split.Translated.EndsWith("...!")
-            && !split.Translated.EndsWith("...!!")
-            && !split.Translated.EndsWith("...?!"))
+            && !translatedForEllipsisCheck.EndsWith("...")
+            && !translatedForEllipsisCheck.EndsWith("...?")
+            && !translatedForEllipsisCheck.EndsWith("...!")
+            && !translatedForEllipsisCheck.EndsWith("...!!")
+            && !translatedForEllipsisCheck.EndsWith("...?!"))
         {
             logLines.Add($"Missing ... {textFile.Path} Replaces: \n{split.Translated}");
             split.FlaggedForRetranslation = true;

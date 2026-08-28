@@ -26,7 +26,7 @@ public static partial class CompoundFieldSplitter
     // it (the LLM could otherwise reorder/drop the number, breaking the "-99" sentinel value). A
     // trailing '%' is absorbed the same way and the run then keeps extending through any further
     // CJK/digit text (e.g. "同盟区域50%后进入门派" stays one fragment, not split at '%').
-    // Any full-width/CJK punctuation ('，' '。' '？' '！' '：' '；' '、' '（）' '～' etc. - the
+    // Any full-width/CJK punctuation ('，' '。' '？' '！' '；' '、' '（）' '～' etc. - the
     // Unicode "CJK Symbols and Punctuation" and "Halfwidth and Fullwidth Forms" blocks) is also
     // absorbed into the run rather than treated as a fragment boundary: an LLM is free to reposition
     // punctuation within its translation (move a clause, merge/drop/replace a comma or full stop,
@@ -37,6 +37,13 @@ public static partial class CompoundFieldSplitter
     // is intentionally NOT absorbed: in this data ASCII punctuation only ever appears as genuine
     // structural/game-syntax separators - list items, role logic, method calls - never as natural
     // Chinese sentence punctuation, so it should keep acting as a fragment boundary.)
+    // The fullwidth colon '：' (U+FF1A) is the one exception carved out of the "Halfwidth and
+    // Fullwidth Forms" block: unlike other CJK punctuation, a colon here consistently introduces an
+    // enumerated/named item (e.g. "...小有名气的门派：仙霞派。" naming a specific sect, or
+    // "<b>仙霞</b>：所有经验获取+5%。" naming a specific effect) where the text before the colon is
+    // usually irrelevant context and the text after it is the actual payload that benefits from
+    // being its own fragment/template boundary (e.g. "{0}：{1}"), rather than being folded into one
+    // run and re-translated as a single sentence every time.
     // Runs made up of digits/signs/percent/punctuation only (no Chinese at all) are filtered out
     // afterwards and left as literal template text - e.g. "威望+10" still splits into fragment
     // "威望" + literal "+10" because nothing follows the number, and "1000-12-0-0" stays fully
@@ -48,7 +55,10 @@ public static partial class CompoundFieldSplitter
     // a spurious fragment boundary and split a quoted word out of its sentence, e.g.
     // "...摊开，都翻到小数字为“一”的那一页）" would otherwise split into three fragments around "一"
     // instead of staying one continuous sentence fragment.
-    private const string CjkTextChars = @"\p{IsCJKUnifiedIdeographs}0-9.\p{IsCJKSymbolsandPunctuation}\p{IsHalfwidthandFullwidthForms}\u2018\u2019\u201C\u201D";
+    // Character class subtraction ('-[\uFF1A]') carves the fullwidth colon back out of
+    // \p{IsHalfwidthandFullwidthForms} so it acts as a fragment boundary instead of being absorbed -
+    // see the comment above.
+    private const string CjkTextChars = @"\p{IsCJKUnifiedIdeographs}0-9.\p{IsCJKSymbolsandPunctuation}\p{IsHalfwidthandFullwidthForms}\u2018\u2019\u201C\u201D-[\uFF1A]";
 
     [GeneratedRegex(@"(?:[+\-](?=[0-9]))?[" + CjkTextChars + @"]+(?:%[" + CjkTextChars + @"]*)*", RegexOptions.Compiled)]
     private static partial Regex TranslatableRunRegex();
@@ -211,15 +221,145 @@ public static partial class CompoundFieldSplitter
         var rawTemplate = runRegex.Replace(escapedCell, match =>
         {
             if (!ChineseCharRegex().IsMatch(match.Value))
-                return match.Value; // pure digits/decimal point run - not translatable, leave as-is
+                return match.Value; // pure quote/paren/digit/decimal-point run - not translatable, leave as-is
 
             var placeholder = $"{{{fragments.Count}}}";
             fragments.Add(match.Value);
             return placeholder;
         });
 
-        return MergeAdjacentFragments(rawTemplate, fragments);
+        var (rebalancedTemplate, rebalancedFragments) = RebalanceBoundaryMarks(rawTemplate, fragments);
+
+        return MergeAdjacentFragments(rebalancedTemplate, rebalancedFragments);
     }
+
+    // Boundary quote/bracket pairs that this game's text uses to wrap a quoted word, title, or
+    // (for fullwidth parens) a parenthetical aside - see RebalanceBoundaryMarks below for why a
+    // pair needs special handling when a placeholder sits between its two halves.
+    private static readonly (char Open, char Close)[] BoundaryMarkPairs =
+    [
+        ('\u201C', '\u201D'), // “ ”
+        ('\u2018', '\u2019'), // ‘ ’
+        ('\u300A', '\u300B'), // 《 》
+        ('\uFF08', '\uFF09'), // （ ）
+    ];
+
+    /// <summary>
+    /// Fixes a specific mis-split that happens when a game-format placeholder (escaped to "⟦n⟧" -
+    /// see Decompose above) sits directly between the two halves of a quote/bracket pair that are
+    /// BOTH present in the same raw cell, e.g. raw "“{0}”竟有这等境界...\n我不能及也": the opening
+    /// "“" has no adjacent Chinese to join (the escaped placeholder isn't part of any translatable
+    /// run), so it becomes an isolated literal token on its own - but the closing "”" IS directly
+    /// adjacent to real Chinese text right after it ("之高，"/"竟有这等境界..."), so the regex
+    /// naturally absorbs it into the START of that fragment instead, e.g. producing fragment text
+    /// "”竟有这等境界...". Left alone, the reconstructed template would end up with only the
+    /// OPENING mark as a template literal while the CLOSING mark rides along inside the translated
+    /// fragment - i.e. the pair gets torn apart even though the original text is fully
+    /// self-contained (both marks belong to the same clause, framing the placeholder, not
+    /// continuing into a different row/split the way <see cref="LineValidation.FixUnbalancedQuotes"/>/
+    /// <see cref="LineValidation.FixUnbalancedParentheses"/> handle for a GENUINELY one-sided
+    /// fragment). The fix: when a literal token contains an unmatched open mark (no closing mark
+    /// already balancing it later in that same literal) immediately followed by a fragment whose
+    /// text starts with the matching close mark, move that leading close mark out of the fragment
+    /// and onto the end of the literal - restoring the original "open⟦0⟧close" literal shape and
+    /// leaving the fragment with only the genuinely translatable text after it. Keeps the original
+    /// CJK glyph (no ASCII conversion) since this literal text is never sent to the LLM at all.
+    /// </summary>
+    private static (string Template, List<string> Fragments) RebalanceBoundaryMarks(string rawTemplate, List<string> rawFragments)
+    {
+        if (rawFragments.Count == 0)
+            return (rawTemplate, rawFragments);
+
+        var tokens = Tokenize(rawTemplate, rawFragments);
+
+        foreach (var (open, close) in BoundaryMarkPairs)
+        {
+            for (int k = 0; k < tokens.Count - 1; k++)
+            {
+                if (tokens[k].IsFragment || !tokens[k + 1].IsFragment)
+                    continue;
+
+                var literalText = tokens[k].Text;
+                var fragmentText = tokens[k + 1].Text;
+
+                if (fragmentText.Length == 0 || fragmentText[0] != close)
+                    continue;
+
+                var openIdx = literalText.LastIndexOf(open);
+                if (openIdx < 0)
+                    continue;
+
+                // If a close already appears after that open within the same literal, this pair is
+                // already balanced there - not our case (avoid double-moving an unrelated pair).
+                if (literalText[(openIdx + 1)..].Contains(close))
+                    continue;
+
+                tokens[k] = (false, literalText + close);
+                tokens[k + 1] = (true, fragmentText[1..]);
+            }
+        }
+
+        return Rebuild(tokens);
+    }
+
+    /// <summary>
+    /// Splits a template string (with "{n}" fragment placeholders) and its ordered fragment list
+    /// into an alternating sequence of literal/fragment tokens - always starting and ending with a
+    /// literal token (possibly empty), so every fragment has a literal neighbour on each side to
+    /// inspect. Shared by <see cref="RebalanceBoundaryMarks"/> and <see cref="MergeAdjacentFragments"/>.
+    /// </summary>
+    private static List<(bool IsFragment, string Text)> Tokenize(string template, IReadOnlyList<string> fragments)
+    {
+        var tokens = new List<(bool IsFragment, string Text)>();
+        var literal = new StringBuilder();
+        int i = 0;
+        while (i < template.Length)
+        {
+            if (template[i] == '{')
+            {
+                tokens.Add((false, literal.ToString()));
+                literal.Clear();
+
+                var close = template.IndexOf('}', i);
+                var index = int.Parse(template[(i + 1)..close]);
+                tokens.Add((true, fragments[index]));
+                i = close + 1;
+            }
+            else
+            {
+                literal.Append(template[i]);
+                i++;
+            }
+        }
+        tokens.Add((false, literal.ToString()));
+
+        return tokens;
+    }
+
+    /// <summary>
+    /// Reassembles a token list (see <see cref="Tokenize"/>) back into a (template, fragments)
+    /// pair, renumbering "{n}" placeholders to match the fragment list's final order.
+    /// </summary>
+    private static (string Template, List<string> Fragments) Rebuild(List<(bool IsFragment, string Text)> tokens)
+    {
+        var fragments = new List<string>();
+        var template = new StringBuilder();
+        foreach (var token in tokens)
+        {
+            if (token.IsFragment)
+            {
+                template.Append('{').Append(fragments.Count).Append('}');
+                fragments.Add(token.Text);
+            }
+            else
+            {
+                template.Append(token.Text);
+            }
+        }
+
+        return (template.ToString(), fragments);
+    }
+
 
 
 
@@ -244,31 +384,7 @@ public static partial class CompoundFieldSplitter
         if (rawFragments.Count == 0)
             return (rawTemplate, rawFragments);
 
-        // Tokenize into an alternating sequence of literal / fragment tokens, always starting and
-        // ending with a literal token (possibly empty), so every fragment has a literal neighbour
-        // on each side to inspect.
-        var tokens = new List<(bool IsFragment, string Text)>();
-        var literal = new StringBuilder();
-        int i = 0;
-        while (i < rawTemplate.Length)
-        {
-            if (rawTemplate[i] == '{')
-            {
-                tokens.Add((false, literal.ToString()));
-                literal.Clear();
-
-                var close = rawTemplate.IndexOf('}', i);
-                var index = int.Parse(rawTemplate[(i + 1)..close]);
-                tokens.Add((true, rawFragments[index]));
-                i = close + 1;
-            }
-            else
-            {
-                literal.Append(rawTemplate[i]);
-                i++;
-            }
-        }
-        tokens.Add((false, literal.ToString()));
+        var tokens = Tokenize(rawTemplate, rawFragments);
 
         // Repeatedly fuse two fragments together whenever an empty literal token sits between them
         // until no more merges apply.
@@ -294,22 +410,7 @@ public static partial class CompoundFieldSplitter
             }
         }
 
-        var mergedFragments = new List<string>();
-        var template = new StringBuilder();
-        foreach (var token in tokens)
-        {
-            if (token.IsFragment)
-            {
-                template.Append('{').Append(mergedFragments.Count).Append('}');
-                mergedFragments.Add(token.Text);
-            }
-            else
-            {
-                template.Append(token.Text);
-            }
-        }
-
-        return (template.ToString(), mergedFragments);
+        return Rebuild(tokens);
     }
 
 
@@ -321,6 +422,31 @@ public static partial class CompoundFieldSplitter
     /// </summary>
     public static bool IsTrivialTemplate(string template, int fragmentCount) =>
         fragmentCount == 1 && template == "{0}";
+
+    // Normalizes bare quote/bracket/paren marks left as literal (non-fragment) template text to
+    // the same ASCII style the translated side gets normalized to elsewhere in the pipeline - see
+    // the call site in Decompose above for why a literal-only run needs this (it never goes
+    // through <see cref="LineValidation.PrepareRaw"/>/translation/cleanup otherwise, so it would
+    // keep its original CJK glyph forever while its counterpart - if it instead ends up inside a
+    // translated fragment - gets normalized). Two independent normalizations apply here, matching
+    // the two places that already do this on the fragment side:
+    //  - Curly double quotes ("“"/"”"), curly single quotes ("‘"/"’"), and CJK title brackets
+    //    ("《"/"》") all consistently map to a single ASCII "'", matching
+    //    <see cref="LineValidation.FixUnbalancedQuotes"/>'s target style for a translated
+    //    fragment's boundary quote.
+    //  - Fullwidth parentheses ("（"/"）") map to their ASCII equivalents "("/")", matching
+    //    <see cref="LineValidation.PrepareRaw"/>'s normalization (applied to fragment text before
+    //    it's ever sent to the LLM) and <see cref="LineValidation.FixUnbalancedParentheses"/>'s
+    //    ASCII-only boundary-paren repair on the translated side. Without this, a stranded literal
+    //    "（" (e.g. isolated from its matching "）" by an escaped format-placeholder marker
+    //    sitting in between) would survive verbatim in the packaged output as a fullwidth paren
+    //    while its counterpart got repaired/normalized to an ASCII paren - the exact same
+    //    mismatched-pair bug class as the quote case above.
+    private static string NormalizeLiteralQuoteMarks(string s) =>
+        s.Replace('\u201C', '\'').Replace('\u201D', '\'')  // “ ”
+         .Replace('\u2018', '\'').Replace('\u2019', '\'')  // ‘ ’
+         .Replace('\u300A', '\'').Replace('\u300B', '\'')  // 《 》
+         .Replace('\uFF08', '(').Replace('\uFF09', ')');   // （ ）
 
     /// <summary>
     /// Rebuilds a cell from its template and translated fragments, in fragment order.
