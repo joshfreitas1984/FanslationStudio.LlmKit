@@ -28,6 +28,7 @@ public static partial class LineValidation
         "Please provide the Chinese string you would like to be translated into English",
         "please provide the Chinese string",
         "please provide the specific Chinese strings",
+        "removed from the translation",
         "Chinese text",
         "Chinese sentence",
         "translates to",
