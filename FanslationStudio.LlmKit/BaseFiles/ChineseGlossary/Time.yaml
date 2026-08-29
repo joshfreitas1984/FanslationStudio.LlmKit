@@ -18,6 +18,8 @@
   result: Second
   direct: Second
   literal: Miao
+  allowalt:
+    - quick
 
 # Time
 - raw: 子时

@@ -91,6 +91,9 @@
   result: General
   direct: general
   literal: jiangjun
+  allowalt:
+    - military
+    - arms
 - raw: 长老
   rawSimplified: 长老
   rawTraditional: 長老
@@ -222,7 +225,7 @@
   literal: Di Di
   context: Refers to one's younger brother.
 - raw: 大哥
-  result: Senior Brother
+  result: Big Brother
   allowalt:
   - Brother
   literal: Da Ge
@@ -234,6 +237,12 @@
   allowalt:
   - Brother
   literal: Shixiong
+- raw: 大师兄
+  rawSimplified: 大师兄
+  rawTraditional: 大師兄
+  result: Big Senior Brother
+  direct: Big Senior Brother
+  literal: Da Shixiong
 - raw: 阿兄
   result: Elder Brother
   allowalt:
@@ -258,7 +267,7 @@
   literal: Jie Jie
   context: Refers to one's older sister.
 - raw: 大姐
-  result: Senior Sister
+  result: Big Sister
   allowalt:
   - Sister
   literal: Da Jie
