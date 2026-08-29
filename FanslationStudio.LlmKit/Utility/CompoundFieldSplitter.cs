@@ -274,6 +274,38 @@ public static partial class CompoundFieldSplitter
 
         foreach (var (open, close) in BoundaryMarkPairs)
         {
+            // Mirror image of the close-mark fix below: an OPEN mark can end up glued onto the
+            // END of a fragment instead (e.g. raw "我“{0}”修为远胜{1}..." - "我“" is one
+            // continuous run since the quote directly follows Chinese with nothing between them,
+            // so it becomes fragment text "我“" rather than an isolated literal). Move that
+            // trailing open mark out of the fragment and onto the front of the following literal
+            // token (the escaped placeholder) so the loop below can pull a matching close mark out
+            // of the fragment right after it, restoring the original "open⟦0⟧close" literal shape
+            // around the placeholder. Only fires when there IS such a following fragment starting
+            // with the matching close - otherwise this would tear apart a genuinely glued run like
+            // "占领门派（" + "-99表示自动）" (no placeholder between them, nothing to rebalance).
+            for (int k = 0; k < tokens.Count - 2; k++)
+            {
+                if (!tokens[k].IsFragment || tokens[k + 1].IsFragment || !tokens[k + 2].IsFragment)
+                    continue;
+
+                var fragmentText = tokens[k].Text;
+                if (fragmentText.Length == 0 || fragmentText[^1] != open)
+                    continue;
+
+                var nextFragmentText = tokens[k + 2].Text;
+                if (nextFragmentText.Length == 0 || nextFragmentText[0] != close)
+                    continue;
+
+                // If a matching close already appears earlier in the same fragment, this open is
+                // already balanced there - not our case (avoid tearing apart an unrelated pair).
+                if (fragmentText[..^1].Contains(close))
+                    continue;
+
+                tokens[k] = (true, fragmentText[..^1]);
+                tokens[k + 1] = (false, open + tokens[k + 1].Text);
+            }
+
             for (int k = 0; k < tokens.Count - 1; k++)
             {
                 if (tokens[k].IsFragment || !tokens[k + 1].IsFragment)

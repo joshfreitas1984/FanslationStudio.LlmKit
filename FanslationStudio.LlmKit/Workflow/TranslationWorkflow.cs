@@ -322,13 +322,15 @@ public static class TranslationWorkflow
 
     private static bool TryFlagAllCapsTranslation(TranslationSplit split, string preparedRaw)
     {
-        if (!string.IsNullOrEmpty(split.Translated)
-            && split.Translated.ToUpper() == split.Translated)
-        {
-            split.FlaggedForRetranslation = true;
-            split.FlaggedMistranslation = "All caps";
-            return true;
-        }
+        // things like "I..." flag this and its annoying
+        //if (!string.IsNullOrEmpty(split.Translated) 
+        //    && split.Translated.Length > 1
+        //    && split.Translated.ToUpper() == split.Translated)
+        //{
+        //    split.FlaggedForRetranslation = true;
+        //    split.FlaggedMistranslation = "All caps";
+        //    return true;
+        //}
 
         return false;
     }
