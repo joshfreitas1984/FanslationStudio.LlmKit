@@ -190,6 +190,9 @@ public static class TranslationWorkflow
         if (TryFlagEmptyTranslation(split, preparedRaw))
             return true;
 
+        if (TryFlagAllCapsTranslation(split, preparedRaw))
+            return true;
+
         return ApplyTranslationRules(logLines, config, split, textFile, preparedRaw);
     }
 
@@ -315,6 +318,19 @@ public static class TranslationWorkflow
         }
 
         return null;
+    }
+
+    private static bool TryFlagAllCapsTranslation(TranslationSplit split, string preparedRaw)
+    {
+        if (!string.IsNullOrEmpty(split.Translated)
+            && split.Translated.ToUpper() == split.Translated)
+        {
+            split.FlaggedForRetranslation = true;
+            split.FlaggedMistranslation = "All caps";
+            return true;
+        }
+
+        return false;
     }
 
     private static bool TryFlagEmptyTranslation(TranslationSplit split, string preparedRaw)

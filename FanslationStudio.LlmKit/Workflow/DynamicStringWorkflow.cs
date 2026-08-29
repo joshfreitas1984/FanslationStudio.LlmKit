@@ -148,7 +148,9 @@ public static class DynamicStringWorkflow
                 if (failed)
                     failedCount++;
                 else
+                {
                     passedCount++;
+                }
             }
 
             await Task.CompletedTask;
