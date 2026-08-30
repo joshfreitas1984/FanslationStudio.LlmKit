@@ -554,9 +554,59 @@ public static partial class CompoundFieldSplitter
 
     private static bool IsCjkIdeograph(char c) => c is >= '\u4E00' and <= '\u9FFF';
 
+    private static readonly Regex EscapedBraceRegex = new(@"⟦[^⟦⟧]*⟧", RegexOptions.Compiled);
+
+    // A restored "{n}"-style format placeholder's real runtime value (a number, date, or an
+    // already-translated token substituted in by the game itself) is unknown at packaging time,
+    // so - unlike NeedsWordBoundarySpace above, which compares two known characters - spacing
+    // around it can only be decided from the ONE known side: the adjacent literal/fragment text.
+    // A space is needed only when that side has already been translated to Latin-script
+    // alphanumeric text (e.g. "Chapter"/"Wheel") - untouched CJK text right next to a raw format
+    // placeholder (e.g. "年"/"月"/"日" glued straight onto "{0}") is exactly how the original raw
+    // string already looked, and must stay byte-identical when round-tripped unchanged.
+    private static bool NeedsPlaceholderBoundarySpace(char? c) =>
+        c.HasValue && char.IsLetterOrDigit(c.Value) && !IsCjkIdeograph(c.Value);
+
     // Reverses the '⟦'/'⟧' escaping Decompose applies to literal '{'/'}' characters, restoring
     // the original ASCII braces now that fragment placeholder substitution is done and there's no
-    // more risk of confusing the two.
-    private static string UnescapeBraces(string s) =>
-        s.Replace("⟦", "{").Replace("⟧", "}");
+    // more risk of confusing the two. Mirrors ReplacePlaceholderWithWordBoundarySpacing's
+    // word-boundary spacing for the SYNTHESIZED "{n}" fragment placeholders above - without this,
+    // a raw format placeholder like "第{0}轮" (raw "{0}" escaped to "⟦0⟧", then reconstructed with
+    // translated fragments "Chapter"/"Wheel" around it) restored via a plain substring replace
+    // straight to "Chapter{0}Wheel", smashing the words together with no space around the
+    // placeholder - the exact same word-smashing bug the fragment-side fix already covers, just on
+    // the other kind of placeholder that Reconstruct restores.
+    private static string UnescapeBraces(string s)
+    {
+        var matches = EscapedBraceRegex.Matches(s);
+        if (matches.Count == 0)
+            return s;
+
+        var sb = new StringBuilder();
+        var startIndex = 0;
+
+        foreach (Match m in matches)
+        {
+            var (beforeCore, beforeTrailingMarkup) = HtmlTagHelpers.SplitTrailingMarkup(s[startIndex..m.Index]);
+            sb.Append(beforeCore);
+
+            if (NeedsPlaceholderBoundarySpace(HtmlTagHelpers.EffectiveTrailingChar(sb.ToString())))
+                sb.Append(' ');
+
+            sb.Append(beforeTrailingMarkup);
+            sb.Append(m.Value.Replace('⟦', '{').Replace('⟧', '}'));
+            startIndex = m.Index + m.Length;
+
+            var afterFull = startIndex < s.Length ? s[startIndex..] : string.Empty;
+            var (afterLeadingMarkup, afterCore) = HtmlTagHelpers.SplitLeadingMarkup(afterFull);
+            sb.Append(afterLeadingMarkup);
+            startIndex += afterLeadingMarkup.Length;
+
+            if (NeedsPlaceholderBoundarySpace(HtmlTagHelpers.EffectiveLeadingChar(afterCore)))
+                sb.Append(' ');
+        }
+
+        sb.Append(s, startIndex, s.Length - startIndex);
+        return sb.ToString();
+    }
 }
