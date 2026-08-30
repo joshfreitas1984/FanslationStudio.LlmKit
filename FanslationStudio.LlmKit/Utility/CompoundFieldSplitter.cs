@@ -329,6 +329,57 @@ public static partial class CompoundFieldSplitter
                 tokens[k] = (false, literalText + close);
                 tokens[k + 1] = (true, fragmentText[1..]);
             }
+
+            // Handles an OPEN mark glued onto the end of a fragment whose matching CLOSE mark is
+            // not adjacent at all - it shows up further along, embedded inside a later literal
+            // token (e.g. after an intervening HTML tag and another fragment), rather than sitting
+            // at the very start of the next token the way the two loops above require. e.g. raw
+            // "...遇到了“<b>瓶颈</b>”！": "了“" has nothing between the Chinese and the quote, so
+            // it becomes part of one fragment ("...了“"); "<b>" is its own literal; "瓶颈" is the
+            // next fragment; then "</b>”！" is a literal with the closing "”" embedded partway
+            // through (after the tag), not at position 0. Left alone the opening mark would vanish
+            // from the template entirely (stuck inside the fragment) while the closing mark stays
+            // correctly in the template literal. Move the trailing open mark out of the fragment
+            // and onto the front of the immediately-following literal, but only when the matching
+            // close later turns up inside a literal token (never swallowed into a fragment, and
+            // with no fresh occurrence of either mark in between) - otherwise there's no real pair
+            // to rebalance here and this is left for <see cref="MergeAdjacentFragments"/> instead.
+            for (int k = 0; k < tokens.Count - 1; k++)
+            {
+                if (!tokens[k].IsFragment || tokens[k + 1].IsFragment)
+                    continue;
+
+                var fragmentText = tokens[k].Text;
+                if (fragmentText.Length == 0 || fragmentText[^1] != open)
+                    continue;
+
+                if (fragmentText[..^1].Contains(close))
+                    continue; // already balanced within this fragment
+
+                if (tokens[k + 1].Text.Contains(close))
+                    continue; // nothing to move - the loops above already cover this shape
+
+                bool closeFoundLater = false;
+                for (int j = k + 2; j < tokens.Count; j++)
+                {
+                    if (tokens[j].IsFragment)
+                    {
+                        if (tokens[j].Text.Contains(open) || tokens[j].Text.Contains(close))
+                            break; // ambiguous/already-paired elsewhere - bail without guessing
+
+                        continue;
+                    }
+
+                    closeFoundLater = tokens[j].Text.Contains(close);
+                    break;
+                }
+
+                if (!closeFoundLater)
+                    continue;
+
+                tokens[k] = (true, fragmentText[..^1]);
+                tokens[k + 1] = (false, open + tokens[k + 1].Text);
+            }
         }
 
         return Rebuild(tokens);
