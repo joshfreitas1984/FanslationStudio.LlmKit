@@ -58,7 +58,7 @@ public static class ConfigurationExtensions
             response.Runtime.Models[model.Name] = runtimeConfig;
 
             // Merge custom prompts if they are specified
-            var customPromptsPath = model.CustomPromptsPath == string.Empty ?
+            var customPromptsPath = string.IsNullOrEmpty(model.CustomPromptsPath) ?
                 $"{workingDirectory}/{model.Name}Prompts"
                 : $"{workingDirectory}/{model.CustomPromptsPath}";
 
