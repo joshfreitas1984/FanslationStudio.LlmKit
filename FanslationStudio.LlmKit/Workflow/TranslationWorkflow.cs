@@ -397,6 +397,30 @@ public static class TranslationWorkflow
             modified = true;
         }
 
+        // A raw split starting with a comma ("，" or plain ",") is a fragment continuing directly
+        // from the previous cell/sentence (e.g. a compound field split by
+        // CompoundFieldSplitter) - the translation must keep that comma as the very first
+        // characters too. The model routinely relocates it into a natural-sounding construction
+        // instead (raw "，比方说这太祖长拳，" -> "For example, this Taijiquan" instead of
+        // ", for example, this Taijiquan"), silently losing the fragment-boundary marker.
+        if (preparedRaw.StartsWith('，') || preparedRaw.StartsWith(','))
+        {
+            if (split.Translated.StartsWith(',') && !split.Translated.StartsWith(", "))
+            {
+                // Comma preserved but glued directly onto the next word with no space.
+                logLines.Add($"Leading comma missing space {textFile.Path} Replaces: \n{split.Translated}");
+                split.Translated = $", {split.Translated[1..].TrimStart()}";
+                modified = true;
+            }
+            else if (!split.Translated.StartsWith(", ") && !split.Translated.StartsWith('，'))
+            {
+                // Comma dropped/relocated entirely.
+                logLines.Add($"Missing leading comma {textFile.Path} Replaces: \n{split.Translated}");
+                split.Translated = $", {split.Translated}";
+                modified = true;
+            }
+        }
+
         // Trim line
         if (split.Translated.Trim().Length != split.Translated.Length)
         {

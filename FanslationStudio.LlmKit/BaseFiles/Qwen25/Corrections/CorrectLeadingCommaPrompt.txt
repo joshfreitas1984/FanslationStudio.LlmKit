@@ -1,0 +1,1 @@
+The source text begins with a comma, meaning this fragment continues directly from the previous sentence/cell. Your translation must begin with ", " (a comma followed by a space) as the very first characters - do not relocate the comma into the middle of the sentence.

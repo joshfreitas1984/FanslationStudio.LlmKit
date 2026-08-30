@@ -83,6 +83,58 @@ public static class HtmlTagHelpers
         return tags;
     }
 
+    // "(?:...)+$"/"^(?:...)+" alternate between two kinds of invisible-at-render-time token: real
+    // HTML/rich-text tags, and this game's literal backslash escape sequences ("\n", "\r", "\t" -
+    // two literal ASCII characters, backslash + letter, not an actual control character) used as a
+    // newline/tab marker in raw game text. Both render with zero visible width of their own, so
+    // neither should count as the "real" trailing/leading character for word-boundary spacing
+    // purposes - confirmed necessary the hard way: without the escape-sequence half of this, the
+    // trailing "n" of a literal "\n" was being treated as a real Latin letter, inserting a spurious
+    // space between "\n" and the CJK/translated text that followed it.
+    private static readonly Regex TrailingTagsRegex = new(@"(?:<\/?[A-Za-z][^<>]*>|\\[nrt])+$", RegexOptions.Compiled);
+    private static readonly Regex LeadingTagsRegex = new(@"^(?:<\/?[A-Za-z][^<>]*>|\\[nrt])+", RegexOptions.Compiled);
+
+    /// <summary>
+    /// Returns the last *visible* character of <paramref name="s"/> - i.e. skipping any run of
+    /// complete HTML/rich-text tags ("&lt;b&gt;", "&lt;/color&gt;", etc.) or literal "\n"/"\r"/"\t"
+    /// escape sequences sitting at the very end - since neither renders as real text. Used by
+    /// callers that need to decide whether a word-boundary space is needed right before something
+    /// that will be placed immediately after <paramref name="s"/> (see
+    /// <see cref="CompoundFieldSplitter.Reconstruct"/>).
+    /// </summary>
+    public static char? EffectiveTrailingChar(string s)
+    {
+        var stripped = TrailingTagsRegex.Replace(s, string.Empty);
+        return stripped.Length > 0 ? stripped[^1] : null;
+    }
+
+    /// <summary>Leading-edge counterpart to <see cref="EffectiveTrailingChar"/>.</summary>
+    public static char? EffectiveLeadingChar(string s)
+    {
+        var stripped = LeadingTagsRegex.Replace(s, string.Empty);
+        return stripped.Length > 0 ? stripped[0] : null;
+    }
+
+    /// <summary>
+    /// Splits off any trailing run of tags/escape-sequences (see <see cref="EffectiveTrailingChar"/>)
+    /// from <paramref name="s"/>, returning the real text and the markup separately so a caller can
+    /// splice something (e.g. a word-boundary space) in BETWEEN them instead of after - keeping an
+    /// opening tag like "&lt;b&gt;" attached to the fragment it's about to wrap, rather than
+    /// stranding it on the wrong side of an inserted space.
+    /// </summary>
+    public static (string Core, string TrailingMarkup) SplitTrailingMarkup(string s)
+    {
+        var match = TrailingTagsRegex.Match(s);
+        return match.Success ? (s[..match.Index], s[match.Index..]) : (s, string.Empty);
+    }
+
+    /// <summary>Leading-edge counterpart to <see cref="SplitTrailingMarkup"/>.</summary>
+    public static (string LeadingMarkup, string Core) SplitLeadingMarkup(string s)
+    {
+        var match = LeadingTagsRegex.Match(s);
+        return match.Success ? (match.Value, s[match.Length..]) : (string.Empty, s);
+    }
+
     public static string TrimHtmlTagsInContent(string input)
     {
         // Regular expression to match HTML tags and remove extra spaces, including self-closing tags

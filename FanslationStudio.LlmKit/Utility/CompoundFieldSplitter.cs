@@ -490,10 +490,69 @@ public static partial class CompoundFieldSplitter
 
         var result = template;
         for (int i = 0; i < translatedFragments.Count; i++)
-            result = result.Replace($"{{{i}}}", translatedFragments[i]);
+            result = ReplacePlaceholderWithWordBoundarySpacing(result, $"{{{i}}}", translatedFragments[i]);
 
         return UnescapeBraces(result);
     }
+
+    // Plain substring replace (the previous implementation) smashes words together whenever a
+    // translated fragment lands directly next to literal template text with no separator - the
+    // source Chinese never needed a space there (CJK doesn't rely on whitespace for word
+    // boundaries), but a translated (typically Latin-script) replacement does, e.g. template
+    // "And<b>{0}</b>, ..." with fragment "External Skill" reconstructing to
+    // "And<b>External Skill</b>, ..." instead of "And <b>External Skill</b>, ...". Runtime
+    // counterpart of this exact fix (applied to substring-dictionary replacement instead of
+    // template placeholder substitution): DragonHeirPlugin/DynamicStringPatches.cs's
+    // ReplaceWithWordBoundarySpacing.
+    //
+    // Only inserts a space when the visible (HTML/rich-text-tag-stripped, see
+    // HtmlTagHelpers.EffectiveTrailingChar/EffectiveLeadingChar) character on both sides of the
+    // boundary is alphanumeric AND at least one side is NOT a CJK ideograph - the CJK exclusion is
+    // required so every existing Decompose -> Reconstruct round-trip with the SAME (untranslated)
+    // fragments stays byte-for-byte identical (a CJK/CJK boundary never needs a space), while still
+    // fixing the Latin/Latin (or Latin/CJK-fallback) word-smashing case above.
+    private static string ReplacePlaceholderWithWordBoundarySpacing(string input, string placeholder, string replacement)
+    {
+        var sb = new StringBuilder();
+        var startIndex = 0;
+        int idx;
+        while ((idx = input.IndexOf(placeholder, startIndex, StringComparison.Ordinal)) >= 0)
+        {
+            // Split off any trailing tag/escape run from the literal text before this placeholder
+            // so a needed space can be spliced in BETWEEN the real text and the markup - keeping an
+            // opening tag like "<b>" attached to the fragment it wraps (e.g. "And <b>Foo") instead
+            // of stranding it on the wrong side of the space (e.g. "And<b> Foo").
+            var (beforeCore, beforeTrailingMarkup) = HtmlTagHelpers.SplitTrailingMarkup(input[startIndex..idx]);
+            sb.Append(beforeCore);
+
+            if (NeedsWordBoundarySpace(HtmlTagHelpers.EffectiveTrailingChar(sb.ToString()), HtmlTagHelpers.EffectiveLeadingChar(replacement)))
+                sb.Append(' ');
+
+            sb.Append(beforeTrailingMarkup);
+            sb.Append(replacement);
+            startIndex = idx + placeholder.Length;
+
+            // Mirror image for the trailing side: pull any leading tag/escape run of what follows
+            // (e.g. a closing "</b>") in immediately after the fragment, then decide whether a
+            // space is needed between that markup and the real text that follows it.
+            var afterFull = startIndex < input.Length ? input[startIndex..] : string.Empty;
+            var (afterLeadingMarkup, afterCore) = HtmlTagHelpers.SplitLeadingMarkup(afterFull);
+            sb.Append(afterLeadingMarkup);
+            startIndex += afterLeadingMarkup.Length;
+
+            if (NeedsWordBoundarySpace(HtmlTagHelpers.EffectiveTrailingChar(replacement), HtmlTagHelpers.EffectiveLeadingChar(afterCore)))
+                sb.Append(' ');
+        }
+        sb.Append(input, startIndex, input.Length - startIndex);
+        return sb.ToString();
+    }
+
+    private static bool NeedsWordBoundarySpace(char? left, char? right) =>
+        left.HasValue && right.HasValue
+        && char.IsLetterOrDigit(left.Value) && char.IsLetterOrDigit(right.Value)
+        && !(IsCjkIdeograph(left.Value) && IsCjkIdeograph(right.Value));
+
+    private static bool IsCjkIdeograph(char c) => c is >= '\u4E00' and <= '\u9FFF';
 
     // Reverses the '⟦'/'⟧' escaping Decompose applies to literal '{'/'}' characters, restoring
     // the original ASCII braces now that fragment placeholder substitution is done and there's no

@@ -353,6 +353,18 @@ public static partial class LineValidation
             correctionPrompts.AddPromptWithValues(config, "CorrectColonSegementPrompt");
         }
 
+        // A raw cell that starts with a comma ("，" or plain ",") is a fragment that continues
+        // directly from the previous cell/sentence (e.g. a compound field split by
+        // CompoundFieldSplitter). The model routinely relocates the comma into a natural-sounding
+        // construction instead of keeping it as the leading character - e.g. raw
+        // "，比方说这太祖长拳，" mistranslated as "For example, this Taijiquan" instead of
+        // ", for example, this Taijiquan" - silently losing the fragment-boundary marker.
+        if ((raw.StartsWith('，') || raw.StartsWith(',')) && !(result.StartsWith(", ") || result.StartsWith('，')))
+        {
+            response = false;
+            correctionPrompts.AddPromptWithValues(config, "CorrectLeadingCommaPrompt");
+        }
+
         //Place holders - incase the model ditched them
         var matches = PlaceholderPatternRegex().Matches(raw);
         foreach (Match match in matches)
