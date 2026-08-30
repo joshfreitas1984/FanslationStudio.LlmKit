@@ -42,6 +42,8 @@ public static partial class LineValidation
         "Output only the",
         "the translation remains",
         "fully corrected English translation",
+        "Translate all Chinese characters",
+        "untranslated Chinese characters"
     ];
 
     private static readonly (string raw, string trans)[] CheckForRemoval = [];
