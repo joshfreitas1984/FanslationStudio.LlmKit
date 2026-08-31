@@ -123,6 +123,9 @@ public static class DynamicStringWorkflow
                 if (result == null)
                     continue;
 
+                // Undo hyphen
+                result = result.Replace("\u2011", "-");
+
                 // A raw string still containing a literal "{n}" placeholder (e.g.
                 // "{0}年{1}月{2}日") is a String.Format-style template - see
                 // DynamicStringResult.IsTemplate for why this must be flagged explicitly rather

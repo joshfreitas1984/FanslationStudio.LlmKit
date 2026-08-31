@@ -122,6 +122,9 @@ public static class PrefabTextWorkflow
                 if (result == null)
                     continue;
 
+                // Undo hyphen
+                result = result.Replace("\u2011", "-");
+
                 results.Add(new PrefabTextResult(line.Raw, result));
 
                 if (failed)
