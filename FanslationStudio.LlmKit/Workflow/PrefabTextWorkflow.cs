@@ -45,6 +45,7 @@ public static class PrefabTextWorkflow
         Directory.CreateDirectory(exportPath);
         Directory.CreateDirectory(convertedPath);
 
+
         var foundLines = File.ReadAllLines(dumpedPath)
             .Where(line => !string.IsNullOrEmpty(line))
             .Select(line =>
