@@ -600,7 +600,11 @@ public static partial class CompoundFieldSplitter
 
     private static bool NeedsWordBoundarySpace(char? left, char? right) =>
         left.HasValue && right.HasValue
-        && char.IsLetterOrDigit(left.Value) && char.IsLetterOrDigit(right.Value)
+        && char.IsLetterOrDigit(right.Value)
+        // A closing ')' has no letter/digit of its own, but a translated fragment starting right
+        // after one (e.g. literal ")" followed by fragment "Improve Level") still needs a space -
+        // English convention always puts a space after a parenthetical before the next word.
+        && (char.IsLetterOrDigit(left.Value) || left.Value == ')')
         && !(IsCjkIdeograph(left.Value) && IsCjkIdeograph(right.Value));
 
     private static bool IsCjkIdeograph(char c) => c is >= '\u4E00' and <= '\u9FFF';
@@ -617,6 +621,16 @@ public static partial class CompoundFieldSplitter
     // string already looked, and must stay byte-identical when round-tripped unchanged.
     private static bool NeedsPlaceholderBoundarySpace(char? c) =>
         c.HasValue && char.IsLetterOrDigit(c.Value) && !IsCjkIdeograph(c.Value);
+
+    // Directional variant of the check above, used only for the side AFTER a restored placeholder:
+    // an opening '(' immediately following (e.g. "{0}(") still wants a preceding space (a
+    // parenthetical always starts with a space before it, matching "HeroName (Level 5)"), and a
+    // directly adjacent raw placeholder (still escaped as '⟦', e.g. "{3}{0}" from "⟦3⟧⟦0⟧") does
+    // too, since two runtime-substituted values glued together with no separator is never intended.
+    // Neither case applies on the BEFORE side (e.g. "(⟦0⟧" must stay "(Value" with no inner space),
+    // so this must not be folded into <see cref="NeedsPlaceholderBoundarySpace"/> itself.
+    private static bool NeedsPlaceholderBoundarySpaceAfter(char? c) =>
+        NeedsPlaceholderBoundarySpace(c) || c is '(' or '⟦';
 
     // Reverses the '⟦'/'⟧' escaping Decompose applies to literal '{'/'}' characters, restoring
     // the original ASCII braces now that fragment placeholder substitution is done and there's no
@@ -653,7 +667,7 @@ public static partial class CompoundFieldSplitter
             sb.Append(afterLeadingMarkup);
             startIndex += afterLeadingMarkup.Length;
 
-            if (NeedsPlaceholderBoundarySpace(HtmlTagHelpers.EffectiveLeadingChar(afterCore)))
+            if (NeedsPlaceholderBoundarySpaceAfter(HtmlTagHelpers.EffectiveLeadingChar(afterCore)))
                 sb.Append(' ');
         }
 
