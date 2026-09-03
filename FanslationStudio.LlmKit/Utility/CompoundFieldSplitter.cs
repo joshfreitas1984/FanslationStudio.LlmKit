@@ -235,12 +235,21 @@ public static partial class CompoundFieldSplitter
 
     // Boundary quote/bracket pairs that this game's text uses to wrap a quoted word, title, or
     // (for fullwidth parens) a parenthetical aside - see RebalanceBoundaryMarks below for why a
-    // pair needs special handling when a placeholder sits between its two halves.
+    // pair needs special handling when a placeholder sits between its two halves. All of these
+    // (aside from the curly quotes, U+2018/2019/201C/201D) sit in the "CJK Symbols and
+    // Punctuation" block, which CjkTextChars absorbs into ordinary translatable runs the same way
+    // as any other CJK punctuation - so every pair here is equally at risk of the open/close mark
+    // getting torn apart from its fragment and needs the same rebalancing.
     private static readonly (char Open, char Close)[] BoundaryMarkPairs =
     [
         ('\u201C', '\u201D'), // “ ”
         ('\u2018', '\u2019'), // ‘ ’
         ('\u300A', '\u300B'), // 《 》
+        ('\u3008', '\u3009'), // 〈 〉
+        ('\u300C', '\u300D'), // 「 」
+        ('\u300E', '\u300F'), // 『 』
+        ('\u3010', '\u3011'), // 【 】
+        ('\u3016', '\u3017'), // 〖 〗
         ('\uFF08', '\uFF09'), // （ ）
     ];
 
@@ -330,20 +339,24 @@ public static partial class CompoundFieldSplitter
                 tokens[k + 1] = (true, fragmentText[1..]);
             }
 
-            // Handles an OPEN mark glued onto the end of a fragment whose matching CLOSE mark is
-            // not adjacent at all - it shows up further along, embedded inside a later literal
-            // token (e.g. after an intervening HTML tag and another fragment), rather than sitting
-            // at the very start of the next token the way the two loops above require. e.g. raw
-            // "...遇到了“<b>瓶颈</b>”！": "了“" has nothing between the Chinese and the quote, so
-            // it becomes part of one fragment ("...了“"); "<b>" is its own literal; "瓶颈" is the
-            // next fragment; then "</b>”！" is a literal with the closing "”" embedded partway
-            // through (after the tag), not at position 0. Left alone the opening mark would vanish
-            // from the template entirely (stuck inside the fragment) while the closing mark stays
-            // correctly in the template literal. Move the trailing open mark out of the fragment
-            // and onto the front of the immediately-following literal, but only when the matching
-            // close later turns up inside a literal token (never swallowed into a fragment, and
-            // with no fresh occurrence of either mark in between) - otherwise there's no real pair
-            // to rebalance here and this is left for <see cref="MergeAdjacentFragments"/> instead.
+            // Handles an OPEN mark glued onto the end of a fragment whose matching CLOSE mark
+            // never became its own fragment - either because it sits directly inside the
+            // immediately-following literal (e.g. raw "《{0}{1}》..." where the placeholders'
+            // escaped literal "⟦0⟧⟦1⟧》..." absorbs "》" as ordinary literal text, since a run of
+            // CJK punctuation with no actual Chinese character is left literal - see
+            // ChineseCharRegex's guard in Decompose), or because it shows up further along,
+            // embedded inside a LATER literal token (e.g. after an intervening HTML tag and
+            // another fragment). e.g. raw "...遇到了“<b>瓶颈</b>”！": "了“" has nothing between the
+            // Chinese and the quote, so it becomes part of one fragment ("...了“"); "<b>" is its
+            // own literal; "瓶颈" is the next fragment; then "</b>”！" is a literal with the closing
+            // "”" embedded partway through (after the tag). Left alone the opening mark would
+            // vanish from the template entirely (stuck inside the fragment) while the closing mark
+            // stays correctly in the template literal. Move the trailing open mark out of the
+            // fragment and onto the front of the immediately-following literal, but only when the
+            // matching close later turns up inside a literal token (never swallowed into a
+            // fragment, and with no fresh occurrence of either mark in between) - otherwise there's
+            // no real pair to rebalance here and this is left for
+            // <see cref="MergeAdjacentFragments"/> instead.
             for (int k = 0; k < tokens.Count - 1; k++)
             {
                 if (!tokens[k].IsFragment || tokens[k + 1].IsFragment)
@@ -356,11 +369,15 @@ public static partial class CompoundFieldSplitter
                 if (fragmentText[..^1].Contains(close))
                     continue; // already balanced within this fragment
 
-                if (tokens[k + 1].Text.Contains(close))
-                    continue; // nothing to move - the loops above already cover this shape
-
-                bool closeFoundLater = false;
-                for (int j = k + 2; j < tokens.Count; j++)
+                // tokens[k + 1] is always a literal here (guaranteed by the loop guard above), so
+                // a close mark found anywhere inside it - not just at position 0 - is already the
+                // pair for our open mark (e.g. raw "《{0}{1}》..." with the "》" sitting straight
+                // after the escaped placeholders in the same literal token); previously this was
+                // wrongly treated as "already handled by the loops above" and skipped, leaving the
+                // "《" stranded inside the fragment instead of moving into this literal alongside
+                // its "》".
+                bool closeFoundLater = tokens[k + 1].Text.Contains(close);
+                for (int j = k + 2; !closeFoundLater && j < tokens.Count; j++)
                 {
                     if (tokens[j].IsFragment)
                     {
@@ -379,6 +396,49 @@ public static partial class CompoundFieldSplitter
 
                 tokens[k] = (true, fragmentText[..^1]);
                 tokens[k + 1] = (false, open + tokens[k + 1].Text);
+            }
+
+            // Mirror image of the loop above, scanning BACKWARD: a fragment can start with a
+            // CLOSE mark while its matching OPEN mark is stuck at the end of an EARLIER fragment,
+            // with both a clean (mark-free) literal AND a clean fragment sitting in between - not
+            // just the immediately preceding literal (that adjacent-only case is already handled
+            // by the "literal-then-fragment" loop above). e.g. raw "他说“<b>你好</b>”很高兴":
+            // "他说“" ends with the open mark, "<b>" is its own literal, "你好" is the next
+            // (unrelated) fragment, "</b>" is a literal with no marks at all, and "”很高兴" starts
+            // with the close mark. Left alone both marks stay stranded inside their fragments
+            // instead of moving out into the literals surrounding the tag/placeholder structure
+            // between them.
+            for (int k = 0; k < tokens.Count; k++)
+            {
+                if (!tokens[k].IsFragment)
+                    continue;
+
+                var fragmentText = tokens[k].Text;
+                if (fragmentText.Length == 0 || fragmentText[0] != close)
+                    continue;
+
+                if (fragmentText[1..].Contains(open))
+                    continue; // already balanced within this fragment
+
+                var openTokenIndex = -1;
+                for (int j = k - 1; j >= 0; j--)
+                {
+                    if (!tokens[j].Text.Contains(open) && !tokens[j].Text.Contains(close))
+                        continue; // clean token, keep scanning further back
+
+                    if (tokens[j].IsFragment && tokens[j].Text[^1] == open && !tokens[j].Text[..^1].Contains(close))
+                        openTokenIndex = j;
+
+                    break; // either found our pair, or something ambiguous - stop either way
+                }
+
+                if (openTokenIndex < 0)
+                    continue;
+
+                tokens[openTokenIndex] = (true, tokens[openTokenIndex].Text[..^1]);
+                tokens[openTokenIndex + 1] = (false, open + tokens[openTokenIndex + 1].Text);
+                tokens[k] = (true, fragmentText[1..]);
+                tokens[k - 1] = (false, tokens[k - 1].Text + close);
             }
         }
 
