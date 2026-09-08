@@ -375,7 +375,43 @@ single-value columns.
   prompt file (e.g. `BaseSystemPrompt.txt` itself, or `BaseGlossaryPrompt`/`BaseSystemSuffixPrompt`)
   rather than assuming the same root cause.
 
-## Testing conventions
+## `ApplyAllRulesToCurrentTranslation` didn't apply game-specific hooks (fixed 2026-09-08)
+
+`Workflow/TranslationWorkflow.cs`'s `UpdateSplit`/`ProcessLine` (the retroactive, no-LLM-call rules
+pass driving `ApplyAllRulesToCurrentTranslation`) never called `LineValidation.PrepareResult` or
+`CheckTransalationSuccessful` — those are the only places `LineValidation.CustomPostRepair`/
+`CustomColumnRepair`/`CustomColumnValidator` get invoked, and they only run from `TranslationService`
+during an actual LLM call (fresh translation + retry loop). A deterministic fix added to a
+game-specific hook (e.g. `DragonHeirOverLlm`'s `Tests/GameFileHandling.cs` stripping braces an LLM
+wrapped around a `#Token#` placeholder) therefore never reached text translated in an earlier pass
+and already sitting in `Files/Converted` — running the "2. ApplyRulesToCurrentTranslation" test
+fact made no corrections and flagged nothing, even though the same repair/validator worked fine for
+newly-translated lines.
+
+Fixed by adding `TryApplyGameSpecificRepair` to `UpdateSplit` (after `TryFlagEmptyTranslation`,
+before `TryFlagAllCapsTranslation`): it re-runs `LineValidation.PrepareResult(preparedRaw,
+split.Translated, textFile, split.Split)` against the *existing* translated value — if the repair
+changes anything, save it and reset flags (no retranslation needed); otherwise, if
+`CustomColumnValidator` still reports a problem (e.g. a token appearing more times in the result
+than the raw), flag the split for retranslation with that reason. This lets a purely deterministic,
+already-registered hook retroactively fix/flag previously-translated lines via the no-LLM-call rules
+pass, without duplicating any game-specific logic in this shared library.
+
+**Follow-up fix (same day) — false "extra token" flags on tokens with an embedded digit** (e.g.
+`#PlotTargetInteractName0#`): `TryApplyGameSpecificRepair` originally passed a freshly computed
+`preparedRaw` (`LineValidation.PrepareRaw(split.Text, tokenReplacer)`) to the game-specific hooks,
+matching how the live-translation call site (`TranslationService.cs`) does it. But `PrepareRaw` runs
+`StringTokenReplacer.Replace`, whose `NumericValueRegex` swaps any bare digit not already inside
+`{}`/`<>` for an internal `{n}` sentinel — including the `0` inside `#PlotTargetInteractName0#` —
+so a game's own `#...#`-shaped placeholder regex can no longer match that token in `preparedRaw` at
+all. During a live call this is harmless (both `preparedRaw` and the not-yet-restored `llmResult`
+get mangled identically before comparison), but here `split.Translated` is already the final,
+fully-restored text from an earlier run — comparing it against a mangled raw made a correctly
+preserved token look like a spurious addition (a real token counted zero times on the raw side, one
+time on the translated side). Fixed by using `split.Text` (the untouched raw) instead of
+`preparedRaw` for the hook calls in `TryApplyGameSpecificRepair` — safe here specifically because
+`split.Translated` is already final text, not a still-in-flight LLM result that needs the same
+mangling applied to it for a fair comparison.
 
 - Prefer pure, fast unit tests against static utility methods (e.g. `CompoundFieldSplitter`) over
   running the file-based workflow tests, which mutate real working-directory state

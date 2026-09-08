@@ -184,16 +184,77 @@ public static class TranslationWorkflow
         if (TryHandleDynamicStringExclusion(split, textFile))
             return true;
 
-        if (TryApplyManualTranslation(logLines, config, split, textFile, preparedRaw) is bool manualResult)
-            return manualResult;
+        if (TryApplyManualTranslation(logLines, config, split, textFile, preparedRaw))
+            return true;
 
         if (TryFlagEmptyTranslation(split, preparedRaw))
             return true;
+
+        if (TryApplyGameSpecificRepair(logLines, split, textFile) is bool gameSpecificResult)
+            return gameSpecificResult;
 
         if (TryFlagAllCapsTranslation(split, preparedRaw))
             return true;
 
         return ApplyTranslationRules(logLines, config, split, textFile, preparedRaw);
+    }
+
+    /// <summary>
+    /// Re-runs <see cref="LineValidation.CustomPostRepair"/>/<see cref="LineValidation.CustomColumnRepair"/>
+    /// against an *already-translated* split's existing <see cref="TranslationSplit.Translated"/>
+    /// value, and falls back to <see cref="LineValidation.CustomColumnValidator"/> when the repair
+    /// makes no change. These hooks otherwise only run during a live LLM call (inside
+    /// <see cref="LineValidation.PrepareResult"/>/<see cref="LineValidation.CheckTransalationSuccessful"/>,
+    /// called from <c>TranslationService</c>), so a deterministic fix added to a game-specific hook
+    /// (e.g. stripping braces an LLM wrapped around a placeholder token) would otherwise never reach
+    /// text translated in an earlier pass and already sitting in <c>Files/Converted</c> - this lets
+    /// <see cref="ApplyAllRulesToCurrentTranslation"/> retroactively apply/detect the same rules
+    /// without paying for a full retranslation. Returns null when there is nothing to check (no
+    /// existing translation yet) or when both the repair and the validator find nothing wrong.
+    ///
+    /// Deliberately passes <see cref="TranslationSplit.Text"/> (the untouched raw), not a freshly
+    /// computed <c>preparedRaw</c>, to the game-specific hooks - <c>preparedRaw</c> goes through
+    /// <see cref="StringTokenReplacer.Replace"/>, whose <c>NumericValueRegex</c> swaps out any bare
+    /// digit (e.g. the "0" in "#PlotTargetInteractName0#") for an internal "{n}" sentinel, which
+    /// makes a game's own "#...#"-shaped placeholder regex unable to match it in the raw side at
+    /// all. That's harmless during a live LLM call because both sides of the comparison (raw and
+    /// the not-yet-restored llmResult) get mangled identically, but here <see cref="TranslationSplit.Translated"/>
+    /// is already the final, fully-restored text from an earlier run - comparing it against a
+    /// mangled raw produced false "token count" mismatches (a real, correctly preserved token looked
+    /// like it had been added out of nowhere, since the raw side's count came up zero).
+    /// </summary>
+    private static bool TryApplyGameSpecificRepair(
+        ConcurrentBag<string> logLines,
+        TranslationSplit split,
+        TextFileToSplit textFile)
+    {
+        if (string.IsNullOrEmpty(split.Translated))
+            return false;
+
+        var raw = split.Text;
+
+        var repaired = LineValidation.PrepareResult(raw, split.Translated, textFile, split.Split);
+        if (repaired != split.Translated)
+        {
+            logLines.Add($"Game-specific repair {textFile.Path} \n{split.Translated}\n->\n{repaired}");
+            split.Translated = repaired;
+            split.ResetFlags();
+            return true;
+        }
+
+        if (LineValidation.CustomColumnValidator != null)
+        {
+            var failureReason = LineValidation.CustomColumnValidator(textFile, split.Split, raw, split.Translated);
+            if (failureReason != null)
+            {
+                logLines.Add($"Game-specific validation failed {textFile.Path} ({failureReason}) \n{split.Translated}");
+                split.FlaggedForRetranslation = true;
+                split.FlaggedMistranslation = failureReason;
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool? TryHandleGameObjectReference(TranslationSplit split, TextFileToSplit textFile)
@@ -291,7 +352,7 @@ public static class TranslationWorkflow
         return false;
     }
 
-    private static bool? TryApplyManualTranslation(
+    private static bool TryApplyManualTranslation(
         ConcurrentBag<string> logLines,
         LlmConfig config,
         TranslationSplit split,
@@ -299,7 +360,7 @@ public static class TranslationWorkflow
         string preparedRaw)
     {
         if (!textFile.EnableGlossary)
-            return null;
+            return false;
 
         foreach (var manual in config.Runtime.ManualTranslations)
         {
@@ -317,7 +378,7 @@ public static class TranslationWorkflow
             return false;
         }
 
-        return null;
+        return false;
     }
 
     private static bool TryFlagAllCapsTranslation(TranslationSplit split, string preparedRaw)
