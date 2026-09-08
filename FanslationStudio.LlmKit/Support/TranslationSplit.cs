@@ -32,6 +32,69 @@ public class TranslationSplit
     [YamlMember(ScalarStyle = ScalarStyle.DoubleQuoted)]
     public string FlaggedHallucination { get; set; } = string.Empty;
 
+    // --- Quality review pass fields (see docs/plans/quality-review-pass.md in DragonHierOverLlm) ---
+    // Additive/optional, per the golden rule - all default to values that preserve old behavior
+    // for any TranslationSplit that predates this feature (old serialized YAML deserializes with
+    // QcStatus.NotReviewed and every Qc* string/nullable empty/null, i.e. "never reviewed").
+
+    /// <summary>
+    /// QC-corrected replacement for <see cref="Translated"/>, set only when <see cref="QcStatus"/>
+    /// is <see cref="QcStatus.Corrected"/>. Packaging prefers this over <see cref="Translated"/>
+    /// when non-empty. For a plain (non-templated) column this is the split's own corrected whole
+    /// cell text. For a templated/compound column, only the column's <c>SubIndex == 0</c> fragment
+    /// ever carries a meaningful value here - it represents the whole reconstructed cell's QC
+    /// correction (there is one QC verdict per column, not per fragment, since the QC pass reviews
+    /// the fully reconstructed cell - see QualityReviewWorkflow). Other fragments in the same
+    /// column (SubIndex >= 1) leave this empty.
+    /// </summary>
+    [YamlMember(ScalarStyle = ScalarStyle.DoubleQuoted)]
+    public string QcTranslated { get; set; } = string.Empty;
+
+    /// <summary>Outcome of the last quality review pass. See <see cref="Support.QcStatus"/>.</summary>
+    public QcStatus QcStatus { get; set; } = QcStatus.NotReviewed;
+
+    /// <summary>
+    /// The exact "effective cell text" (see QualityReviewWorkflow - <see cref="Translated"/> for a
+    /// plain column, or the reconstructed cell for a templated column) that was reviewed to
+    /// produce the current <see cref="QcStatus"/>. A subsequent QC run skips this split/column (no
+    /// LLM call) while its current effective text still equals this value; if the underlying
+    /// translation changes later (re-translation, manual fix, glossary rerun), this no longer
+    /// matches and the line is automatically picked up for review again - no manual invalidation
+    /// needed.
+    /// </summary>
+    [YamlMember(ScalarStyle = ScalarStyle.DoubleQuoted)]
+    public string QcReviewedText { get; set; } = string.Empty;
+
+    /// <summary>
+    /// True when this split/column needs a human glance: either a QC-proposed correction was
+    /// rejected by the validation gate (<see cref="QcStatus"/> == FailedValidation), or
+    /// <see cref="QcQualityScore"/> fell below the configured minimum acceptable score. Recomputed
+    /// on every QC run (like <see cref="FlaggedForRetranslation"/>) - not an append-only marker a
+    /// human has to remember to clear.
+    /// </summary>
+    public bool FlaggedForQcReview { get; set; } = false;
+
+    /// <summary>The corrected text QC proposed that got rejected by the validation gate, kept so a
+    /// human reviewer can see exactly what was tried. Empty unless <see cref="QcStatus"/> ==
+    /// FailedValidation.</summary>
+    [YamlMember(ScalarStyle = ScalarStyle.DoubleQuoted)]
+    public string QcRejectedCorrection { get; set; } = string.Empty;
+
+    /// <summary>Why <see cref="QcRejectedCorrection"/> was rejected (reuses
+    /// ValidationResult.CorrectionPrompt-style reason text). Empty unless <see cref="QcStatus"/>
+    /// == FailedValidation.</summary>
+    [YamlMember(ScalarStyle = ScalarStyle.DoubleQuoted)]
+    public string QcFailureReason { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 0-100 self-rated confidence, from the QC model itself, that the current
+    /// <see cref="Translated"/>/<see cref="QcTranslated"/> value is an accurate, well-constructed
+    /// translation of <see cref="Text"/>. Null means "not yet reviewed" (distinct from a real 0).
+    /// Treat as a relative sort key for triage, not a calibrated absolute metric - see
+    /// docs/plans/quality-review-pass.md's score-calibration caveat.
+    /// </summary>
+    public int? QcQualityScore { get; set; }
+
     //public DateTime LastTranslatedOn = DateTime.Now;
 
     public TranslationSplit() { }
