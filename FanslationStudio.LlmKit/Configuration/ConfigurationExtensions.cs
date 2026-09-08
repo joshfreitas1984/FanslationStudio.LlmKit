@@ -21,6 +21,10 @@ public static class ConfigurationExtensions
         response.SplitRegexPatterns ??= new List<string>();
         response.SplitCharactersList ??= new List<string>();
         response.ExtraStringTokenReplacers ??= new List<string>();
+        // Same guard as above for a `qualityReview:` key present with no content underneath it
+        // (e.g. every field commented out) - the property initializer only covers a fully absent
+        // key, not one present but empty.
+        response.QualityReview ??= new QualityReviewConfig();
 
         response.Runtime.WorkingDirectory = workingDirectory;
 
@@ -77,6 +81,16 @@ public static class ConfigurationExtensions
             && !response.Runtime.Models.ContainsKey(response.EscalationModelName))
             throw new InvalidOperationException(
                 $"EscalationModelName '{response.EscalationModelName}' does not match any configured model name. " +
+                $"Configured model names: {string.Join(", ", response.Runtime.Models.Keys)}");
+
+        // Same fail-fast treatment for the quality review pass's model name (see
+        // QualityReviewConfig.ModelName doc comment) - only checked when QC is actually enabled,
+        // so a project that never opts in never needs a qualityReview: section at all.
+        if (response.QualityReview.Enabled
+            && !string.IsNullOrEmpty(response.QualityReview.ModelName)
+            && !response.Runtime.Models.ContainsKey(response.QualityReview.ModelName))
+            throw new InvalidOperationException(
+                $"QualityReview.ModelName '{response.QualityReview.ModelName}' does not match any configured model name. " +
                 $"Configured model names: {string.Join(", ", response.Runtime.Models.Keys)}");
 
         // Load Preset Glossary before workspace glossary so that workspace can override preset entries

@@ -26,6 +26,13 @@ public class LlmConfig
     public GlossaryPresetConfig GlossaryPreset { get; set; } = new();
 
     /// <summary>
+    /// Post-translation quality review pass config (see docs/plans/quality-review-pass.md in
+    /// DragonHierOverLlm). Optional - defaults to <see cref="QualityReviewConfig.Enabled"/> =
+    /// false, a documented no-op for any project that doesn't opt in.
+    /// </summary>
+    public QualityReviewConfig QualityReview { get; set; } = new();
+
+    /// <summary>
     /// Name of a model (matching a <see cref="ModelConfig.Name"/> entry in <see cref="Models"/>) to
     /// escalate a split to once it has exhausted its normal <see cref="RetryCount"/> budget against
     /// its originally assigned model and is still invalid. Optional - if null/empty (or resolves to

@@ -111,6 +111,8 @@ public static class PrefabTextWorkflow
         var outputPath = $"{workingDirectory}/Mod";
         Directory.CreateDirectory(outputPath);
 
+        var minAcceptableScore = Configuration.ConfigurationExtensions.GetConfiguration(workingDirectory).QualityReview.MinAcceptableScore;
+
         var results = new List<PrefabTextResult>();
         var passedCount = 0;
         var failedCount = 0;
@@ -119,7 +121,7 @@ public static class PrefabTextWorkflow
         {
             foreach (var line in fileLines)
             {
-                var (result, failed) = ReconstructLine(line, textFile);
+                var (result, failed) = ReconstructLine(line, textFile, minAcceptableScore);
                 if (result == null)
                     continue;
 
@@ -146,17 +148,32 @@ public static class PrefabTextWorkflow
     /// <summary>
     /// Reconstructs a single line's packaged output. The returned <c>Failed</c> flag reflects
     /// whether the line fell back to its original raw text because a fragment/split was
-    /// unsafe, flagged for retranslation, or missing its translation - this must be reported by
-    /// the caller as an actual failure (see <see cref="PackagePrefabTextAsync"/>) rather than
-    /// silently folded into the same bucket as a genuinely successful line, since both cases
-    /// otherwise look identical in the packaged raw/result YAML.
+    /// unsafe, flagged for retranslation, missing its translation, or (see
+    /// docs/plans/quality-review-pass.md) scored below <paramref name="minAcceptableScore"/> by
+    /// the quality review pass - this must be reported by the caller as an actual failure (see
+    /// <see cref="PackagePrefabTextAsync"/>) rather than silently folded into the same bucket as a
+    /// genuinely successful line, since both cases otherwise look identical in the packaged
+    /// raw/result YAML. The underlying <c>Translated</c>/<c>QcTranslated</c>/<c>QcQualityScore</c>
+    /// values are never modified here regardless of outcome - this only decides what gets written
+    /// to <c>Files/Mod</c>, never what's kept in <c>Files/Converted</c>.
     /// </summary>
-    private static (string? Result, bool Failed) ReconstructLine(TranslationLine line, TextFileToSplit textFile)
+    private static (string? Result, bool Failed) ReconstructLine(TranslationLine line, TextFileToSplit textFile, int minAcceptableScore)
     {
         var template = line.Templates.FirstOrDefault(t => t.Split == 0);
         if (template != null)
         {
             var fragments = line.Splits.Where(s => s.Split == 0).OrderBy(s => s.SubIndex).ToList();
+
+            // Whole-cell QC state lives only on the column's SubIndex == 0 fragment - see
+            // TranslationSplit.QcTranslated's doc comment. A non-null score below the threshold
+            // holds the whole column back regardless of whether a correction was ever proposed.
+            var anchor = fragments.FirstOrDefault(f => f.SubIndex == 0);
+            if (anchor != null && anchor.QcQualityScore is int score && score < minAcceptableScore)
+                return (line.Raw, true);
+
+            if (anchor != null && !string.IsNullOrEmpty(anchor.QcTranslated))
+                return (anchor.QcTranslated, false);
+
             var translatedFragments = new List<string>();
 
             foreach (var fragment in fragments)
@@ -179,8 +196,13 @@ public static class PrefabTextWorkflow
         if (split == null)
             return (null, false);
 
-        if (!string.IsNullOrEmpty(split.Translated) && !split.FlaggedForRetranslation && split.SafeToTranslate)
-            return (split.Translated, false);
+        if (split.QcQualityScore is int plainScore && plainScore < minAcceptableScore)
+            return (split.Text, true);
+
+        var effectiveTranslated = !string.IsNullOrEmpty(split.QcTranslated) ? split.QcTranslated : split.Translated;
+
+        if (!string.IsNullOrEmpty(effectiveTranslated) && !split.FlaggedForRetranslation && split.SafeToTranslate)
+            return (effectiveTranslated, false);
 
         return (split.Text, true);
     }

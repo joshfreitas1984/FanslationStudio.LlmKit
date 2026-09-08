@@ -110,6 +110,8 @@ public static class DynamicStringWorkflow
         var outputPath = $"{workingDirectory}/Mod";
         Directory.CreateDirectory(outputPath);
 
+        var minAcceptableScore = Configuration.ConfigurationExtensions.GetConfiguration(workingDirectory).QualityReview.MinAcceptableScore;
+
         var results = new List<DynamicStringResult>();
         var seenBareRaw = new HashSet<string>();
         var passedCount = 0;
@@ -119,7 +121,7 @@ public static class DynamicStringWorkflow
         {
             foreach (var line in fileLines)
             {
-                var (result, failed, bareFragment) = ReconstructLine(line, textFile);
+                var (result, failed, bareFragment) = ReconstructLine(line, textFile, minAcceptableScore);
                 if (result == null)
                     continue;
 
@@ -201,12 +203,28 @@ public static class DynamicStringWorkflow
     /// <see cref="PackageDynamicStringsAsync"/> for why this extra bare label/translation pair
     /// needs to be packaged as its own dictionary entry alongside the full reconstructed line.
     /// </summary>
-    private static (string? Result, bool Failed, (string Raw, string Result)? BareFragment) ReconstructLine(TranslationLine line, TextFileToSplit textFile)
+    private static (string? Result, bool Failed, (string Raw, string Result)? BareFragment) ReconstructLine(TranslationLine line, TextFileToSplit textFile, int minAcceptableScore)
     {
         var template = line.Templates.FirstOrDefault(t => t.Split == 0);
         if (template != null)
         {
             var fragments = line.Splits.Where(s => s.Split == 0).OrderBy(s => s.SubIndex).ToList();
+
+            // Whole-cell QC state lives only on the column's SubIndex == 0 fragment - see
+            // TranslationSplit.QcTranslated's doc comment.
+            var anchor = fragments.FirstOrDefault(f => f.SubIndex == 0);
+            if (anchor != null && anchor.QcQualityScore is int score && score < minAcceptableScore)
+                return (line.Raw, true, null);
+
+            if (anchor != null && !string.IsNullOrEmpty(anchor.QcTranslated))
+                // Known limitation: bypassing Reconstruct() here means the single-fragment "bare
+                // label" dictionary entry (see the doc comment on PackageDynamicStringsAsync's
+                // bareFragment handling, needed for NPC dialogue-option buttons) can't be derived
+                // from a whole-cell QC correction without the same ambiguous reverse-mapping this
+                // design deliberately avoids - so a corrected multi-part line loses its bare-label
+                // entry. The full reconstructed entry still packages correctly either way.
+                return (anchor.QcTranslated, false, null);
+
             var translatedFragments = new List<string>();
 
             foreach (var fragment in fragments)
@@ -234,8 +252,13 @@ public static class DynamicStringWorkflow
         if (split == null)
             return (null, false, null);
 
-        if (!string.IsNullOrEmpty(split.Translated) && !split.FlaggedForRetranslation && split.SafeToTranslate)
-            return (split.Translated, false, null);
+        if (split.QcQualityScore is int plainScore && plainScore < minAcceptableScore)
+            return (split.Text, true, null);
+
+        var effectiveTranslated = !string.IsNullOrEmpty(split.QcTranslated) ? split.QcTranslated : split.Translated;
+
+        if (!string.IsNullOrEmpty(effectiveTranslated) && !split.FlaggedForRetranslation && split.SafeToTranslate)
+            return (effectiveTranslated, false, null);
 
         return (split.Text, true, null);
     }
