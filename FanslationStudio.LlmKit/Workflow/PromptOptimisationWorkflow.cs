@@ -56,13 +56,32 @@ public static class PromptOptimisationWorkflow
     private const int LongPromptThresholdChars = 500;
 
     /// <summary>
+    /// Whole-file attempts to spend correcting a rejected suggestion (feeding back exactly why it
+    /// was rejected, the same "assistant reply + corrective user message" shape
+    /// <see cref="TranslationService.AddCorrectionMessages"/> uses for translation retries) before
+    /// giving up and leaving the file untouched. Without this, the files that most need a good
+    /// rewrite - the long, multi-rule ones like BaseSystemPrompt/BaseQualityReviewPrompt - are
+    /// exactly the ones a single-shot attempt is most likely to fail the guards on and skip
+    /// entirely.
+    /// </summary>
+    private const int MaxAttemptsPerFile = 3;
+
+    /// <summary>
     /// Runs the optimisation pass over every *.txt file under
     /// <paramref name="baseFilesSourceRoot"/>/&lt;preset&gt;/ (recursively - covers Prompts/,
     /// Corrections/, Dynamics/), calling the preset's own real model for each rewrite and
     /// overwriting the file in place. Returns the paths of every file actually rewritten (a file
-    /// is left untouched if the request fails or the model returns an empty response).
+    /// is left untouched if every attempt fails validation - see <see cref="MaxAttemptsPerFile"/>).
     /// </summary>
-    public static async Task<List<string>> RunAsync(ModelPreset preset, ModelPresetType presetType, string baseFilesSourceRoot)
+    /// <param name="promptKeys">
+    /// If set, only re-optimise files whose name (without extension - e.g. "BaseSystemPrompt")
+    /// matches one of these, case-insensitively - every other file under the preset is left
+    /// completely alone. Use this for a targeted re-run against files already committed from a
+    /// prior full pass, so they aren't fed back through another round of shrinking. Omit (or pass
+    /// null) to run every prompt file under the preset.
+    /// </param>
+    public static async Task<List<string>> RunAsync(ModelPreset preset, ModelPresetType presetType, string baseFilesSourceRoot,
+        IReadOnlyCollection<string>? promptKeys = null)
     {
         var modelConfig = ConfigurationExtensions.GetPresetModelConfig(preset, presetType);
         var presetDir = Path.Combine(baseFilesSourceRoot, preset.ToString());
@@ -71,6 +90,12 @@ public static class PromptOptimisationWorkflow
             throw new InvalidOperationException($"No BaseFiles source directory found at '{presetDir}'.");
 
         var promptFiles = Directory.GetFiles(presetDir, "*.txt", SearchOption.AllDirectories).OrderBy(p => p).ToList();
+
+        if (promptKeys != null)
+        {
+            var keySet = new HashSet<string>(promptKeys, StringComparer.OrdinalIgnoreCase);
+            promptFiles = promptFiles.Where(f => keySet.Contains(Path.GetFileNameWithoutExtension(f))).ToList();
+        }
 
         using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(300) };
         var config = new LlmConfig();
@@ -94,49 +119,10 @@ public static class PromptOptimisationWorkflow
                 continue;
             }
 
-            var promptKey = Path.GetFileNameWithoutExtension(promptFile);
-            var messages = new List<object>
-            {
-                LlmHelpers.GenerateSystemPrompt(
-                    $"You are optimising your own prompt set. The prompt below (key: '{promptKey}') " +
-                    "is one you will be given verbatim ahead of future translation requests."),
-                LlmHelpers.GenerateUserPrompt($"{OptimiseInstruction}\n\n---\n{original}"),
-            };
+            var suggestion = await TryOptimisePromptAsync(client, config, modelConfig, promptFile, original);
 
-            string suggestion;
-            try
-            {
-                suggestion = await TranslationService.TranslateMessagesAsync(client, config, modelConfig, messages);
-            }
-            catch (HttpRequestException e)
-            {
-                Console.WriteLine($"Prompt optimisation request error for '{promptFile}': {e.Message}");
+            if (suggestion == null)
                 continue;
-            }
-
-            if (string.IsNullOrWhiteSpace(suggestion))
-            {
-                Console.WriteLine($"Prompt optimisation: empty response for '{promptFile}' - leaving it untouched.");
-                continue;
-            }
-
-            var missingPlaceholders = PlaceholderTokenPattern.Matches(original)
-                .Select(m => m.Value)
-                .Distinct()
-                .Where(token => !suggestion.Contains(token))
-                .ToList();
-
-            if (missingPlaceholders.Count > 0)
-            {
-                Console.WriteLine($"Prompt optimisation: skipping '{promptFile}' - suggestion dropped placeholder(s) {string.Join(", ", missingPlaceholders)} present in the original. Leaving it untouched.");
-                continue;
-            }
-
-            if (original.Length >= LongPromptThresholdChars && suggestion.Length < original.Length * MinAcceptableLengthRatioForLongPrompts)
-            {
-                Console.WriteLine($"Prompt optimisation: skipping '{promptFile}' - suggestion ({suggestion.Length} chars) is under {MinAcceptableLengthRatioForLongPrompts:P0} of the original ({original.Length} chars), which likely means it dropped rules rather than just tightening wording. Leaving it untouched.");
-                continue;
-            }
 
             await File.WriteAllTextAsync(promptFile, suggestion);
             updated.Add(promptFile);
@@ -146,5 +132,84 @@ public static class PromptOptimisationWorkflow
         Console.WriteLine($"Prompt optimisation done: {updated.Count} of {promptFiles.Count} file(s) under '{presetDir}' rewritten - review with `git diff` before committing.");
 
         return updated;
+    }
+
+    /// <summary>
+    /// One prompt file's optimisation attempt loop - up to <see cref="MaxAttemptsPerFile"/> tries,
+    /// feeding the specific validation failure back to the model each time (same shape as
+    /// <see cref="TranslationService.AddCorrectionMessages"/>) rather than starting fresh, so a
+    /// second attempt actually knows what it got wrong. Returns null (never writes anything) if
+    /// every attempt fails validation, or the request itself keeps failing.
+    /// </summary>
+    private static async Task<string?> TryOptimisePromptAsync(HttpClient client, LlmConfig config,
+        ModelExecutionConfig modelConfig, string promptFile, string original)
+    {
+        var promptKey = Path.GetFileNameWithoutExtension(promptFile);
+        var messages = new List<object>
+        {
+            LlmHelpers.GenerateSystemPrompt(
+                $"You are optimising your own prompt set. The prompt below (key: '{promptKey}') " +
+                "is one you will be given verbatim ahead of future translation requests."),
+            LlmHelpers.GenerateUserPrompt($"{OptimiseInstruction}\n\n---\n{original}"),
+        };
+
+        for (var attempt = 1; attempt <= MaxAttemptsPerFile; attempt++)
+        {
+            string suggestion;
+            try
+            {
+                suggestion = await TranslationService.TranslateMessagesAsync(client, config, modelConfig, messages);
+            }
+            catch (HttpRequestException e)
+            {
+                Console.WriteLine($"Prompt optimisation request error for '{promptFile}' (attempt {attempt}/{MaxAttemptsPerFile}): {e.Message}");
+                continue;
+            }
+
+            var failureReason = ValidateSuggestion(original, suggestion);
+            if (failureReason == null)
+                return suggestion;
+
+            Console.WriteLine($"Prompt optimisation: attempt {attempt}/{MaxAttemptsPerFile} for '{promptFile}' rejected - {failureReason}");
+
+            if (attempt == MaxAttemptsPerFile)
+            {
+                Console.WriteLine($"Prompt optimisation: giving up on '{promptFile}' after {MaxAttemptsPerFile} attempt(s). Leaving it untouched. Last rejected suggestion:\n{suggestion}");
+                return null;
+            }
+
+            messages.Add(LlmHelpers.GenerateAssistantPrompt(suggestion));
+            messages.Add(LlmHelpers.GenerateUserPrompt(
+                $"That rewrite is rejected: {failureReason} Try again - keep every rule and literal " +
+                "token from the original, just tighten the wording further."));
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Same checks as before, extracted so both the first attempt and every retry in
+    /// <see cref="TryOptimisePromptAsync"/> validate identically. Returns null if the suggestion is
+    /// acceptable, otherwise a human-readable reason suitable both for the console log and for
+    /// feeding straight back to the model as corrective feedback.
+    /// </summary>
+    private static string? ValidateSuggestion(string original, string suggestion)
+    {
+        if (string.IsNullOrWhiteSpace(suggestion))
+            return "the response was empty.";
+
+        var missingPlaceholders = PlaceholderTokenPattern.Matches(original)
+            .Select(m => m.Value)
+            .Distinct()
+            .Where(token => !suggestion.Contains(token))
+            .ToList();
+
+        if (missingPlaceholders.Count > 0)
+            return $"it dropped placeholder(s) {string.Join(", ", missingPlaceholders)} present in the original.";
+
+        if (original.Length >= LongPromptThresholdChars && suggestion.Length < original.Length * MinAcceptableLengthRatioForLongPrompts)
+            return $"it came back at {suggestion.Length} chars, under {MinAcceptableLengthRatioForLongPrompts:P0} of the original's {original.Length} chars - that likely means it dropped rules rather than just tightening wording.";
+
+        return null;
     }
 }

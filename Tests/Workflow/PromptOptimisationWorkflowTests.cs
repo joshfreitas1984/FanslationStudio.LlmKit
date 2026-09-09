@@ -28,4 +28,16 @@ public class PromptOptimisationWorkflowTests
     {
         await PromptOptimisationWorkflow.RunAsync(ModelPreset.Glm4, ModelPresetType.Standard, BaseFilesSourceRoot);
     }
+
+    // Targeted re-run for the two files that failed validation (and were left untouched) on the
+    // last full Glm4 pass - BaseSystemPrompt and BaseQualityReviewPrompt are the ones that matter
+    // most for a real QC-model comparison, so they're worth the extra retry attempts on their own
+    // rather than being silently skipped alongside a full re-run that would also re-shrink the
+    // already-committed, already-accepted rewrites of every other file.
+    [Fact(DisplayName = "Optimise Glm4's System/QC prompts only")]
+    public async Task OptimiseGlm4SystemAndQcPrompts()
+    {
+        await PromptOptimisationWorkflow.RunAsync(ModelPreset.Glm4, ModelPresetType.Standard, BaseFilesSourceRoot,
+            promptKeys: ["BaseSystemPrompt"]);
+    }
 }
