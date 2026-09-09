@@ -42,4 +42,18 @@ public class QualityReviewConfig
     /// effect, since the score is already stored per split.
     /// </summary>
     public int MinAcceptableScore { get; set; } = 70;
+
+    /// <summary>
+    /// How many times <see cref="Workflow.QualityReviewWorkflow.ApplyRulesToCurrentQcTranslated"/>
+    /// will reset and retry the SAME underlying translation's QC correction before giving up on it
+    /// (see <see cref="Support.TranslationSplit.QcRuleCheckFailureCount"/>) and surfacing it for a
+    /// human instead. Unlike a normal translation attempt - where more resampling attempts keep
+    /// helping, because there's real content variety to explore - a QC correction that still breaks
+    /// the same rule after a few tries is usually a persistent false positive (e.g. a name that
+    /// happens to match the bad-words list) that no amount of extra retries will fix, so this
+    /// deliberately stays much lower than a translation retry budget. The safety net either way is
+    /// the same: a column that's given up on still falls back to its last known-good
+    /// <see cref="Support.TranslationSplit.Translated"/>, never a rule-breaking QcTranslated.
+    /// </summary>
+    public int MaxRuleCheckRetries { get; set; } = 3;
 }

@@ -100,14 +100,24 @@ public static class QualityReviewWorkflow
     /// exercises a representative mix of plain and templated columns. Omit (or pass null) for a
     /// full run once a model has been chosen.
     /// </param>
-    public static async Task RunAsync(string workingDirectory, TextFileToSplit[] textFiles, int? sampleSize = null)
+    /// <returns>
+    /// How many columns were actually reviewed this pass (got a real LLM verdict - Passed,
+    /// Corrected, or RejectedByGate - as opposed to being Skipped). Used by
+    /// <see cref="RunBruteForce"/> as a second loop-continuation signal alongside
+    /// <see cref="ApplyRulesToCurrentQcTranslated"/>'s count: a column left <see cref="QcStatus.NotReviewed"/>
+    /// for another retry after a rejection (see the RejectedByGate branch in
+    /// <see cref="ReviewColumnAsync"/>) is invisible to that count, since it only tracks
+    /// <see cref="QcStatus.Corrected"/> columns going stale - so without this, the loop could stop
+    /// while a retriable rejection is still sitting there waiting for its next attempt.
+    /// </returns>
+    public static async Task<int> RunAsync(string workingDirectory, TextFileToSplit[] textFiles, int? sampleSize = null)
     {
         var config = ConfigurationExtensions.GetConfiguration(workingDirectory);
 
         if (!config.QualityReview.Enabled)
         {
             Console.WriteLine("Quality review pass is disabled (qualityReview.enabled: false in Config.yaml) - nothing to do.");
-            return;
+            return 0;
         }
 
         if (string.IsNullOrEmpty(config.QualityReview.ModelName)
@@ -228,6 +238,8 @@ public static class QualityReviewWorkflow
             await FileHelper.WriteAllTextWithRetryAsync(file.OutputFile, file.Serializer.Serialize(file.FileLines));
 
         Console.WriteLine($"Quality review done: {reviewedCount} reviewed, {correctedCount} corrected, {rejectedCount} rejected by validation gate, {flaggedCount} flagged for human review.");
+
+        return reviewedCount;
     }
 
     private static async Task<QcOutcome> ReviewColumnAsync(LlmConfig config, ModelExecutionConfig modelConfig, HttpClient client, QcWorkItem item, ReviewLlmCache reviewCache)
@@ -291,6 +303,12 @@ public static class QualityReviewWorkflow
         {
             anchor.QcStatus = QcStatus.Passed;
             anchor.FlaggedForQcReview = verdict.Score < config.QualityReview.MinAcceptableScore;
+            // Passed cleanly - whatever streak of rule-check failures this column had against this
+            // same Translated baseline is over. A LATER failure (e.g. a new rule catching this
+            // freshly-reviewed text, or ApplyRulesToCurrentQcTranslated flagging drift down the
+            // line) deserves a full fresh retry budget, not one continuing from before this success.
+            anchor.QcRuleCheckFailureCount = 0;
+            anchor.QcRuleCheckFailureBaseline = string.Empty;
             return QcOutcome.Passed;
         }
 
@@ -311,45 +329,77 @@ public static class QualityReviewWorkflow
         // translation path.
         correctedResult = LineValidation.PrepareResult(rawText, correctedResult, item.File.TextFile, anchor.Split);
 
-        // Validation gate: the exact same structural check a normal translation attempt goes
-        // through (LineValidation.CheckTransalationSuccessful), plus the same rule checks
-        // ApplyAllRulesToCurrentTranslation applies to every line (bad-words/hallucinated-glossary-
-        // term/missing-ellipsis/missing-required-token - a QC correction is just as capable of
-        // introducing a bad-words hit or dropping a required token as a fresh translation attempt,
-        // and nothing else in this gate would have caught that), plus checks specific to QC that
-        // need a "known-good" baseline to compare against - something a fresh translation attempt
-        // from raw Chinese doesn't have, but a QC correction does (see
-        // CheckGlossaryDrift/CheckCapitalizationRegression).
-        var validation = LineValidation.CheckTransalationSuccessful(modelConfig, rawText, correctedResult, item.File.TextFile, anchor.Split);
-        var glossaryFailureReason = CheckGlossaryDrift(rawText, correctedResult, config.Runtime.GlossaryLines, item.File.TextFile.Path);
+        // Validation gate: TranslationWorkflow.EvaluateRules is the single shared rule list a
+        // candidate translation must pass - the same one ApplyTranslationRules runs against
+        // Translated and ApplyRulesToCurrentQcTranslated re-runs against an already-accepted
+        // QcTranslated, so a new rule added there applies here too with nothing else to edit.
+        //
+        // preparedRaw gets the CJK-punctuation-normalized half of LineValidation.PrepareRaw (e.g.
+        // the CJK ellipsis glyph "…" -> "..." so IsMissingRequiredEllipsis can actually match it) -
+        // called with a null tokenReplacer so it does NOT also run the token-masking half, which
+        // would corrupt this column's own tokenReplacer (already populated above for the masked LLM
+        // prompt/Restore); splitRaw stays the untouched rawText, matching what the Translated path
+        // passes for the same parameter.
+        // Layered on top: CheckCapitalizationRegression, a check specific to QC that needs a
+        // "known-good" baseline to compare against - something a fresh translation attempt from raw
+        // Chinese doesn't have, but a QC correction does.
+        var preparedRaw = LineValidation.PrepareRaw(rawText, null);
+        var ruleResult = TranslationWorkflow.EvaluateRules(config, modelConfig, preparedRaw, rawText, correctedResult, item.File.TextFile, anchor.Split);
         var capsFailureReason = CheckCapitalizationRegression(effectiveTranslated, correctedResult);
-        var badWordsFailureReason = TranslationWorkflow.MatchesBadWords(correctedResult)
-            ? $"QC correction matches the bad-words list: '{correctedResult}'."
-            : null;
-        var ellipsisFailureReason = TranslationWorkflow.IsMissingRequiredEllipsis(rawText, correctedResult)
-            ? "QC correction is missing an ellipsis '...' required by the source."
-            : null;
-        var missingTokenFailureReason = TranslationWorkflow.FindMissingRequiredToken(rawText, correctedResult, config.ExtraStringTokenReplacers) is string missingToken
-            ? $"QC correction is missing required token '{missingToken}'."
-            : null;
-        var hallucinationFailureReason = TranslationWorkflow.FindGlossaryHallucination(rawText, correctedResult, config, item.File.TextFile);
 
-        var failureReason = glossaryFailureReason ?? capsFailureReason ?? badWordsFailureReason
-            ?? ellipsisFailureReason ?? missingTokenFailureReason ?? hallucinationFailureReason
-            ?? (validation.Valid ? null : validation.CorrectionPrompt);
+        var failureReason = capsFailureReason ?? ruleResult.AllReasons.FirstOrDefault();
 
         if (failureReason != null)
         {
-            anchor.QcStatus = QcStatus.FailedValidation;
+            // Same underlying Translated as last time this column was rejected? Keep counting
+            // toward the retry cap (TranslationSplit.QcRuleCheckFailureCount) - shared with
+            // ApplyRulesToCurrentQcTranslated's own retry tracking for a Corrected column going
+            // stale, since both are "this column's QC output keeps breaking a rule" from the
+            // column's point of view. Anything else (first rejection ever, or Translated changed
+            // since) starts the count over.
+            anchor.QcRuleCheckFailureCount = anchor.QcRuleCheckFailureBaseline == effectiveTranslated
+                ? anchor.QcRuleCheckFailureCount + 1
+                : 1;
+            anchor.QcRuleCheckFailureBaseline = effectiveTranslated;
             anchor.QcRejectedCorrection = correctedResult;
             anchor.QcFailureReason = failureReason;
-            anchor.FlaggedForQcReview = true;
+
+            if (anchor.QcRuleCheckFailureCount > config.QualityReview.MaxRuleCheckRetries)
+            {
+                // Given up: leave QcReviewedText matching (set above) so IsQcReviewFresh reports
+                // this as "already handled" - RunAsync stops re-reviewing it, and it surfaces for a
+                // human via GetFlaggedQcReviews, same terminal shape
+                // ApplyRulesToCurrentQcTranslated's own give-up path uses. QcQualityScore must be
+                // cleared too (not just QcTranslated, already empty from ResetQcState() above) -
+                // packaging's low-score gate (TranslationPackaging.cs) checks
+                // "qcFresh && QcQualityScore < minAcceptableScore" BEFORE it ever reaches the
+                // QcTranslated-empty fallback to Translated, so a stale/low verdict.Score left behind
+                // here would make the whole line fail outright (raw source shipped) instead of the
+                // intended clean fallback to the last known-good Translated.
+                anchor.QcStatus = QcStatus.FailedValidation;
+                anchor.QcQualityScore = null;
+                anchor.FlaggedForQcReview = true;
+                return QcOutcome.RejectedByGate;
+            }
+
+            // Still worth another try - deliberately do NOT leave QcReviewedText matching
+            // effectiveTranslated (undoing what the ResetQcState()+assignment above just set), so
+            // IsQcReviewFresh reports this column as needing review again and the next RunAsync
+            // pass retries it automatically - no extra plumbing needed in RunBruteForce's loop.
+            // FlaggedForQcReview stays false while still retrying automatically; only surfaced once
+            // given up.
+            anchor.QcStatus = QcStatus.NotReviewed;
+            anchor.QcReviewedText = string.Empty;
             return QcOutcome.RejectedByGate;
         }
 
         anchor.QcStatus = QcStatus.Corrected;
         anchor.QcTranslated = correctedResult;
         anchor.FlaggedForQcReview = verdict.Score < config.QualityReview.MinAcceptableScore;
+        // Same reasoning as the Passed branch above - this correction just passed the gate, so any
+        // rule-check failure streak against this Translated baseline is resolved.
+        anchor.QcRuleCheckFailureCount = 0;
+        anchor.QcRuleCheckFailureBaseline = string.Empty;
         return QcOutcome.Corrected;
     }
 
@@ -415,39 +465,6 @@ public static class QualityReviewWorkflow
     }
 
     /// <summary>
-    /// Every glossary term whose Raw/RawSimplified/RawTraditional matched in <paramref name="rawText"/>
-    /// must still have its Result (or an allowed alternative) present in <paramref name="correctedText"/> -
-    /// a QC correction that silently drops or changes a glossary-mapped name/term is rejected, even
-    /// if it otherwise passes the generic validation checks. See docs/plans/quality-review-pass.md's
-    /// "make sure it doesn't... mistranslate things in the glossary after running" requirement.
-    /// </summary>
-    private static string? CheckGlossaryDrift(string rawText, string correctedText, List<GlossaryLine> glossaryLines, string outputFile)
-    {
-        foreach (var line in glossaryLines)
-        {
-            if (line.OnlyOutputFiles.Count > 0 && !line.OnlyOutputFiles.Contains(outputFile))
-                continue;
-            if (line.ExcludeOutputFiles.Count > 0 && line.ExcludeOutputFiles.Contains(outputFile))
-                continue;
-
-            var matchedRaw = (!string.IsNullOrEmpty(line.Raw) && rawText.Contains(line.Raw))
-                || (!string.IsNullOrEmpty(line.RawSimplified) && rawText.Contains(line.RawSimplified))
-                || (!string.IsNullOrEmpty(line.RawTraditional) && rawText.Contains(line.RawTraditional));
-
-            if (!matchedRaw)
-                continue;
-
-            var acceptableResults = new List<string> { line.Result };
-            acceptableResults.AddRange(line.AllowedAlternatives);
-
-            if (!acceptableResults.Any(r => !string.IsNullOrEmpty(r) && correctedText.Contains(r, StringComparison.OrdinalIgnoreCase)))
-                return $"Glossary term '{line.Raw}' (expected '{line.Result}') is missing from the QC-corrected text.";
-        }
-
-        return null;
-    }
-
-    /// <summary>
     /// Rejects a QC correction that turns a normally-cased translation into an all-caps "shout" -
     /// e.g. "Full helmet" -> "FULL HELMET". A QC model can rate its own such correction 100/100
     /// (<see cref="TranslationSplit.QcQualityScore"/> is self-reported, not calibrated - see its doc
@@ -465,9 +482,267 @@ public static class QualityReviewWorkflow
         bool IsAllCapsShout(string text) => text.Any(char.IsUpper) && !text.Any(char.IsLower);
 
         if (IsAllCapsShout(correctedText) && !IsAllCapsShout(originalTranslated))
-            return $"QC correction changed normal casing to all-caps ('{originalTranslated}' -> '{correctedText}').";
+            // correctedText itself isn't repeated here - it's already stored in QcRejectedCorrection
+            // right alongside this reason. originalTranslated is worth keeping though: it's the only
+            // place the "before" state shows up, and it's what makes this reason self-explanatory.
+            return $"QC correction changed normal casing to all-caps (was '{originalTranslated}').";
 
         return null;
+    }
+
+    /// <summary>
+    /// The quality-review equivalent of <see cref="TranslationWorkflow.TranslateLinesBruteForce"/> -
+    /// meant to be run as the last step of the normal "added a glossary entry / got file updates /
+    /// exported more dynamic strings / added a bad word / needed a new game repair" workflow,
+    /// immediately after <c>TranslateLinesBruteForce</c>, so <see cref="TranslationSplit.QcTranslated"/>
+    /// gets the same keep-redoing-until-clean treatment <see cref="TranslationSplit.Translated"/>
+    /// already gets there instead of silently drifting out of sync with today's rules until someone
+    /// happens to re-run a plain <see cref="RunAsync"/>. Each iteration resets any
+    /// currently-accepted <c>QcTranslated</c> that now breaks the rules
+    /// (<see cref="ApplyRulesToCurrentQcTranslated"/>) and then reviews everything eligible
+    /// (<see cref="RunAsync"/> - covers freshly reset columns, any column that has never been
+    /// reviewed, e.g. new translations <c>TranslateLinesBruteForce</c> just produced, AND any column
+    /// a prior iteration's rejection left <see cref="QcStatus.NotReviewed"/> for another try - see
+    /// the <c>RejectedByGate</c> branch in <see cref="ReviewColumnAsync"/>). Stops once BOTH signals
+    /// go quiet - the rule-check finds nothing left to reset, AND <see cref="RunAsync"/> reviewed
+    /// nothing this pass - or <paramref name="maxIterations"/> is reached. Both are needed: a
+    /// column left <c>NotReviewed</c> for a retry is invisible to the rule-check (which only tracks
+    /// <see cref="QcStatus.Corrected"/> columns going stale), so relying on that count alone could
+    /// stop the loop while a retriable rejection is still waiting for its next attempt.
+    /// <paramref name="maxIterations"/> defaults far lower than
+    /// <see cref="TranslationWorkflow.TranslateLinesBruteForce"/>'s 30: a genuinely fixable QC rule
+    /// break (e.g. a stale correction after a glossary change) typically resolves on the very next
+    /// review, unlike a from-scratch translation attempt where more resampling keeps helping, so
+    /// there's little to gain from a large shared cap here - <see cref="TranslationSplit.QcRuleCheckFailureCount"/>
+    /// bounds any one stuck column's own retries independently anyway.
+    /// </summary>
+    public static async Task RunBruteForce(string workingDirectory, TextFileToSplit[] textFiles, int? sampleSize = null, int maxIterations = 5)
+    {
+        var iterations = 0;
+        int flagged;
+        int reviewed;
+
+        // Catches any already-corrected column left stale by a previous run (e.g. a glossary/bad-
+        // word change made since) before spending an LLM call reviewing it - RunAsync's own
+        // freshness check would eventually catch this too, but only after this reset makes it
+        // non-fresh.
+        await ApplyRulesToCurrentQcTranslated(workingDirectory, textFiles);
+
+        do
+        {
+            reviewed = await RunAsync(workingDirectory, textFiles, sampleSize);
+            flagged = await ApplyRulesToCurrentQcTranslated(workingDirectory, textFiles);
+            iterations++;
+        }
+        while ((flagged > 0 || reviewed > 0) && iterations < maxIterations);
+    }
+
+    /// <summary>
+    /// Retroactively re-applies the same rule set <see cref="ReviewColumnAsync"/>'s validation gate
+    /// checks against every column's CURRENTLY ACCEPTED <see cref="TranslationSplit.QcTranslated"/> -
+    /// the <see cref="TranslationWorkflow.ApplyAllRulesToCurrentTranslation"/> equivalent for QC
+    /// output. Needed because that method only ever looks at <see cref="TranslationSplit.Translated"/>,
+    /// so a rule that changes after a correction was already accepted (a new bad word, a
+    /// new/changed glossary entry, a new game-specific repair) would otherwise never get re-checked
+    /// against an already "fresh" <c>QcTranslated</c> - freshness
+    /// (<see cref="QualityReviewHelpers.IsQcReviewFresh"/>) only tracks whether the underlying
+    /// <c>Translated</c> has changed, not whether <c>QcTranslated</c> itself is still rule-compliant.
+    ///
+    /// Two tiers, mirroring <see cref="TranslationWorkflow.UpdateSplit"/>/<see cref="TranslationWorkflow.ApplyTranslationRules"/>:
+    /// a deterministic repair (<see cref="LineValidation.PrepareResult"/>/<see cref="LineValidation.CleanupLineBeforeSaving"/>,
+    /// same as a normal translation attempt and <see cref="ReviewColumnAsync"/>'s own correction
+    /// path get) is applied to <c>QcTranslated</c> in place; anything that can't be fixed
+    /// deterministically (bad words, glossary drift/hallucination, missing ellipsis/required token,
+    /// generic structural validation - the exact same checks <see cref="ReviewColumnAsync"/>'s gate
+    /// runs against a freshly proposed correction) either resets the column back to
+    /// <see cref="QcStatus.NotReviewed"/> via <see cref="TranslationSplit.ResetQcState"/> for another
+    /// try, or - once <see cref="TranslationSplit.QcRuleCheckFailureCount"/> exceeds
+    /// <see cref="Configuration.QualityReviewConfig.MaxRuleCheckRetries"/> for this same underlying
+    /// <c>Translated</c> - gives up and lands on <see cref="QcStatus.FailedValidation"/> instead, so
+    /// a persistently unfixable correction (e.g. a false-positive bad-words match) stops consuming
+    /// review passes and surfaces for a human instead. Either way, because packaging always calls
+    /// <see cref="QualityReviewHelpers.IsQcReviewFresh"/> first, the column falls back to
+    /// (already rule-checked) <c>Translated</c> immediately - never ships broken text while waiting
+    /// for (or having given up on) the next LLM review.
+    /// </summary>
+    /// <returns>How many columns needed action this pass (reset for retry, or given up on).</returns>
+    public static async Task<int> ApplyRulesToCurrentQcTranslated(string workingDirectory, TextFileToSplit[] textFiles)
+    {
+        var config = ConfigurationExtensions.GetConfiguration(workingDirectory);
+        var serializer = YamlHelper.CreateSerializer();
+        var totalFlagged = 0;
+        var totalGivenUp = 0;
+
+        await FileIteration.IterateTranslatedFilesInParallelAsync(workingDirectory, textFiles, async (outputFile, textFile, fileLines) =>
+        {
+            if (!textFile.EnableQualityReview)
+                return;
+
+            var fileModified = false;
+            var fileFlagged = 0;
+            var fileGivenUp = 0;
+
+            foreach (var line in fileLines)
+            {
+                foreach (var columnGroup in line.Splits.GroupBy(s => s.Split))
+                {
+                    var fragments = columnGroup.OrderBy(s => s.SubIndex).ToList();
+                    var anchor = fragments.FirstOrDefault(f => f.SubIndex == 0) ?? fragments[0];
+
+                    if (anchor.QcStatus != QcStatus.Corrected || string.IsNullOrEmpty(anchor.QcTranslated))
+                        continue;
+
+                    var template = line.Templates.FirstOrDefault(t => t.Split == columnGroup.Key);
+                    var rawText = template != null
+                        ? CompoundFieldSplitter.Reconstruct(template.Template, fragments.Select(f => f.Text).ToList())
+                        : anchor.Text;
+                    var priorTranslated = QualityReviewHelpers.ComputeEffectiveTranslatedText(anchor, template, fragments);
+
+                    var (changed, needsRetry, gaveUp) = ApplyRulesToQcColumn(config, anchor, textFile, rawText, priorTranslated);
+                    if (changed)
+                        fileModified = true;
+                    if (needsRetry)
+                        fileFlagged++;
+                    if (gaveUp)
+                        fileGivenUp++;
+                }
+            }
+
+            if (fileModified)
+                await FileHelper.WriteAllTextWithRetryAsync(outputFile, serializer.Serialize(fileLines));
+
+            Interlocked.Add(ref totalFlagged, fileFlagged);
+            Interlocked.Add(ref totalGivenUp, fileGivenUp);
+        });
+
+        if (totalFlagged > 0 || totalGivenUp > 0)
+            Console.WriteLine($"Quality review rule check: {totalFlagged} previously-corrected column(s) now break the rules and were reset for re-review, {totalGivenUp} gave up after exhausting retries and were left for human review.");
+
+        return totalFlagged;
+    }
+
+    /// <summary>
+    /// One column's worth of <see cref="ApplyRulesToCurrentQcTranslated"/> - see its doc comment for
+    /// the tiering rationale. <paramref name="priorTranslated"/> is the pre-QC baseline
+    /// (<see cref="TranslationSplit.Translated"/>, reconstructed for a templated column) used only
+    /// by <see cref="CheckCapitalizationRegression"/>, exactly as <see cref="ReviewColumnAsync"/>
+    /// uses it.
+    /// </summary>
+    private static (bool changed, bool needsRetry, bool gaveUp) ApplyRulesToQcColumn(
+        LlmConfig config,
+        TranslationSplit anchor,
+        TextFileToSplit textFile,
+        string rawText,
+        string priorTranslated)
+    {
+        var current = anchor.QcTranslated;
+
+        // Tier 1: deterministic repair, in place - same repair a normal translation attempt (and a
+        // freshly proposed QC correction) already gets before ever reaching validation.
+        var repaired = LineValidation.PrepareResult(rawText, current, textFile, anchor.Split);
+        var cleaned = LineValidation.CleanupLineBeforeSaving(repaired, rawText, textFile, new StringTokenReplacer());
+
+        var changed = cleaned != current;
+        if (changed)
+            anchor.QcTranslated = current = cleaned;
+
+        // Tier 2: the exact same shared rule list ReviewColumnAsync's validation gate runs against a
+        // freshly proposed correction (see TranslationWorkflow.EvaluateRules) - anything that fails
+        // here can't be fixed deterministically, so the column is reset for a fresh LLM review
+        // instead. preparedRaw is rawText's CJK-punctuation-normalized form (null tokenReplacer - no
+        // masking needed here, nothing downstream needs to Restore it) - see ReviewColumnAsync's
+        // matching comment for why this matters (e.g. the ellipsis check).
+        var modelConfig = LlmHelpers.CalculateModelConfig(config, rawText);
+        var preparedRaw = LineValidation.PrepareRaw(rawText, null);
+        var ruleResult = TranslationWorkflow.EvaluateRules(config, modelConfig, preparedRaw, rawText, current, textFile, anchor.Split);
+        var capsFailureReason = CheckCapitalizationRegression(priorTranslated, current);
+
+        var failureReason = capsFailureReason ?? ruleResult.AllReasons.FirstOrDefault();
+
+        if (failureReason == null)
+        {
+            // Still clean - clear any rule-check failure streak left over from before this
+            // (now-Corrected) QcTranslated was accepted, same reasoning as ReviewColumnAsync's
+            // Passed/Corrected branches. Without this, a LATER failure against the same Translated
+            // baseline would wrongly resume counting from here instead of starting a fresh budget.
+            var hadFailureHistory = anchor.QcRuleCheckFailureCount != 0 || anchor.QcRuleCheckFailureBaseline != string.Empty;
+            anchor.QcRuleCheckFailureCount = 0;
+            anchor.QcRuleCheckFailureBaseline = string.Empty;
+            return (changed || hadFailureHistory, needsRetry: false, gaveUp: false);
+        }
+
+        // Same underlying Translated as last time this column failed? Keep counting toward the
+        // retry cap. Anything else (first failure ever, or Translated changed since - a
+        // retranslation, manual fix, or repair) starts the count over: that's a different piece of
+        // text with no accumulated history of its own, so it deserves a full retry budget.
+        anchor.QcRuleCheckFailureCount = anchor.QcRuleCheckFailureBaseline == priorTranslated
+            ? anchor.QcRuleCheckFailureCount + 1
+            : 1;
+        anchor.QcRuleCheckFailureBaseline = priorTranslated;
+
+        if (anchor.QcRuleCheckFailureCount > config.QualityReview.MaxRuleCheckRetries)
+        {
+            // Given up: discard the correction (same safe fallback to Translated as every other
+            // reset), but land on FailedValidation instead of NotReviewed so RunAsync stops
+            // re-reviewing it and it surfaces for a human via GetFlaggedQcReviews, exactly like a
+            // freshly-rejected correction already does. QcReviewedText = priorTranslated marks it
+            // "fresh" so packaging/RunAsync don't treat it as needing another look. QcQualityScore
+            // must be cleared too - packaging's low-score gate (TranslationPackaging.cs) checks
+            // "qcFresh && QcQualityScore < minAcceptableScore" BEFORE it ever reaches the
+            // QcTranslated-empty fallback to Translated, so leaving behind whatever score this
+            // column had from its original (now-discarded) Corrected acceptance would make the
+            // whole line fail outright (raw source shipped) instead of the intended clean fallback.
+            Console.WriteLine($"Quality review rule check: {textFile.Path} gave up after {anchor.QcRuleCheckFailureCount} retries ({failureReason}) \n{current}");
+            anchor.QcTranslated = string.Empty;
+            anchor.QcStatus = QcStatus.FailedValidation;
+            anchor.QcReviewedText = priorTranslated;
+            anchor.QcRejectedCorrection = current;
+            anchor.QcFailureReason = $"Gave up after {anchor.QcRuleCheckFailureCount} rule-check retries: {failureReason}";
+            anchor.QcQualityScore = null;
+            anchor.FlaggedForQcReview = true;
+            // Not counted as "needsRetry" - a given-up column lands on FailedValidation, which
+            // RunAsync won't touch again, so another RunBruteForce iteration would find no further
+            // work for it. Only "still-retriable" resets should drive that loop's continuation.
+            return (true, needsRetry: false, gaveUp: true);
+        }
+
+        Console.WriteLine($"Quality review rule check: {textFile.Path} QcTranslated now breaks the rules ({failureReason}), retry {anchor.QcRuleCheckFailureCount}/{config.QualityReview.MaxRuleCheckRetries} \n{current}");
+        anchor.ResetQcState(); // Leaves QcRuleCheckFailureCount/Baseline alone - see their doc comments.
+        return (true, needsRetry: true, gaveUp: false);
+    }
+
+    /// <summary>
+    /// Manual escape hatch for <see cref="TranslationSplit.QcRuleCheckFailureCount"/>: clears every
+    /// column's accumulated retry count back to 0, and gives any column currently parked at
+    /// <see cref="QcStatus.FailedValidation"/> a genuinely fresh review next run (full
+    /// <see cref="TranslationSplit.ResetQcState"/>, not just the counter). Use this after fixing
+    /// whatever was causing a persistent rule violation (e.g. removing a false-positive bad word,
+    /// loosening a glossary rule) so previously given-up-on columns get retried instead of staying
+    /// parked forever - <see cref="ApplyRulesToCurrentQcTranslated"/> has no way to know on its own
+    /// that a fix like that happened, since nothing about the column's own text changed.
+    /// </summary>
+    public static async Task ResetQcRetryLimits(string workingDirectory, TextFileToSplit[] textFiles)
+    {
+        var serializer = YamlHelper.CreateSerializer();
+
+        await FileIteration.IterateTranslatedFilesInParallelAsync(workingDirectory, textFiles, async (outputFile, textFile, fileLines) =>
+        {
+            foreach (var line in fileLines)
+            {
+                foreach (var columnGroup in line.Splits.GroupBy(s => s.Split))
+                {
+                    var anchor = columnGroup.OrderBy(s => s.SubIndex).FirstOrDefault(f => f.SubIndex == 0) ?? columnGroup.First();
+
+                    anchor.QcRuleCheckFailureCount = 0;
+                    anchor.QcRuleCheckFailureBaseline = string.Empty;
+
+                    if (anchor.QcStatus == QcStatus.FailedValidation)
+                        anchor.ResetQcState();
+                }
+            }
+
+            await FileHelper.WriteAllTextWithRetryAsync(outputFile, serializer.Serialize(fileLines));
+        });
     }
 
     /// <summary>

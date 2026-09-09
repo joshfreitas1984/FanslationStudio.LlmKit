@@ -72,27 +72,14 @@ public static class TranslationWorkflow
 
     private record TranslationRuleContext(
         LlmConfig Config,
-        HashSet<string> FullFileRetrans,
-        List<string> NewGlossaryStrings,
-        List<Regex> CompiledBadRegexes,
         Regex ChineseCharRegex);
 
     private static TranslationRuleContext BuildTranslationRuleContext(string workingDirectory)
     {
         var config = ConfigurationExtensions.GetConfiguration(workingDirectory);
-
-        HashSet<string> fullFileRetrans = [];
-        List<string> newGlossaryStrings = [];
-        var badRegexes = new List<string>
-        {
-            //"<size=[^>]+>"
-            //@"master and disciple"
-        };
-
-        var compiledBadRegexes = badRegexes.Select(r => new Regex(r, RegexOptions.Compiled | RegexOptions.IgnoreCase)).ToList();
         var chineseCharRegex = new Regex(LineValidation.ChineseCharPattern, RegexOptions.Compiled);
 
-        return new TranslationRuleContext(config, fullFileRetrans, newGlossaryStrings, compiledBadRegexes, chineseCharRegex);
+        return new TranslationRuleContext(config, chineseCharRegex);
     }
 
     private static async Task<int> ProcessFileAsync(
@@ -104,7 +91,7 @@ public static class TranslationWorkflow
         TranslationRuleContext context)
     {
         int recordsModded = 0;
-        bool isFullFileRetrans = context.FullFileRetrans.Contains(textFile.Path);
+        bool isFullFileRetrans = false;
 
         Parallel.ForEach(fileLines, line =>
         {
@@ -145,7 +132,7 @@ public static class TranslationWorkflow
                 continue;
             }
 
-            if (UpdateSplit(logLines, context.NewGlossaryStrings, context.CompiledBadRegexes, split, textFile, context.Config, context.ChineseCharRegex, tokenReplacer))
+            if (UpdateSplit(logLines, split, textFile, context.Config, context.ChineseCharRegex, tokenReplacer))
                 modded++;
         }
 
@@ -154,8 +141,6 @@ public static class TranslationWorkflow
 
     public static bool UpdateSplit(
         ConcurrentBag<string> logLines,
-        List<string> newGlossaryStrings,
-        List<Regex> compiledBadRegexes,
         TranslationSplit split,
         TextFileToSplit textFile,
         LlmConfig config,
@@ -174,12 +159,6 @@ public static class TranslationWorkflow
 
         if (TryHandleAlreadyTranslated(logLines, split, textFile, preparedRaw, cleanedRaw, preparedResultRaw, chineseCharRegex) is bool alreadyTranslatedResult)
             return alreadyTranslatedResult;
-
-        if (TryFlagForNewGlossary(logLines, newGlossaryStrings, split, textFile, preparedRaw))
-            return true;
-
-        if (TryFlagForBadRegex(logLines, compiledBadRegexes, split, textFile))
-            return true;
 
         if (TryHandleDynamicStringExclusion(split, textFile))
             return true;
@@ -308,15 +287,7 @@ public static class TranslationWorkflow
             if (preparedRaw.Contains(glossary))
             {
                 logLines.Add($"New Glossary {textFile.Path} Replaces: \n{split.Translated}");
-                split.FlaggedForRetranslation = true;
-
-                // A prior QC correction may have been made before this glossary entry existed, and
-                // could now contradict it. IsQcReviewFresh only invalidates a QC override when
-                // Translated's *value* changes, which retranslation isn't guaranteed to do (it can
-                // reproduce the same string, or this flag can sit unretranslated for a while) - so
-                // force a fresh QC look rather than letting a stale, now-glossary-violating
-                // QcTranslated keep shipping on a technicality. See QualityReviewHelpers.IsQcReviewFresh.
-                split.ResetQcState();
+                split.FlaggedForRetranslation = true;             
                 return true;
             }
         }
@@ -424,18 +395,6 @@ public static class TranslationWorkflow
         string preparedRaw)
     {
         bool modified = false;
-
-        if (MatchesBadWords(split.Translated))
-        {
-            logLines.Add($"Matches Bad words ... {textFile.Path} Replaces: \n{split.Translated}");
-            split.FlaggedForRetranslation = true;
-            modified = true;
-        }
-
-        // Glossary Clean up - this won't check our manual jobs
-        modified = CheckMistranslationGlossary(config, split, modified, textFile);
-        modified = CheckHallucinationGlossary(config, split, modified, textFile);
-
         var modelConfig = LlmHelpers.CalculateModelConfig(config, preparedRaw);
 
         // Characters
@@ -494,20 +453,59 @@ public static class TranslationWorkflow
             modified = true;
         }
 
-        // Remove Invalid ones -- Have to use pure raw because translated is untokenised
+        // Single shared rule list (see EvaluateRules) - covers bad words, glossary mistranslation/
+        // hallucination, missing ellipsis, missing required token, any game-specific
+        // CustomColumnValidator, and the generic structural check. A new rule added there applies
+        // here and to QualityReviewWorkflow's QC gate/rule-check without anything more to edit.
         var translated2 = StringTokenReplacer.CleanTranslatedForApplyRules(split.Translated);
-        var result = LineValidation.CheckTransalationSuccessful(modelConfig, split.Text, translated2, textFile, split.Split);
-        if (!result.Valid)
+        var ruleResult = EvaluateRules(config, modelConfig, preparedRaw, split.Text, translated2, textFile, split.Split);
+
+        if (ruleResult.MistranslatedGlossaryTerms.Count > 0)
         {
-            logLines.Add($"Invalid {textFile.Path} Failures:{result.CorrectionPrompt}\n{split.Translated}");
+            foreach (var item in ruleResult.MistranslatedGlossaryTerms)
+                split.FlaggedMistranslation += $"{item.Result},{item.Raw},";
             split.FlaggedForRetranslation = true;
             modified = true;
         }
 
-        var missingToken = FindMissingRequiredToken(split.Text, split.Translated, config.ExtraStringTokenReplacers);
-        if (missingToken != null)
+        if (ruleResult.HallucinationReason != null)
         {
-            logLines.Add($"Invalid {textFile.Path} Failures:Missing '{missingToken}'\n{split.Translated}");
+            split.FlaggedHallucination += ruleResult.HallucinationReason;
+            split.FlaggedForRetranslation = true;
+            modified = true;
+        }
+
+        if (ruleResult.BadWordsReason != null)
+        {
+            logLines.Add($"Matches Bad words ... {textFile.Path} Replaces: \n{split.Translated}");
+            split.FlaggedForRetranslation = true;
+            modified = true;
+        }
+
+        if (ruleResult.EllipsisReason != null)
+        {
+            logLines.Add($"Missing ... {textFile.Path} Replaces: \n{split.Translated}");
+            split.FlaggedForRetranslation = true;
+            modified = true;
+        }
+
+        if (ruleResult.MissingTokenReason != null)
+        {
+            logLines.Add($"Invalid {textFile.Path} Failures:{ruleResult.MissingTokenReason}\n{split.Translated}");
+            split.FlaggedForRetranslation = true;
+            modified = true;
+        }
+
+        if (ruleResult.CustomValidatorReason != null)
+        {
+            logLines.Add($"Invalid {textFile.Path} Failures:{ruleResult.CustomValidatorReason}\n{split.Translated}");
+            split.FlaggedForRetranslation = true;
+            modified = true;
+        }
+
+        if (ruleResult.StructuralReason != null)
+        {
+            logLines.Add($"Invalid {textFile.Path} Failures:{ruleResult.StructuralReason}\n{split.Translated}");
             split.FlaggedForRetranslation = true;
             modified = true;
         }
@@ -559,16 +557,120 @@ public static class TranslationWorkflow
         return null;
     }
 
-    private static bool CheckMistranslationGlossary(LlmConfig config, TranslationSplit split, bool modified, TextFileToSplit textFile)
+    /// <summary>
+    /// The full set of hard-fail rule checks a candidate translation must pass, computed once and
+    /// shared by every caller: a normal translation attempt's post-LLM rule pass
+    /// (<see cref="ApplyTranslationRules"/>), a freshly proposed QC correction's accept-time gate,
+    /// and QC's retroactive re-check of an already-accepted <see cref="TranslationSplit.QcTranslated"/>
+    /// (both in <see cref="Workflow.QualityReviewWorkflow"/>). Adding a brand new kind of check
+    /// belongs here, once - every caller reading <see cref="RuleCheckResult.AllReasons"/> (or a
+    /// specific field, for a category it wants to report distinctly - see
+    /// <see cref="TranslationSplit.FlaggedMistranslation"/>/<see cref="TranslationSplit.FlaggedHallucination"/>)
+    /// picks it up automatically, with nowhere else that needs editing.
+    ///
+    /// Takes two raw-text variants because the checks folded in here were never consistent about
+    /// which one they used before this consolidation, and preserving that (rather than silently
+    /// changing a live pipeline's behavior) matters more than tidiness: <paramref name="preparedRaw"/>
+    /// feeds the glossary/ellipsis checks and is meant to be <see cref="LineValidation.PrepareRaw"/>'s
+    /// output, exactly like the <c>Translated</c> path's own "preparedRaw" local variable it's named
+    /// after; <paramref name="splitRaw"/> feeds <see cref="LineValidation.CheckTransalationSuccessful"/>/
+    /// <see cref="FindMissingRequiredToken"/>/<see cref="LineValidation.CustomColumnValidator"/> and
+    /// is meant to be the split's untouched raw <see cref="TranslationSplit.Text"/>. QC (which has no
+    /// split of its own for a templated/reconstructed cell) calls <c>PrepareRaw(rawText, null)</c> for
+    /// its <paramref name="preparedRaw"/> argument - the CJK-punctuation-normalized half only, e.g.
+    /// the CJK ellipsis glyph "…" -> "..." so <see cref="IsMissingRequiredEllipsis"/> can actually
+    /// match it - deliberately passing a null <see cref="StringTokenReplacer"/> so it skips the
+    /// token-masking half, which would otherwise corrupt the column's own replacer (already
+    /// populated for masking the LLM prompt/restoring its response). <paramref name="splitRaw"/>
+    /// stays QC's untouched raw column text either way.
+    /// </summary>
+    internal static RuleCheckResult EvaluateRules(
+        LlmConfig config,
+        ModelExecutionConfig modelConfig,
+        string preparedRaw,
+        string splitRaw,
+        string candidate,
+        TextFileToSplit textFile,
+        int? column)
+    {
+        var mistranslatedGlossaryTerms = FindGlossaryMistranslations(config, preparedRaw, candidate, textFile).ToList();
+        var hallucinationReason = FindGlossaryHallucination(preparedRaw, candidate, config, textFile);
+        var badWordsReason = MatchesBadWords(candidate) ? "Matches the bad-words list." : null;
+        var ellipsisReason = IsMissingRequiredEllipsis(preparedRaw, candidate) ? "Missing an ellipsis '...' required by the source." : null;
+        var missingTokenReason = FindMissingRequiredToken(splitRaw, candidate, config.ExtraStringTokenReplacers) is string missingToken
+            ? $"Missing required token '{missingToken}'."
+            : null;
+        var customValidatorReason = LineValidation.CustomColumnValidator?.Invoke(textFile, column, splitRaw, candidate);
+        var validation = LineValidation.CheckTransalationSuccessful(modelConfig, splitRaw, candidate, textFile, column);
+        var structuralReason = validation.Valid ? null : validation.CorrectionPrompt;
+
+        return new RuleCheckResult(
+            mistranslatedGlossaryTerms,
+            hallucinationReason,
+            badWordsReason,
+            ellipsisReason,
+            missingTokenReason,
+            customValidatorReason,
+            structuralReason);
+    }
+
+    /// <summary>See <see cref="EvaluateRules"/>.</summary>
+    internal sealed record RuleCheckResult(
+        List<GlossaryLine> MistranslatedGlossaryTerms,
+        string? HallucinationReason,
+        string? BadWordsReason,
+        string? EllipsisReason,
+        string? MissingTokenReason,
+        string? CustomValidatorReason,
+        string? StructuralReason)
+    {
+        /// <summary>
+        /// Every failure reason in generic order - for a caller (like QC) that just wants "did
+        /// anything fail, and why" without breaking a category out into its own dedicated field.
+        /// </summary>
+        public IEnumerable<string> AllReasons
+        {
+            get
+            {
+                foreach (var item in MistranslatedGlossaryTerms)
+                    yield return $"Glossary term '{item.Raw}' (expected '{item.Result}') is missing.";
+
+                if (HallucinationReason != null) yield return HallucinationReason;
+                if (BadWordsReason != null) yield return BadWordsReason;
+                if (EllipsisReason != null) yield return EllipsisReason;
+                if (MissingTokenReason != null) yield return MissingTokenReason;
+                if (CustomValidatorReason != null) yield return CustomValidatorReason;
+                if (StructuralReason != null) yield return StructuralReason;
+            }
+        }
+
+        public bool HasFailure =>
+            MistranslatedGlossaryTerms.Count > 0
+            || HallucinationReason != null
+            || BadWordsReason != null
+            || EllipsisReason != null
+            || MissingTokenReason != null
+            || CustomValidatorReason != null
+            || StructuralReason != null;
+    }
+
+    /// <summary>
+    /// Pure glossary-mistranslation detector shared (via <see cref="EvaluateRules"/>) by the normal
+    /// translation pipeline's rule check and <see cref="Workflow.QualityReviewWorkflow"/>'s QC
+    /// gate/rule-check - a single implementation so a change to what counts as "this glossary term
+    /// was mistranslated" only has to be made once instead of drifting between two pipelines. Returns
+    /// every glossary line whose Raw/RawSimplified/RawTraditional matched in <paramref name="rawText"/>
+    /// but whose Result (or an allowed alternative) is missing from <paramref name="candidate"/> -
+    /// empty if none. Mirrors <see cref="IsGlossaryHallucination"/>'s matching approach (all three raw
+    /// variants), which the older, QC-only version of this check
+    /// (<c>QualityReviewWorkflow.CheckGlossaryDrift</c>) already did but this one, checking only
+    /// <see cref="GlossaryLine.Raw"/>, did not - unifying picks up that stricter behavior for both
+    /// pipelines rather than the other way round.
+    /// </summary>
+    internal static IEnumerable<GlossaryLine> FindGlossaryMistranslations(LlmConfig config, string rawText, string candidate, TextFileToSplit textFile)
     {
         if (!textFile.EnableGlossary)
-            return modified;
-
-        var tokenReplacer = new StringTokenReplacer();
-        var preparedRaw = LineValidation.PrepareRaw(split.Text, tokenReplacer);
-
-        if (split.Translated == null)
-            return modified;
+            yield break;
 
         foreach (var item in config.Runtime.GlossaryLines)
         {
@@ -581,50 +683,18 @@ public static class TranslationWorkflow
             else if (item.ExcludeOutputFiles.Count > 0 && item.ExcludeOutputFiles.Contains(textFile.Path))
                 continue;
 
-            if (preparedRaw.Contains(item.Raw) && !split.Translated.Contains(item.Result, StringComparison.OrdinalIgnoreCase))
-            {
-                var found = false;
-                foreach (var alternative in item.AllowedAlternatives)
-                {
-                    found = split.Translated.Contains(alternative, StringComparison.OrdinalIgnoreCase);
-                    if (found)
-                        break;
-                }
+            var matchedRaw = (!string.IsNullOrEmpty(item.Raw) && rawText.Contains(item.Raw))
+                || (!string.IsNullOrEmpty(item.RawSimplified) && rawText.Contains(item.RawSimplified))
+                || (!string.IsNullOrEmpty(item.RawTraditional) && rawText.Contains(item.RawTraditional));
 
-                if (!found)
-                {
-                    split.FlaggedForRetranslation = true;
-                    split.FlaggedMistranslation += $"{item.Result},{item.Raw},";
-                    modified = true;
-                }
-            }
+            if (!matchedRaw || candidate.Contains(item.Result, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            if (item.AllowedAlternatives.Any(alternative => candidate.Contains(alternative, StringComparison.OrdinalIgnoreCase)))
+                continue;
+
+            yield return item;
         }
-
-        return modified; // Will be previous value - even if it didnt find anything
-    }
-
-    private static bool CheckHallucinationGlossary(LlmConfig config, TranslationSplit split, bool modified, TextFileToSplit textFile)
-    {
-        if (!textFile.EnableGlossary)
-            return modified;
-
-        var tokenReplacer = new StringTokenReplacer();
-        var preparedRaw = LineValidation.PrepareRaw(split.Text, tokenReplacer);
-
-        if (split.Translated == null)
-            return modified;
-
-        foreach (var item in config.Runtime.GlossaryLines)
-        {
-            if (IsGlossaryHallucination(item, config.Runtime.GlossaryLines, preparedRaw, split.Translated, textFile))
-            {
-                split.FlaggedForRetranslation = true;
-                split.FlaggedHallucination += $"{item.Result},{item.Raw},";
-                modified = true;
-            }
-        }
-
-        return modified; // Will be previous value - even if it didnt find anything
     }
 
     /// <summary>
@@ -665,10 +735,9 @@ public static class TranslationWorkflow
     }
 
     /// <summary>
-    /// Read-only counterpart to <see cref="CheckHallucinationGlossary"/> for callers that need a
-    /// pass/fail verdict without owning (and mutating) a <see cref="TranslationSplit"/> - e.g.
-    /// <see cref="Workflow.QualityReviewWorkflow"/> validating a QC-proposed correction. Returns a
-    /// description of the first hallucinated glossary term found, or null if none.
+    /// Pure hallucination detector shared by <see cref="EvaluateRules"/> (used by both the
+    /// <c>Translated</c> pipeline and QC) - returns a description of the first hallucinated
+    /// glossary term found, or null if none.
     /// </summary>
     internal static string? FindGlossaryHallucination(string preparedRaw, string translated, LlmConfig config, TextFileToSplit textFile)
     {

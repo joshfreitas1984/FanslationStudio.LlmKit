@@ -95,6 +95,34 @@ public class TranslationSplit
     /// </summary>
     public int? QcQualityScore { get; set; }
 
+    /// <summary>
+    /// How many consecutive times <see cref="Workflow.QualityReviewWorkflow.ApplyRulesToCurrentQcTranslated"/>
+    /// has reset this column's <see cref="QcTranslated"/> for breaking a rule, against the SAME
+    /// underlying <see cref="Translated"/> baseline (see <see cref="QcRuleCheckFailureBaseline"/>).
+    /// Once this reaches <see cref="Configuration.QualityReviewConfig.MaxRuleCheckRetries"/>, the
+    /// column stops being retried automatically - its correction is still discarded like every
+    /// other reset (packaging never trusts a rule-breaking QcTranslated), but <see cref="QcStatus"/>
+    /// is left at <see cref="Support.QcStatus.FailedValidation"/> instead of
+    /// <see cref="Support.QcStatus.NotReviewed"/>, so <see cref="Workflow.QualityReviewWorkflow.RunAsync"/>
+    /// stops re-reviewing it and it's surfaced for a human instead
+    /// (<see cref="Workflow.QualityReviewWorkflow.GetFlaggedQcReviews"/>), exactly like a
+    /// freshly-rejected correction already is. Deliberately NOT cleared by
+    /// <see cref="ResetQcState"/> - unlike every other Qc* field, this needs to survive the very
+    /// reset it's counting, or it could never accumulate past 1. Never persists across an upstream
+    /// change though: <see cref="QcRuleCheckFailureBaseline"/> not matching the column's current
+    /// effective translated text means the count restarts from 0 - a retranslation, manual fix, or
+    /// repair deserves a fresh retry budget, not one already exhausted by different text. A human
+    /// can also explicitly clear this (see <see cref="Workflow.QualityReviewWorkflow.ResetQcRetryLimits"/>)
+    /// if they've fixed the underlying cause (e.g. removed a false-positive bad word) and want
+    /// previously given-up columns retried anyway.
+    /// </summary>
+    public int QcRuleCheckFailureCount { get; set; } = 0;
+
+    /// <summary>The effective translated text <see cref="QcRuleCheckFailureCount"/> was last
+    /// accumulated against - see its doc comment.</summary>
+    [YamlMember(ScalarStyle = ScalarStyle.DoubleQuoted)]
+    public string QcRuleCheckFailureBaseline { get; set; } = string.Empty;
+
     //public DateTime LastTranslatedOn = DateTime.Now;
 
     public TranslationSplit() { }
