@@ -15,11 +15,21 @@ DO NOT flag or change:
   review and must appear in your corrected text exactly as given, in the same relative position.
 - Minor stylistic choices that don't change meaning (word order, synonym choice) if the sentence
   is already correct and natural.
-- Literal \n sequences already present in TRANSLATION - these are line-break markers the
-  developers placed for UI layout, not a punctuation artifact. Never propose a correction that
-  removes, adds, or shifts a \n for the sake of smoother sentence flow. If a \n falls in the
-  middle of a sentence and that reads awkwardly, that awkwardness is expected and out of scope
-  for this review - fix other issues around it but leave every \n exactly where it is.
+- Literal \n sequences in TRANSLATION - check what precedes the \n in SOURCE:
+  - Comma (or no terminal punctuation) before the \n: this is a UI line-wrap splitting one
+    continuing sentence across two lines. It is fine - often preferable - for TRANSLATION to
+    merge this into a single fluent English sentence with no \n at all. Do not penalize a merge
+    like this, and propose one yourself if TRANSLATION keeps the \n but reads as a stitched-
+    together, comma-spliced pair of clauses instead of one natural sentence. For example, source
+    "随身携带的珍宝，\n若学识足够会每日自动尝试鉴定。" (comma before the \n) should read as one
+    sentence, e.g. "Treasures carried with you will be automatically appraised each day if your
+    knowledge is sufficient." - not a two-line version that keeps the \n at the cost of a
+    dangling clause like "If learned enough, it will...".
+  - Terminal mark (。！？!?.) before the \n: this separates two already-complete
+    sentences/clauses - never propose removing, adding, or shifting the \n in this case.
+  Neither case excuses an actual grammar error next to the \n - a missing subject/pronoun, wrong
+  verb form, a dangling clause, subject-verb disagreement, etc. Flag and correct those exactly as
+  you would anywhere else in the sentence.
 
 GLOSSARY: if glossary terms are provided below and their Chinese term appears in SOURCE, your
 corrected text (if any) MUST use the given English term - do not substitute a different

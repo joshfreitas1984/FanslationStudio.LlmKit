@@ -406,7 +406,15 @@ public static partial class LineValidation
             }
         }
 
-        if (raw.Contains("\\n") && !result.Contains("\\n"))
+        // A source \n immediately preceded by a comma (or nothing terminal) is a mid-sentence
+        // UI line-wrap - the devs split one continuing sentence across two lines purely for
+        // chat-bubble/box width. Forcing that literal break into the English translation produces
+        // a comma-splice artifact ("...camp,\nIt seems...") instead of the single fluent sentence
+        // a native speaker would write, so only hard-enforce \n preservation when it sits between
+        // two already-complete sentences/clauses (preceded by 。！？!?.) - that's the case closer
+        // to a deliberate structural/stat-list-style separator worth protecting.
+        var hasStructuralNewlineBreak = Regex.IsMatch(raw, @"[。！？!?.]\s*\\n");
+        if (hasStructuralNewlineBreak && raw.Contains("\\n") && !result.Contains("\\n"))
         {
             response = false;
             correctionPrompts.AddPromptWithValues(config, "CorrectRemovalPrompt", "\\n");

@@ -56,6 +56,38 @@ public static class QualityReviewWorkflow
     private enum QcOutcome { Skipped, Passed, Corrected, RejectedByGate }
 
     /// <summary>
+    /// The model's raw verdict for one (source text, current translation, applicable glossary
+    /// prompt) triple, before any file/column-specific repair or validation is applied to it -
+    /// see <see cref="ReviewCacheKey"/>/<see cref="ReviewLlmCache"/>.
+    /// </summary>
+    private sealed record LlmVerdict(bool Success, int Score, string? CorrectedRawMasked);
+
+    /// <summary>
+    /// SOURCE + CURRENT TRANSLATION + the glossary prompt built for them (see
+    /// <see cref="GlossaryLine.AppendPromptsFor"/>) is everything that actually goes into the QC
+    /// prompt sent to the model, so it's exactly the right cache key: two columns (even in
+    /// different files) that reduce to the same triple get the same LLM verdict instead of two
+    /// independent, non-deterministic LLM calls that could disagree with each other on identical
+    /// text. Including the glossary prompt (rather than just raw text) rather than the file path
+    /// itself keeps this safe even though some glossary lines are restricted to specific output
+    /// files (<see cref="GlossaryLine.OnlyOutputFiles"/>/<see cref="GlossaryLine.ExcludeOutputFiles"/>)
+    /// - if that restriction makes the applicable glossary content differ between two files, the
+    /// prompt (and so the key) differs too, and they naturally get separate LLM calls instead of
+    /// wrongly sharing one.
+    /// </summary>
+    private readonly record struct ReviewCacheKey(string RawText, string EffectiveTranslated, string GlossaryPrompt);
+
+    /// <summary>
+    /// Dedupes concurrent/repeated LLM calls for the same <see cref="ReviewCacheKey"/> within one
+    /// <see cref="RunAsync"/> run. The <see cref="Lazy{T}"/> wrapper (not just the bare Task) is
+    /// what makes this safe under <c>Parallel.ForEachAsync</c>: two threads racing
+    /// <see cref="ConcurrentDictionary{TKey,TValue}.GetOrAdd"/> for the same key would otherwise
+    /// both start their own LLM call before either finishes - wrapping the factory in Lazy ensures
+    /// only one of them actually runs it, and the other just awaits the same in-flight Task.
+    /// </summary>
+    private sealed class ReviewLlmCache : ConcurrentDictionary<ReviewCacheKey, Lazy<Task<LlmVerdict>>>;
+
+    /// <summary>
     /// Runs the quality review pass. See docs/plans/quality-review-pass.md.
     /// </summary>
     /// <param name="sampleSize">
@@ -100,6 +132,9 @@ public static class QualityReviewWorkflow
         var fileStates = new List<QcFileState>();
         foreach (var textFile in textFiles)
         {
+            if (!textFile.EnableQualityReview)
+                continue;
+
             var outputFile = $"{outputPath}/{textFile.Path}.yaml";
             if (!File.Exists(outputFile))
                 continue;
@@ -151,6 +186,7 @@ public static class QualityReviewWorkflow
         Console.WriteLine($"Quality review: {workItems.Count} column(s) across {fileStates.Count} file(s) to consider, max concurrency {maxConcurrency}, model '{config.QualityReview.ModelName}'.");
 
         using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(300) };
+        var reviewCache = new ReviewLlmCache();
 
         var consideredCount = 0;
         var reviewedCount = 0;
@@ -160,7 +196,7 @@ public static class QualityReviewWorkflow
 
         await Parallel.ForEachAsync(workItems, new ParallelOptions { MaxDegreeOfParallelism = maxConcurrency }, async (item, _) =>
         {
-            var outcome = await ReviewColumnAsync(config, modelConfig, client, item);
+            var outcome = await ReviewColumnAsync(config, modelConfig, client, item, reviewCache);
 
             if (outcome == QcOutcome.Skipped)
                 return;
@@ -194,7 +230,7 @@ public static class QualityReviewWorkflow
         Console.WriteLine($"Quality review done: {reviewedCount} reviewed, {correctedCount} corrected, {rejectedCount} rejected by validation gate, {flaggedCount} flagged for human review.");
     }
 
-    private static async Task<QcOutcome> ReviewColumnAsync(LlmConfig config, ModelExecutionConfig modelConfig, HttpClient client, QcWorkItem item)
+    private static async Task<QcOutcome> ReviewColumnAsync(LlmConfig config, ModelExecutionConfig modelConfig, HttpClient client, QcWorkItem item, ReviewLlmCache reviewCache)
     {
         var anchor = item.Anchor;
 
@@ -235,6 +271,105 @@ public static class QualityReviewWorkflow
 
         var glossaryPrompt = GlossaryLine.AppendPromptsFor(rawText, config.Runtime.GlossaryLines, item.File.TextFile.Path);
 
+        var cacheKey = new ReviewCacheKey(rawText, effectiveTranslated, glossaryPrompt);
+        var verdict = await reviewCache.GetOrAdd(cacheKey, _ => new Lazy<Task<LlmVerdict>>(
+            () => GetLlmVerdictAsync(config, modelConfig, client, rawText, maskedRaw, maskedTranslated, glossaryPrompt))).Value;
+
+        if (!verdict.Success)
+            // Either the request errored, or the response didn't parse - leave the column's Qc
+            // state exactly as it was rather than recording a guessed score. Picked up again next
+            // run (GetLlmVerdictAsync already logged the reason).
+            return QcOutcome.Skipped;
+
+        // Clean slate before recording this review's outcome - avoids a stale
+        // QcTranslated/FlaggedForQcReview lingering from an earlier review of different text.
+        anchor.ResetQcState();
+        anchor.QcReviewedText = effectiveTranslated;
+        anchor.QcQualityScore = verdict.Score;
+
+        if (verdict.CorrectedRawMasked == null)
+        {
+            anchor.QcStatus = QcStatus.Passed;
+            anchor.FlaggedForQcReview = verdict.Score < config.QualityReview.MinAcceptableScore;
+            return QcOutcome.Passed;
+        }
+
+        // Restore using THIS column's own tokenReplacer - its placeholderMap/sizeMap/colorMap were
+        // just populated by this column's own Replace() calls above, which is deterministic given
+        // the same rawText/effectiveTranslated (see StringTokenReplacer.Replace), so this correctly
+        // reverses the masked correction even when the verdict itself came from the cache/another
+        // column's LLM call.
+        var correctedResult = tokenReplacer.Restore(verdict.CorrectedRawMasked);
+
+        // Same post-LLM repair pass a normal translation attempt gets (TranslateSplitAsync always
+        // runs PrepareResult before validating) - e.g. GameFileHandling.RepairKnownLlmQuirks
+        // unwraps braces an LLM sometimes adds around this game's own "#...#" placeholder tokens.
+        // A QC correction is just as capable of introducing the same quirks as a normal
+        // translation attempt, so skipping this here meant a fixable artifact (e.g. GLM4 rewriting
+        // "#TargetInteractName#" as "{TargetInteractName}") went straight to the validation gate
+        // and got rejected outright instead of being repaired first like it would on the
+        // translation path.
+        correctedResult = LineValidation.PrepareResult(rawText, correctedResult, item.File.TextFile, anchor.Split);
+
+        // Validation gate: the exact same structural check a normal translation attempt goes
+        // through (LineValidation.CheckTransalationSuccessful), plus the same rule checks
+        // ApplyAllRulesToCurrentTranslation applies to every line (bad-words/hallucinated-glossary-
+        // term/missing-ellipsis/missing-required-token - a QC correction is just as capable of
+        // introducing a bad-words hit or dropping a required token as a fresh translation attempt,
+        // and nothing else in this gate would have caught that), plus checks specific to QC that
+        // need a "known-good" baseline to compare against - something a fresh translation attempt
+        // from raw Chinese doesn't have, but a QC correction does (see
+        // CheckGlossaryDrift/CheckCapitalizationRegression).
+        var validation = LineValidation.CheckTransalationSuccessful(modelConfig, rawText, correctedResult, item.File.TextFile, anchor.Split);
+        var glossaryFailureReason = CheckGlossaryDrift(rawText, correctedResult, config.Runtime.GlossaryLines, item.File.TextFile.Path);
+        var capsFailureReason = CheckCapitalizationRegression(effectiveTranslated, correctedResult);
+        var badWordsFailureReason = TranslationWorkflow.MatchesBadWords(correctedResult)
+            ? $"QC correction matches the bad-words list: '{correctedResult}'."
+            : null;
+        var ellipsisFailureReason = TranslationWorkflow.IsMissingRequiredEllipsis(rawText, correctedResult)
+            ? "QC correction is missing an ellipsis '...' required by the source."
+            : null;
+        var missingTokenFailureReason = TranslationWorkflow.FindMissingRequiredToken(rawText, correctedResult, config.ExtraStringTokenReplacers) is string missingToken
+            ? $"QC correction is missing required token '{missingToken}'."
+            : null;
+        var hallucinationFailureReason = TranslationWorkflow.FindGlossaryHallucination(rawText, correctedResult, config, item.File.TextFile);
+
+        var failureReason = glossaryFailureReason ?? capsFailureReason ?? badWordsFailureReason
+            ?? ellipsisFailureReason ?? missingTokenFailureReason ?? hallucinationFailureReason
+            ?? (validation.Valid ? null : validation.CorrectionPrompt);
+
+        if (failureReason != null)
+        {
+            anchor.QcStatus = QcStatus.FailedValidation;
+            anchor.QcRejectedCorrection = correctedResult;
+            anchor.QcFailureReason = failureReason;
+            anchor.FlaggedForQcReview = true;
+            return QcOutcome.RejectedByGate;
+        }
+
+        anchor.QcStatus = QcStatus.Corrected;
+        anchor.QcTranslated = correctedResult;
+        anchor.FlaggedForQcReview = verdict.Score < config.QualityReview.MinAcceptableScore;
+        return QcOutcome.Corrected;
+    }
+
+    /// <summary>
+    /// Makes the actual QC LLM call for one <see cref="ReviewCacheKey"/> and parses its response.
+    /// Pure with respect to any one <see cref="QcWorkItem"/> - deliberately has no knowledge of
+    /// which column(s) requested it, so its result can be safely shared by every column that
+    /// reduces to the same (source, current translation, glossary prompt) triple (see
+    /// <see cref="ReviewLlmCache"/>). File/column-specific repair and validation happen afterward,
+    /// back in <see cref="ReviewColumnAsync"/>, once per column.
+    /// </summary>
+    private static async Task<LlmVerdict> GetLlmVerdictAsync(
+        LlmConfig config,
+        ModelExecutionConfig modelConfig,
+        HttpClient client,
+        string rawText,
+        string maskedRaw,
+        string maskedTranslated,
+        string glossaryPrompt)
+    {
         var userPrompt = new StringBuilder();
         userPrompt.AppendLine($"SOURCE (Chinese): {maskedRaw}");
         userPrompt.AppendLine($"CURRENT TRANSLATION (English): {maskedTranslated}");
@@ -258,16 +393,14 @@ public static class QualityReviewWorkflow
         catch (HttpRequestException e)
         {
             Console.WriteLine($"Quality review request error: {e.Message}");
-            return QcOutcome.Skipped;
+            return new LlmVerdict(false, 0, null);
         }
 
         var scoreMatch = ScoreLineRegex.Match(llmResponse);
         if (!scoreMatch.Success)
         {
-            // Response didn't parse - leave the column's Qc state exactly as it was rather than
-            // recording a guessed score. Picked up again next run.
             Console.WriteLine($"Quality review: could not parse response for '{rawText}' - skipping. Raw response: {llmResponse}");
-            return QcOutcome.Skipped;
+            return new LlmVerdict(false, 0, null);
         }
 
         var score = Math.Clamp(int.Parse(scoreMatch.Groups[1].Value), 0, 100);
@@ -278,49 +411,7 @@ public static class QualityReviewWorkflow
             && !string.IsNullOrEmpty(correctedRaw)
             && !correctedRaw.Equals("NONE", StringComparison.OrdinalIgnoreCase);
 
-        // Clean slate before recording this review's outcome - avoids a stale
-        // QcTranslated/FlaggedForQcReview lingering from an earlier review of different text.
-        anchor.ResetQcState();
-        anchor.QcReviewedText = effectiveTranslated;
-        anchor.QcQualityScore = score;
-
-        if (!hasCorrection)
-        {
-            anchor.QcStatus = QcStatus.Passed;
-            anchor.FlaggedForQcReview = score < config.QualityReview.MinAcceptableScore;
-            return QcOutcome.Passed;
-        }
-
-        var correctedResult = tokenReplacer.Restore(correctedRaw);
-
-        // Same post-LLM repair pass a normal translation attempt gets (TranslateSplitAsync always
-        // runs PrepareResult before validating) - e.g. GameFileHandling.RepairKnownLlmQuirks
-        // unwraps braces an LLM sometimes adds around this game's own "#...#" placeholder tokens.
-        // A QC correction is just as capable of introducing the same quirks as a normal
-        // translation attempt, so skipping this here meant a fixable artifact (e.g. GLM4 rewriting
-        // "#TargetInteractName#" as "{TargetInteractName}") went straight to the validation gate
-        // and got rejected outright instead of being repaired first like it would on the
-        // translation path.
-        correctedResult = LineValidation.PrepareResult(rawText, correctedResult, item.File.TextFile, anchor.Split);
-
-        // Validation gate: the exact same structural check a normal translation attempt goes
-        // through, plus a glossary-drift check specific to QC (see CheckGlossaryDrift).
-        var validation = LineValidation.CheckTransalationSuccessful(modelConfig, rawText, correctedResult, item.File.TextFile, anchor.Split);
-        var glossaryFailureReason = CheckGlossaryDrift(rawText, correctedResult, config.Runtime.GlossaryLines, item.File.TextFile.Path);
-
-        if (!validation.Valid || glossaryFailureReason != null)
-        {
-            anchor.QcStatus = QcStatus.FailedValidation;
-            anchor.QcRejectedCorrection = correctedResult;
-            anchor.QcFailureReason = glossaryFailureReason ?? validation.CorrectionPrompt;
-            anchor.FlaggedForQcReview = true;
-            return QcOutcome.RejectedByGate;
-        }
-
-        anchor.QcStatus = QcStatus.Corrected;
-        anchor.QcTranslated = correctedResult;
-        anchor.FlaggedForQcReview = score < config.QualityReview.MinAcceptableScore;
-        return QcOutcome.Corrected;
+        return new LlmVerdict(true, score, hasCorrection ? correctedRaw : null);
     }
 
     /// <summary>
@@ -357,6 +448,29 @@ public static class QualityReviewWorkflow
     }
 
     /// <summary>
+    /// Rejects a QC correction that turns a normally-cased translation into an all-caps "shout" -
+    /// e.g. "Full helmet" -> "FULL HELMET". A QC model can rate its own such correction 100/100
+    /// (<see cref="TranslationSplit.QcQualityScore"/> is self-reported, not calibrated - see its doc
+    /// comment), and <see cref="LineValidation.CheckTransalationSuccessful"/> has no notion of
+    /// "natural" casing since a fresh translation attempt has no prior English text to compare
+    /// against. A QC correction is different: <paramref name="originalTranslated"/> (the
+    /// already-accepted <see cref="TranslationSplit.Translated"/>/prior <see cref="TranslationSplit.QcTranslated"/>
+    /// this review started from) is a known-good casing baseline, so a flip from mixed/lower case to
+    /// all-caps is a strong, cheap signal of a bad correction rather than a deliberate stylistic
+    /// choice. Ignores text with no lowercase letters to begin with (e.g. already an acronym, or too
+    /// short to have case at all) so it only fires on an actual regression.
+    /// </summary>
+    internal static string? CheckCapitalizationRegression(string originalTranslated, string correctedText)
+    {
+        bool IsAllCapsShout(string text) => text.Any(char.IsUpper) && !text.Any(char.IsLower);
+
+        if (IsAllCapsShout(correctedText) && !IsAllCapsShout(originalTranslated))
+            return $"QC correction changed normal casing to all-caps ('{originalTranslated}' -> '{correctedText}').";
+
+        return null;
+    }
+
+    /// <summary>
     /// Mirrors <see cref="GameFileHandlingBase.GetFailedTranslations"/>'s reporting shape, scoped to
     /// QC rejections/flags instead of translation failures - lets a human reviewer pull every column
     /// currently flagged for a look (either a rejected correction, or a low quality score) in one
@@ -374,6 +488,9 @@ public static class QualityReviewWorkflow
 
         await FileIteration.IterateTranslatedFilesAsync(workingDirectory, textFiles, async (_, textFile, fileLines) =>
         {
+            if (!textFile.EnableQualityReview)
+                return;
+
             foreach (var line in fileLines)
             {
                 // Group by column (same shape as RunAsync's work items) rather than iterating

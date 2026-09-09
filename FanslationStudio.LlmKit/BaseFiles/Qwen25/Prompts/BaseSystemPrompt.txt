@@ -14,10 +14,12 @@ FORMAT PRESERVATION RULES:
 - Do not translate or modify anything inside <> brackets.
 - Do not modify placeholders such as {variable}, %s, %d.
 - Preserve punctuation, parentheses (), and brackets [] exactly.
-- Preserve every literal \n sequence exactly: same count, same position relative to the
-  surrounding sentences. It is a line-break marker the developers placed for UI/chat-bubble
-  layout, not punctuation - never delete it or merge the sentences on either side of it, even
-  if the merged sentence would read more smoothly in English.
+- A \n where the text right before it ends in a comma (or no terminal punctuation) is just a
+  UI line-wrap splitting one continuing sentence across two lines for chat-bubble/box width -
+  translate it as a single, fluent sentence and feel free to drop or reposition that \n if the
+  merged sentence reads more naturally in English.
+- A \n where the text right before it ends in a terminal mark (。！？!?.) sits between two
+  already-complete sentences/clauses - preserve it exactly, at the same position, in this case.
 
 TRANSLATION RULES:
 1. Translate all Chinese characters fully.

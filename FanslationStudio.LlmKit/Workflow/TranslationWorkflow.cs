@@ -439,20 +439,7 @@ public static class TranslationWorkflow
         var modelConfig = LlmHelpers.CalculateModelConfig(config, preparedRaw);
 
         // Characters
-        // Some fragments legitimately start with a stray closing quote mark ("”"/"'"/"\"") split
-        // off a larger quoted sentence whose opening quote lives in the surrounding template
-        // literal (e.g. "“⟦0⟧{0}" + fragment "”竟有这等境界...") - the LLM correctly renders that
-        // closing quote as a trailing apostrophe/quote AFTER the ellipsis ("...'"), which the plain
-        // EndsWith("...") checks below don't recognize, incorrectly flagging a fine translation as
-        // having dropped the ellipsis. Strip any trailing quote-like characters before comparing.
-        var translatedForEllipsisCheck = split.Translated.TrimEnd('\'', '"', '’', '‘', '”', '“');
-        if (preparedRaw.EndsWith("...")
-            && preparedRaw.Length < 15
-            && !translatedForEllipsisCheck.EndsWith("...")
-            && !translatedForEllipsisCheck.EndsWith("...?")
-            && !translatedForEllipsisCheck.EndsWith("...!")
-            && !translatedForEllipsisCheck.EndsWith("...!!")
-            && !translatedForEllipsisCheck.EndsWith("...?!"))
+        if (IsMissingRequiredEllipsis(preparedRaw, split.Translated))
         {
             logLines.Add($"Missing ... {textFile.Path} Replaces: \n{split.Translated}");
             split.FlaggedForRetranslation = true;
@@ -517,17 +504,59 @@ public static class TranslationWorkflow
             modified = true;
         }
 
-        foreach (var token in config.ExtraStringTokenReplacers)
+        var missingToken = FindMissingRequiredToken(split.Text, split.Translated, config.ExtraStringTokenReplacers);
+        if (missingToken != null)
         {
-            if (split.Text.Contains(token) && !split.Translated.Contains(token))
-            {
-                logLines.Add($"Invalid {textFile.Path} Failures:Missing '{token}'\n{split.Translated}");
-                split.FlaggedForRetranslation = true;
-                modified = true;
-            }
+            logLines.Add($"Invalid {textFile.Path} Failures:Missing '{missingToken}'\n{split.Translated}");
+            split.FlaggedForRetranslation = true;
+            modified = true;
         }
 
         return modified;
+    }
+
+    /// <summary>
+    /// True when <paramref name="preparedRaw"/> ends in an ellipsis that <paramref name="translated"/>
+    /// fails to preserve - shared between <see cref="ApplyTranslationRules"/> (the main
+    /// translate/retranslate pipeline) and <see cref="Workflow.QualityReviewWorkflow"/>'s QC
+    /// validation gate, so a QC-proposed correction is held to the same bar as a normal translation
+    /// attempt instead of silently allowing what would otherwise trigger a retranslation.
+    /// </summary>
+    internal static bool IsMissingRequiredEllipsis(string preparedRaw, string translated)
+    {
+        // Some fragments legitimately start with a stray closing quote mark ("”"/"'"/"\"") split
+        // off a larger quoted sentence whose opening quote lives in the surrounding template
+        // literal (e.g. "“⟦0⟧{0}" + fragment "”竟有这等境界...") - the LLM correctly renders that
+        // closing quote as a trailing apostrophe/quote AFTER the ellipsis ("...'"), which a plain
+        // EndsWith("...") check doesn't recognize, incorrectly flagging a fine translation as
+        // having dropped the ellipsis. Strip any trailing quote-like characters before comparing.
+        var translatedForEllipsisCheck = translated.TrimEnd('\'', '"', '’', '‘', '”', '“');
+
+        return preparedRaw.EndsWith("...")
+            && preparedRaw.Length < 15
+            && !translatedForEllipsisCheck.EndsWith("...")
+            && !translatedForEllipsisCheck.EndsWith("...?")
+            && !translatedForEllipsisCheck.EndsWith("...!")
+            && !translatedForEllipsisCheck.EndsWith("...!!")
+            && !translatedForEllipsisCheck.EndsWith("...?!");
+    }
+
+    /// <summary>
+    /// Returns the first configured <see cref="LlmConfig.ExtraStringTokenReplacers"/> token present
+    /// in <paramref name="raw"/> but missing from <paramref name="translated"/>, or null if every
+    /// such token that appears in <paramref name="raw"/> was preserved. Shared between
+    /// <see cref="ApplyTranslationRules"/> and <see cref="Workflow.QualityReviewWorkflow"/>'s QC
+    /// validation gate - see <see cref="IsMissingRequiredEllipsis"/>'s doc comment for why.
+    /// </summary>
+    internal static string? FindMissingRequiredToken(string raw, string translated, IEnumerable<string> extraTokens)
+    {
+        foreach (var token in extraTokens)
+        {
+            if (raw.Contains(token) && !translated.Contains(token))
+                return token;
+        }
+
+        return null;
     }
 
     private static bool CheckMistranslationGlossary(LlmConfig config, TranslationSplit split, bool modified, TextFileToSplit textFile)
@@ -587,44 +616,72 @@ public static class TranslationWorkflow
 
         foreach (var item in config.Runtime.GlossaryLines)
         {
-            var wordPattern = $"\\b{item.Result}\\b";
-
-            if (!preparedRaw.Contains(item.Raw) && split.Translated.Contains(item.Result))
+            if (IsGlossaryHallucination(item, config.Runtime.GlossaryLines, preparedRaw, split.Translated, textFile))
             {
-                if (!item.CheckForMisusedTranslation)
-                    continue;
-
-                //Exclusions and Targetted Glossary
-                if (item.OnlyOutputFiles.Count > 0 && !item.OnlyOutputFiles.Contains(textFile.Path))
-                    continue;
-                else if (item.ExcludeOutputFiles.Count > 0 && item.ExcludeOutputFiles.Contains(textFile.Path))
-                    continue;
-
-                // Regex matches on terms with ... match incorrectly
-                if (!Regex.IsMatch(split.Translated, wordPattern, RegexOptions.IgnoreCase))
-                    continue;
-
-                // Check for Alternatives
-                var dupes = config.Runtime.GlossaryLines.Where(s => s.Result == item.Result && s.Raw != item.Raw);
-                bool found = false;
-
-                foreach (var dupe in dupes)
-                {
-                    found = preparedRaw.Contains(dupe.Raw);
-                    if (found)
-                        break;
-                }
-
-                if (!found)
-                {
-                    split.FlaggedForRetranslation = true;
-                    split.FlaggedHallucination += $"{item.Result},{item.Raw},";
-                    modified = true;
-                }
+                split.FlaggedForRetranslation = true;
+                split.FlaggedHallucination += $"{item.Result},{item.Raw},";
+                modified = true;
             }
         }
 
         return modified; // Will be previous value - even if it didnt find anything
+    }
+
+    /// <summary>
+    /// True when <paramref name="translated"/> contains <paramref name="item"/>'s Result even
+    /// though its Raw (the term it's supposed to translate) never appeared in <paramref name="preparedRaw"/>
+    /// at all - i.e. the model appears to have hallucinated a glossary-mapped term into text that
+    /// never asked for it - and no other glossary line mapping to the same Result is present in
+    /// <paramref name="preparedRaw"/> to explain the occurrence.
+    /// </summary>
+    private static bool IsGlossaryHallucination(GlossaryLine item, List<GlossaryLine> allGlossaryLines, string preparedRaw, string translated, TextFileToSplit textFile)
+    {
+        if (preparedRaw.Contains(item.Raw) || !translated.Contains(item.Result))
+            return false;
+
+        if (!item.CheckForMisusedTranslation)
+            return false;
+
+        //Exclusions and Targetted Glossary
+        if (item.OnlyOutputFiles.Count > 0 && !item.OnlyOutputFiles.Contains(textFile.Path))
+            return false;
+        else if (item.ExcludeOutputFiles.Count > 0 && item.ExcludeOutputFiles.Contains(textFile.Path))
+            return false;
+
+        // Regex matches on terms with ... match incorrectly
+        var wordPattern = $"\\b{item.Result}\\b";
+        if (!Regex.IsMatch(translated, wordPattern, RegexOptions.IgnoreCase))
+            return false;
+
+        // Check for Alternatives
+        var dupes = allGlossaryLines.Where(s => s.Result == item.Result && s.Raw != item.Raw);
+        foreach (var dupe in dupes)
+        {
+            if (preparedRaw.Contains(dupe.Raw))
+                return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Read-only counterpart to <see cref="CheckHallucinationGlossary"/> for callers that need a
+    /// pass/fail verdict without owning (and mutating) a <see cref="TranslationSplit"/> - e.g.
+    /// <see cref="Workflow.QualityReviewWorkflow"/> validating a QC-proposed correction. Returns a
+    /// description of the first hallucinated glossary term found, or null if none.
+    /// </summary>
+    internal static string? FindGlossaryHallucination(string preparedRaw, string translated, LlmConfig config, TextFileToSplit textFile)
+    {
+        if (!textFile.EnableGlossary)
+            return null;
+
+        foreach (var item in config.Runtime.GlossaryLines)
+        {
+            if (IsGlossaryHallucination(item, config.Runtime.GlossaryLines, preparedRaw, translated, textFile))
+                return $"Hallucinated glossary term '{item.Result}' (maps from '{item.Raw}', which is not present in the source).";
+        }
+
+        return null;
     }
 
     public static bool MatchesBadWords(string input)
