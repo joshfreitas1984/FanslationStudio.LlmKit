@@ -211,12 +211,17 @@ public static class DynamicStringWorkflow
             var fragments = line.Splits.Where(s => s.Split == 0).OrderBy(s => s.SubIndex).ToList();
 
             // Whole-cell QC state lives only on the column's SubIndex == 0 fragment - see
-            // TranslationSplit.QcTranslated's doc comment.
+            // TranslationSplit.QcTranslated's doc comment. Only trust it if still fresh relative
+            // to the fragments' CURRENT Translated values (see QualityReviewHelpers.IsQcReviewFresh)
+            // - a retranslation since the last review must never be silently overridden by a stale
+            // score/correction just because nobody has re-run the quality review pass yet.
             var anchor = fragments.FirstOrDefault(f => f.SubIndex == 0);
-            if (anchor != null && anchor.QcQualityScore is int score && score < minAcceptableScore)
+            var qcFresh = anchor != null && QualityReviewHelpers.IsQcReviewFresh(anchor, template, fragments);
+
+            if (qcFresh && anchor!.QcQualityScore is int score && score < minAcceptableScore)
                 return (line.Raw, true, null);
 
-            if (anchor != null && !string.IsNullOrEmpty(anchor.QcTranslated))
+            if (qcFresh && !string.IsNullOrEmpty(anchor!.QcTranslated))
                 // Known limitation: bypassing Reconstruct() here means the single-fragment "bare
                 // label" dictionary entry (see the doc comment on PackageDynamicStringsAsync's
                 // bareFragment handling, needed for NPC dialogue-option buttons) can't be derived
@@ -252,10 +257,12 @@ public static class DynamicStringWorkflow
         if (split == null)
             return (null, false, null);
 
-        if (split.QcQualityScore is int plainScore && plainScore < minAcceptableScore)
+        var plainQcFresh = QualityReviewHelpers.IsQcReviewFresh(split, null, [split]);
+
+        if (plainQcFresh && split.QcQualityScore is int plainScore && plainScore < minAcceptableScore)
             return (split.Text, true, null);
 
-        var effectiveTranslated = !string.IsNullOrEmpty(split.QcTranslated) ? split.QcTranslated : split.Translated;
+        var effectiveTranslated = plainQcFresh && !string.IsNullOrEmpty(split.QcTranslated) ? split.QcTranslated : split.Translated;
 
         if (!string.IsNullOrEmpty(effectiveTranslated) && !split.FlaggedForRetranslation && split.SafeToTranslate)
             return (effectiveTranslated, false, null);

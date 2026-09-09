@@ -18,13 +18,3 @@ models:
     url: "http://localhost/structured"
     apiKeyRequired: true
     overridePromptFolder: "StructuredPrompts"
-  # - name: alwaysFailing
-  #   modelPreset: Qwen35  
-  #   modelType: Escalation
-  # - name: regexMatch
-  #   modelPreset: Gpt4oMini
-  #   structuredPreset: None
-  #   regexMatches:
-  #     - ".*error.*"
-  #   params:
-  #     temperature: 0.7 

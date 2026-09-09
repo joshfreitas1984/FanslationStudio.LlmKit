@@ -20,6 +20,11 @@
   re-export matching order, and the known cost of the fragment model.
 - [`docs/prefabtext-workflow.md`](docs/prefabtext-workflow.md) — `TextFileType.PrefabText` design:
   a flat, row/column-less alternative to the CSV pipeline for dumped prefab/UI text.
+- [`docs/quality-review-pass-architecture.md`](docs/quality-review-pass-architecture.md) —
+  post-translation quality review pass: `TranslationSplit` Qc\* fields and the `SubIndex == 0`
+  anchor convention, `QualityReviewWorkflow` mechanics, the staleness/freshness problem and its fix
+  (`QualityReviewHelpers.IsQcReviewFresh`, merge preservation), score-gated packaging, and the
+  per-model-family (`Qwen25`/`Glm4`) prompt design.
 
 ## Bug-fix postmortems
 
@@ -29,10 +34,11 @@
   `ApplyAllRulesToCurrentTranslation` not applying game-specific hooks to already-translated lines
   (fixed 2026-09-08), and a follow-up false-positive fix for tokens with an embedded digit.
 
-## In-progress feature design
+## Design history (superseded by a current-state doc above, kept for context)
 
 - [`../DragonHierOverLlm/docs/plans/quality-review-pass.md`](../DragonHierOverLlm/docs/plans/quality-review-pass.md)
-  — post-translation quality review pass. Spans this repo (new `TranslationSplit` fields, new
-  `Workflow/QualityReviewWorkflow.cs`, packaging changes) and `DragonHierOverLlm` (config, a new
-  numbered manually-run test step). Design document; check its own "Status" line for current
-  implementation progress.
+  — the original design plan for the quality review pass (spans this repo + `DragonHierOverLlm`),
+  including the open questions/tradeoffs that were resolved along the way and the model-selection
+  sample-run methodology. Predates most of the feature being built - for current-state reference
+  use [`docs/quality-review-pass-architecture.md`](docs/quality-review-pass-architecture.md)
+  instead.

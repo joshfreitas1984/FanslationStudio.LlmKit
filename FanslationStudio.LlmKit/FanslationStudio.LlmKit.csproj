@@ -15,7 +15,8 @@
     <EmbeddedResource Include="BaseFiles\Qwen25\Corrections\*.txt" />
     <EmbeddedResource Include="BaseFiles\Qwen25\Dynamics\*.txt" />
 
-    <EmbeddedResource Include="BaseFiles\Qwen35\Config.yaml" />
+    <EmbeddedResource Include="BaseFiles\Glm4\Config.yaml" />
+    <EmbeddedResource Include="BaseFiles\Glm4\Prompts\*.txt" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,23 +1,21 @@
 apiKeyRequired: false
 url: "http://localhost:11434/api/chat"
-model: "qwen3.5:9b"
+model: "glm4:9b"
 modelParams:
-  temperature: 0.2
+  temperature: 0.15
   top_p: 0.9
+  top_k: 40
   repeat_penalty: 1.05
   frequency_penalty: 0
   presence_penalty: 0
-  top_k: 40
-  min_p: 0
   num_ctx: 16384
   num_predict: 512
-tagModelParams:
+structuredTextModelParams:
   temperature: 0
-  top_p: 0.9
+  top_p: 0.95
+  top_k: 0
   repeat_penalty: 1.0
   frequency_penalty: 0
   presence_penalty: 0
-  top_k: 0
-  min_p: 0
   num_ctx: 16384
   num_predict: 512

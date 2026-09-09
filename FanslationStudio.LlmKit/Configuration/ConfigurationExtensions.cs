@@ -57,6 +57,8 @@ public static class ConfigurationExtensions
             // Load Presets - add more here
             if (model.ModelPreset == ModelPreset.Qwen25)
                 runtimeConfig = MergeModelConfig(GetQwen25Preset(deserializer, model), runtimeConfig);
+            else if (model.ModelPreset == ModelPreset.Glm4)
+                runtimeConfig = MergeModelConfig(GetGlm4Preset(deserializer, model), runtimeConfig);
 
             // Set the merged config to runtime
             response.Runtime.Models[model.Name] = runtimeConfig;
@@ -135,6 +137,35 @@ public static class ConfigurationExtensions
                 presetConfig.ModelParams
                 : presetConfig.StructuredTextModelParams,
             Prompts = LoadPresetPrompts("FanslationStudio.LlmKit.BaseFiles.Qwen25")
+        };
+    }
+
+    /// <summary>
+    /// GLM-4 preset - currently only used as a quality-review-pass candidate model (see
+    /// docs/plans/quality-review-pass.md), not for primary translation, so it only ships a
+    /// BaseQualityReviewPrompt prompt today (no BaseSystemPrompt/Corrections/Dynamics - those are
+    /// only looked up by the translation retry path, which this preset isn't exercised through
+    /// yet). Add the rest under BaseFiles/Glm4/ the same way Qwen25 has them if this preset is
+    /// ever used for real translation.
+    /// </summary>
+    private static ModelExecutionConfig GetGlm4Preset(IDeserializer deserializer, ModelConfig model)
+    {
+        var assembly = typeof(ConfigurationExtensions).Assembly;
+        var resourceName = "FanslationStudio.LlmKit.BaseFiles.Glm4.Config.yaml";
+        using var stream = assembly.GetManifestResourceStream(resourceName)
+            ?? throw new InvalidOperationException($"Embedded resource '{resourceName}' not found.");
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+        var presetConfig = deserializer.Deserialize<PresetConfig>(reader);
+
+        return new ModelExecutionConfig
+        {
+            Model = presetConfig.Model,
+            Url = presetConfig.Url,
+            ApiKeyRequired = presetConfig.ApiKeyRequired,
+            ModelParams = model.ModelPresetType == ModelPresetType.Standard ?
+                presetConfig.ModelParams
+                : presetConfig.StructuredTextModelParams,
+            Prompts = LoadPresetPrompts("FanslationStudio.LlmKit.BaseFiles.Glm4")
         };
     }
 

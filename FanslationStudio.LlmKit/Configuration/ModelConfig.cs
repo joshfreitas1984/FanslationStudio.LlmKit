@@ -20,7 +20,7 @@ public enum ModelPreset
 {
     None,
     Qwen25,
-    //Qwen35,
+    Glm4,
 }
 
 public class PresetConfig

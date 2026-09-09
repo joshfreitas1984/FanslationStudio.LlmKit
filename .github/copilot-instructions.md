@@ -82,6 +82,21 @@ structure). See [`docs/prefabtext-workflow.md`](../docs/prefabtext-workflow.md) 
 design; a consuming project's packaging step must filter `PrefabText` entries out of its CSV
 reconstruction loop and call `PrefabTextWorkflow.PackagePrefabTextAsync` instead.
 
+## Quality review pass (`Workflow/QualityReviewWorkflow.cs`) — optional, opt-in
+
+A second, independent pass over already-translated text (`qualityReview.enabled` in `Config.yaml`)
+— an LLM judges fluency/accuracy per column, optionally proposes a correction (only accepted if it
+passes `LineValidation.CheckTransalationSuccessful` plus a glossary-drift check), and rates its own
+confidence 0-100. Additive `TranslationSplit` fields only (`QcTranslated`, `QcStatus`,
+`QcQualityScore`, etc.) — no change to the golden-rule contract. **Nothing besides
+`QualityReviewWorkflow` itself resets these fields** — a retranslation or re-export can leave them
+stale, so anything that would trust `QcTranslated`/`QcQualityScore` (packaging, or the QC pass
+deciding whether to re-review) must first check
+`Utility.QualityReviewHelpers.IsQcReviewFresh(...)`. The QC prompt (`BaseQualityReviewPrompt`) is
+per-model-family like `BaseSystemPrompt`, not a shared/generic file. See
+[`docs/quality-review-pass-architecture.md`](../docs/quality-review-pass-architecture.md) for the
+full design.
+
 ## Testing conventions
 
 - `Tests/` in this repo is a genuine, fast, CI-safe xUnit regression suite (pure unit tests against

@@ -49,7 +49,8 @@ Same three-tier split used by downstream consuming repos:
 | `CompoundFieldSplitter` regex design history and rationale (why each character class/absorption rule exists) | [`compoundfieldsplitter-design.md`](compoundfieldsplitter-design.md) |
 | `TranslationService` retry/escalation mechanics + real-run bug-fix postmortems (correction-suffix leak, game-specific-hook ordering bug, leading punctuation handling) | [`translation-retry-escalation-and-fixes.md`](translation-retry-escalation-and-fixes.md) |
 | `TextFileType.PrefabText` workflow design (flat, row/column-less dumped text files) | [`prefabtext-workflow.md`](prefabtext-workflow.md) |
-| Post-translation quality review pass — design plan (spans this repo + `DragonHierOverLlm`) | [`../../DragonHierOverLlm/docs/plans/quality-review-pass.md`](../../DragonHierOverLlm/docs/plans/quality-review-pass.md) |
+| Post-translation quality review pass — current-state architecture (data model, `QualityReviewWorkflow`, staleness/freshness, packaging, presets/prompts) | [`quality-review-pass-architecture.md`](quality-review-pass-architecture.md) |
+| Post-translation quality review pass — original design plan/history (spans this repo + `DragonHierOverLlm`) | [`../../DragonHierOverLlm/docs/plans/quality-review-pass.md`](../../DragonHierOverLlm/docs/plans/quality-review-pass.md) |
 
 See [`KNOWN_ISSUES.md`](../KNOWN_ISSUES.md) for the full issue index (mirrors this table with
 one-line summaries).
@@ -62,5 +63,5 @@ one-line summaries).
 | Debug/extend `CompoundFieldSplitter.Decompose`/`Reconstruct` | [`.github/copilot-instructions.md`](../.github/copilot-instructions.md) (current-state rules), [`compoundfieldsplitter-design.md`](compoundfieldsplitter-design.md) (why) |
 | Investigate a translation retry/validation/escalation issue | [`translation-retry-escalation-and-fixes.md`](translation-retry-escalation-and-fixes.md) |
 | Add support for a new flat/prefab-style dumped text file | [`prefabtext-workflow.md`](prefabtext-workflow.md) |
-| Understand or extend the quality-review pass work | [`../../DragonHierOverLlm/docs/plans/quality-review-pass.md`](../../DragonHierOverLlm/docs/plans/quality-review-pass.md) |
+| Understand or extend the quality-review pass work | [`quality-review-pass-architecture.md`](quality-review-pass-architecture.md) (current-state), [`../../DragonHierOverLlm/docs/plans/quality-review-pass.md`](../../DragonHierOverLlm/docs/plans/quality-review-pass.md) (design history) |
 | See how a downstream game project consumes this library | `DragonHierOverLlm/.github/instructions/tests-translation-workflow.instructions.md` (sibling repo) |

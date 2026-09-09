@@ -38,6 +38,18 @@ public class TranslationSplit
     // QcStatus.NotReviewed and every Qc* string/nullable empty/null, i.e. "never reviewed").
 
     /// <summary>
+    /// The exact "effective cell text" (see QualityReviewWorkflow - <see cref="Translated"/> for a
+    /// plain column, or the reconstructed cell for a templated column) that was reviewed to
+    /// produce the current <see cref="QcStatus"/>. A subsequent QC run skips this split/column (no
+    /// LLM call) while its current effective text still equals this value; if the underlying
+    /// translation changes later (re-translation, manual fix, glossary rerun), this no longer
+    /// matches and the line is automatically picked up for review again - no manual invalidation
+    /// needed.
+    /// </summary>
+    [YamlMember(ScalarStyle = ScalarStyle.DoubleQuoted)]
+    public string QcReviewedText { get; set; } = string.Empty;
+
+    /// <summary>
     /// QC-corrected replacement for <see cref="Translated"/>, set only when <see cref="QcStatus"/>
     /// is <see cref="QcStatus.Corrected"/>. Packaging prefers this over <see cref="Translated"/>
     /// when non-empty. For a plain (non-templated) column this is the split's own corrected whole
@@ -52,18 +64,6 @@ public class TranslationSplit
 
     /// <summary>Outcome of the last quality review pass. See <see cref="Support.QcStatus"/>.</summary>
     public QcStatus QcStatus { get; set; } = QcStatus.NotReviewed;
-
-    /// <summary>
-    /// The exact "effective cell text" (see QualityReviewWorkflow - <see cref="Translated"/> for a
-    /// plain column, or the reconstructed cell for a templated column) that was reviewed to
-    /// produce the current <see cref="QcStatus"/>. A subsequent QC run skips this split/column (no
-    /// LLM call) while its current effective text still equals this value; if the underlying
-    /// translation changes later (re-translation, manual fix, glossary rerun), this no longer
-    /// matches and the line is automatically picked up for review again - no manual invalidation
-    /// needed.
-    /// </summary>
-    [YamlMember(ScalarStyle = ScalarStyle.DoubleQuoted)]
-    public string QcReviewedText { get; set; } = string.Empty;
 
     /// <summary>
     /// True when this split/column needs a human glance: either a QC-proposed correction was
@@ -120,6 +120,24 @@ public class TranslationSplit
         FlaggedForRetranslation = false;
         FlaggedMistranslation = string.Empty;
         FlaggedHallucination = string.Empty;
+    }
+
+    /// <summary>
+    /// Clears every quality-review-pass field back to "never reviewed" - called by
+    /// <see cref="Workflow.QualityReviewWorkflow"/> immediately before recording a fresh review
+    /// outcome, so a stale <see cref="QcTranslated"/>/<see cref="FlaggedForQcReview"/> from an
+    /// earlier review of different text (e.g. before a retranslation changed <see cref="Translated"/>)
+    /// never lingers alongside this review's result.
+    /// </summary>
+    public void ResetQcState()
+    {
+        QcTranslated = string.Empty;
+        QcStatus = QcStatus.NotReviewed;
+        QcReviewedText = string.Empty;
+        FlaggedForQcReview = false;
+        QcRejectedCorrection = string.Empty;
+        QcFailureReason = string.Empty;
+        QcQualityScore = null;
     }
 
     //public void ResetGlossaryFlags()

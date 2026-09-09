@@ -57,18 +57,25 @@ Single entry point, called once per workflow invocation. Loads, in order:
 1. `Config.yaml` → `LlmConfig` (models list, `BatchSize`, `RetryCount`, `SplitCharactersList`,
    `SplitRegexPatterns`, `GlossaryPreset`, `UseContinuousWorkerPool`, `MaxConcurrency`, etc.).
 2. `ManualTranslations.yaml` → exact raw→result overrides, always wins over LLM output.
-3. Per-model runtime config (`RuntimeValues.Models[name]`): merges a built-in **preset**
-   (currently only `Qwen25`, loaded from embedded resources under `BaseFiles/Qwen25/`) with
-   workspace-level prompt overrides (`{WorkingDirectory}/{ModelName}Prompts/*.txt`) and an API key
-   file (`{ModelName}ApiKey.txt`).
+3. Per-model runtime config (`RuntimeValues.Models[name]`): merges a built-in **preset** with
+   workspace-level prompt overrides (`{WorkingDirectory}/{ModelName}Prompts/*.txt`, or
+   `CustomPromptsPath` if set) and an API key file (`{ModelName}ApiKey.txt`). Presets today:
+   - `Qwen25` (`BaseFiles/Qwen25/`) — the primary translation preset: model params (Standard vs.
+     StructuredText) + full prompt set (`BaseSystemPrompt`, `BaseGlossaryPrompt`,
+     `BaseCorrectionSuffixPrompt`, `Corrections/*`, `Dynamics/*`, `BaseQualityReviewPrompt`).
+   - `Glm4` (`BaseFiles/Glm4/`) — currently QC-only (see
+     [`quality-review-pass-architecture.md`](quality-review-pass-architecture.md)): only ships
+     `BaseQualityReviewPrompt` today, since it isn't used for real translation yet. Add the rest
+     under `BaseFiles/Glm4/` the same way `Qwen25` has them if it ever is.
 4. Preset Chinese glossary (embedded `BaseFiles/ChineseGlossary/*.yaml`, filterable by
    `ChineseGlossaryTypesToSupress`), then workspace `Glossary/*.yaml` merged on top (workspace
    entries override preset entries matching on `Raw`/`RawSimplified`/`RawTraditional`).
 5. Hyphens in glossary/manual results are rewritten to non-breaking hyphens (Unity line-break
    workaround).
 
-Adding a new preset model = add a case in `GetQwen25Preset`-style method + embedded
-`BaseFiles/<Name>/Config.yaml` + prompt `.txt` resources.
+Adding a new preset model = add a case in `GetConfiguration`'s preset-branch (a `GetQwen25Preset`/
+`GetGlm4Preset`-style method) + embedded `BaseFiles/<Name>/Config.yaml` + prompt `.txt` resources +
+a new `ModelPreset` enum value.
 
 ## Entry points (`Workflow/TranslationWorkflow.cs`)
 
@@ -193,7 +200,18 @@ Key mechanics shared by both schedulers:
 Central gatekeeper for "is this translation acceptable" — Chinese-character-leftover detection,
 placeholder/token preservation checks, HTML/color/size tag integrity, length/format
 sanity. Returns a `ValidationResult` with a `CorrectionPrompt` describing exactly what's wrong so
-the retry attempt can self-correct rather than blindly re-asking.
+the retry attempt can self-correct rather than blindly re-asking. Only checks structural/format
+correctness, not translation quality/fluency — see the next section for the pass that does.
+
+## Quality review pass (`Workflow/QualityReviewWorkflow.cs`) — optional, independent of translation
+
+A second, independent pass over already-translated text: an LLM (typically a different model than
+primary translation) judges each column's fluency/accuracy, optionally proposes a correction
+(validated through the same `LineValidation` gate plus a glossary-drift check before being
+accepted), and rates its own confidence 0-100. Entirely opt-in (`qualityReview.enabled` in
+`Config.yaml`) and additive — new `TranslationSplit` fields only, no change to the
+`Line`/`Splits`/`Templates` contract. Full reference:
+[`quality-review-pass-architecture.md`](quality-review-pass-architecture.md).
 
 ## String/text utilities (`Utility/`)
 
