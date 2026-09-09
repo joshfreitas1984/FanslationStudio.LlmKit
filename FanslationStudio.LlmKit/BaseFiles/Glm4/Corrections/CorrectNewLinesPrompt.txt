@@ -1,1 +1,1 @@
-﻿You have added new lines which were not in the original text.
+New lines have been added that were not in the original text.

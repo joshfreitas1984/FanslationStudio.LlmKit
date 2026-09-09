@@ -1,4 +1,2 @@
-﻿
-**Special markup:**
-- Preserve markup </size> tags and include them in the translation and final output.
-
+---
+**Special markup:** - Maintain </size> tags and incorporate in translation & output.

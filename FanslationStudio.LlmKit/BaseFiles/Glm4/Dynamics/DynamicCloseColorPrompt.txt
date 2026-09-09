@@ -1,4 +1,2 @@
-﻿
-**Special markup:**
-- Preserve markup </color> tags and include them in the translation and final output.
-
+---
+**Special markup:** - Keep </color> tags; include in translation/output

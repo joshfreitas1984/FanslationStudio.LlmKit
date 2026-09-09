@@ -1,1 +1,1 @@
-﻿Single-quoted terms like 'Example Term' are pre-translated proper nouns acting as placeholders for bracket notation (e.g. 《》 or 【】). The single quotes wrapping them must be preserved exactly as they appear in the source.
+Single-quoted terms ('Example Term') represent pre-translated proper nouns for bracket placeholders (e.g. 《》or【】), preserving single quotes exactly as in the source.

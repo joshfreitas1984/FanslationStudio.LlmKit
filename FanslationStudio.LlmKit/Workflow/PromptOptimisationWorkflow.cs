@@ -82,6 +82,18 @@ public static class PromptOptimisationWorkflow
             if (string.IsNullOrWhiteSpace(original))
                 continue;
 
+            // A file that is nothing but placeholder token(s) (e.g. BaseCorrectionPrompt.txt's
+            // bare `{2}`) has no actual wording to tighten - asking the model to "optimise" it
+            // anyway invites exactly what happened in practice: a fluent-looking but entirely
+            // fabricated prompt (invented {0}/{1} substitutions, SCORE:/CORRECTED: labels that
+            // don't belong to this file) that still passes the placeholder-presence check below
+            // because the original {2} incidentally appears somewhere in the invention too.
+            if (PlaceholderTokenPattern.Replace(original, "").Trim().Length == 0)
+            {
+                Console.WriteLine($"Prompt optimisation: skipping '{promptFile}' - it's just placeholder token(s) with no wording to optimise. Leaving it untouched.");
+                continue;
+            }
+
             var promptKey = Path.GetFileNameWithoutExtension(promptFile);
             var messages = new List<object>
             {

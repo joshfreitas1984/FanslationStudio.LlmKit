@@ -1,1 +1,1 @@
-﻿**Instruction**: Ensure that the "·" character is always preserved in any text processing or formatting tasks.
+**Instruction**: Maintain the "·" character in all text processing and formatting.

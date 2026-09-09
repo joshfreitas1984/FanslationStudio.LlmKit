@@ -1,1 +1,1 @@
-﻿Alternatives were provided when none should be given.
+Provided alternatives unnecessarily.
