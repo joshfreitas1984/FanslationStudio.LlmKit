@@ -309,6 +309,14 @@ public static class TranslationWorkflow
             {
                 logLines.Add($"New Glossary {textFile.Path} Replaces: \n{split.Translated}");
                 split.FlaggedForRetranslation = true;
+
+                // A prior QC correction may have been made before this glossary entry existed, and
+                // could now contradict it. IsQcReviewFresh only invalidates a QC override when
+                // Translated's *value* changes, which retranslation isn't guaranteed to do (it can
+                // reproduce the same string, or this flag can sit unretranslated for a while) - so
+                // force a fresh QC look rather than letting a stale, now-glossary-violating
+                // QcTranslated keep shipping on a technicality. See QualityReviewHelpers.IsQcReviewFresh.
+                split.ResetQcState();
                 return true;
             }
         }

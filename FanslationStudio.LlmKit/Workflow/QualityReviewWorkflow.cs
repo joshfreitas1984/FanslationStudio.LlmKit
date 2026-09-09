@@ -293,6 +293,16 @@ public static class QualityReviewWorkflow
 
         var correctedResult = tokenReplacer.Restore(correctedRaw);
 
+        // Same post-LLM repair pass a normal translation attempt gets (TranslateSplitAsync always
+        // runs PrepareResult before validating) - e.g. GameFileHandling.RepairKnownLlmQuirks
+        // unwraps braces an LLM sometimes adds around this game's own "#...#" placeholder tokens.
+        // A QC correction is just as capable of introducing the same quirks as a normal
+        // translation attempt, so skipping this here meant a fixable artifact (e.g. GLM4 rewriting
+        // "#TargetInteractName#" as "{TargetInteractName}") went straight to the validation gate
+        // and got rejected outright instead of being repaired first like it would on the
+        // translation path.
+        correctedResult = LineValidation.PrepareResult(rawText, correctedResult, item.File.TextFile, anchor.Split);
+
         // Validation gate: the exact same structural check a normal translation attempt goes
         // through, plus a glossary-drift check specific to QC (see CheckGlossaryDrift).
         var validation = LineValidation.CheckTransalationSuccessful(modelConfig, rawText, correctedResult, item.File.TextFile, anchor.Split);

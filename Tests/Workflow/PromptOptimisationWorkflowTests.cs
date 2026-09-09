@@ -38,6 +38,6 @@ public class PromptOptimisationWorkflowTests
     public async Task OptimiseGlm4SystemAndQcPrompts()
     {
         await PromptOptimisationWorkflow.RunAsync(ModelPreset.Glm4, ModelPresetType.Standard, BaseFilesSourceRoot,
-            promptKeys: ["BaseSystemPrompt"]);
+            promptKeys: ["BaseSystemPrompt", "BaseQualityReviewPrompt"]);
     }
 }

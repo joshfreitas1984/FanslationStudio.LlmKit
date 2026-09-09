@@ -299,6 +299,18 @@ public static partial class LineValidation
         var response = true;
         var correctionPrompts = new StringBuilder();
 
+        // A stray '\r' (alone, or as the CRLF a model occasionally emits instead of a bare '\n')
+        // carries no meaning of its own in this pipeline - unlike a genuine embedded '\n' (see the
+        // duplication check below), its mere presence isn't a sign the model duplicated/
+        // self-corrected text, so flagging it invalid just spends a retry (or, on the QC path,
+        // rejects an otherwise-good correction) fixing something that's easier to normalize away
+        // outright. Folding it into '\n' here (rather than dropping it) means a genuine
+        // duplication - e.g. "\r" used the same way the '\n' check below guards against - still
+        // gets caught by that same check afterwards. Left alone if raw itself already contains a
+        // '\r' (e.g. genuinely CRLF source text), since then it isn't something the model added.
+        if (result.Contains('\r') && !raw.Contains('\r'))
+            result = result.Replace("\r\n", "\n").Replace('\r', '\n');
+
         if (string.IsNullOrEmpty(raw))
             response = false;
 
@@ -450,16 +462,6 @@ public static partial class LineValidation
             // once written out. Flag as invalid so it gets retried instead of silently patched.
             response = false;
             correctionPrompts.AddPromptWithValues(config, "CorrectAdditionalPrompt", "\\n");
-        }
-
-        if (result.Contains('\r') && !raw.Contains('\r'))
-        {
-            // Same duplication/self-correction signal as the embedded '\n' check above (e.g.
-            // "Wan, extremely sorry! \r Extremely sorry!") - a genuine carriage return character
-            // has no business appearing in these single-line CSV values, so flag as invalid and
-            // retry rather than silently squashing the duplicated text into one line.
-            response = false;
-            correctionPrompts.AddPromptWithValues(config, "CorrectAdditionalPrompt", "\\r");
         }
 
         if (ChineseCharRegex().IsMatch(result) && !ChinesePlaceholderRegex().IsMatch(result))
