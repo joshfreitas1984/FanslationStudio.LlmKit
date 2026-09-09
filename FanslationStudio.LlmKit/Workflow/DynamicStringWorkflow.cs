@@ -90,7 +90,7 @@ public static class DynamicStringWorkflow
 
         var serializer = YamlHelper.CreateSerializer();
         var yaml = serializer.Serialize(foundLines);
-        File.WriteAllText($"{exportPath}/{textFile.Path}.yaml", yaml);
+        FileHelper.WriteAllTextWithRetry($"{exportPath}/{textFile.Path}.yaml", yaml);
 
         if (!File.Exists($"{convertedPath}/{textFile.Path}.yaml"))
             File.Copy($"{exportPath}/{textFile.Path}.yaml", $"{convertedPath}/{textFile.Path}.yaml");
@@ -162,7 +162,7 @@ public static class DynamicStringWorkflow
         });
 
         var serializer = YamlHelper.CreateSerializer();
-        await File.WriteAllTextAsync($"{outputPath}/{textFile.Path}.yaml", serializer.Serialize(results));
+        await FileHelper.WriteAllTextWithRetryAsync($"{outputPath}/{textFile.Path}.yaml", serializer.Serialize(results));
 
         return (passedCount, failedCount);
     }

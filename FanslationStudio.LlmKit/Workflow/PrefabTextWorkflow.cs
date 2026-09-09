@@ -83,7 +83,7 @@ public static class PrefabTextWorkflow
 
         var serializer = YamlHelper.CreateSerializer();
         var yaml = serializer.Serialize(foundLines);
-        File.WriteAllText($"{exportPath}/{textFile.Path}.yaml", yaml);
+        FileHelper.WriteAllTextWithRetry($"{exportPath}/{textFile.Path}.yaml", yaml);
 
         // Add missing converted file if it doesn't exist yet - matches the CSV export path's
         // behavior of never overwriting an already-accumulated Converted/*.yaml.
@@ -140,7 +140,7 @@ public static class PrefabTextWorkflow
         });
 
         var serializer = YamlHelper.CreateSerializer();
-        await File.WriteAllTextAsync($"{outputPath}/{textFile.Path}.yaml", serializer.Serialize(results));
+        await FileHelper.WriteAllTextWithRetryAsync($"{outputPath}/{textFile.Path}.yaml", serializer.Serialize(results));
 
         return (passedCount, failedCount);
     }

@@ -116,7 +116,7 @@ public static class TranslationWorkflow
         {
             Console.WriteLine($"Writing {recordsModded} records to {outputFile}");
             var serializer = YamlHelper.CreateSerializer();
-            await File.WriteAllTextAsync(outputFile, serializer.Serialize(fileLines));
+            await FileHelper.WriteAllTextWithRetryAsync(outputFile, serializer.Serialize(fileLines));
         }
 
         return recordsModded;
@@ -651,7 +651,7 @@ public static class TranslationWorkflow
                     // Reset all the retrans flags
                     split.ResetFlags(false);
 
-            await File.WriteAllTextAsync(outputFile, serializer.Serialize(fileLines));
+            await FileHelper.WriteAllTextWithRetryAsync(outputFile, serializer.Serialize(fileLines));
         });
     }
 
@@ -679,7 +679,7 @@ public static class TranslationWorkflow
                     }
                 }
 
-            await File.WriteAllTextAsync(outputFile, serializer.Serialize(fileLines));
+            await FileHelper.WriteAllTextWithRetryAsync(outputFile, serializer.Serialize(fileLines));
             Console.WriteLine($"Writing {recordsModded} records to {outputFile}");
         });
     }
@@ -707,7 +707,7 @@ public static class TranslationWorkflow
                     }
                 }
 
-            await File.WriteAllTextAsync(outputFile, serializer.Serialize(fileLines));
+            await FileHelper.WriteAllTextWithRetryAsync(outputFile, serializer.Serialize(fileLines));
             Console.WriteLine($"Writing {recordsModded} records to {outputFile}");
         });
     }
@@ -740,7 +740,7 @@ public static class TranslationWorkflow
                     }
                 }
 
-            await File.WriteAllTextAsync(outputFile, serializer.Serialize(fileLines));
+            await FileHelper.WriteAllTextWithRetryAsync(outputFile, serializer.Serialize(fileLines));
             Console.WriteLine($"Writing {recordsModded} records to {outputFile}");
         });
     }

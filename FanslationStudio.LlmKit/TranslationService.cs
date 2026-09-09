@@ -405,7 +405,7 @@ public static class TranslationService
                 if (bufferedRecords > BatchlessBuffer)
                 {
                     Console.WriteLine($"Writing Buffer....");
-                    File.WriteAllText(outputFile, serializer.Serialize(fileLines));
+                    FileHelper.WriteAllTextWithRetry(outputFile, serializer.Serialize(fileLines));
                     bufferedRecords = 0;
                 }
             }
@@ -413,7 +413,7 @@ public static class TranslationService
             var elapsed = stopWatch.ElapsedMilliseconds;
             var speed = recordsProcessed == 0 ? 0 : elapsed / recordsProcessed;
             Console.WriteLine($"Done: {totalLines} ({elapsed} ms ~ {speed}/line)");
-            File.WriteAllText(outputFile, serializer.Serialize(fileLines));
+            FileHelper.WriteAllTextWithRetry(outputFile, serializer.Serialize(fileLines));
         }
     }
 
@@ -618,7 +618,7 @@ public static class TranslationService
                             // file. Safe to call repeatedly - it only copies over translations that
                             // already exist on the first occurrence of each duplicate group.
                             PropagateDuplicates(file, forceRetranslation, config, ref totalRecordsProcessed);
-                            File.WriteAllText(file.OutputFile, file.Serializer.Serialize(file.FileLines));
+                            FileHelper.WriteAllTextWithRetry(file.OutputFile, file.Serializer.Serialize(file.FileLines));
                             file.BufferedRecords = 0;
                         }
                     }
@@ -642,7 +642,7 @@ public static class TranslationService
             var elapsed = file.Stopwatch.ElapsedMilliseconds;
             var speed = file.RecordsProcessed == 0 ? 0 : elapsed / file.RecordsProcessed;
             Console.WriteLine($"Done: {file.FileLines.Count} ({elapsed} ms ~ {speed}/line) File: {file.TextFile.Path}");
-            File.WriteAllText(file.OutputFile, file.Serializer.Serialize(file.FileLines));
+            FileHelper.WriteAllTextWithRetry(file.OutputFile, file.Serializer.Serialize(file.FileLines));
         }
 
         Console.WriteLine($"Total Lines: {totalRecordsProcessed} records, Unprocessable: {incorrectLineCount}");
@@ -670,7 +670,7 @@ public static class TranslationService
             .OrderBy(x => x.FilePath)
             .ThenBy(x => x.Raw)
             .Select(x => $"[{x.FilePath}] RAW: {x.Raw}\n  RESULT: {x.Result}\n  REASON: {x.Reason}"));
-        File.WriteAllText(logPath, logContent);
+        FileHelper.WriteAllTextWithRetry(logPath, logContent);
     }
 
     /// <summary>

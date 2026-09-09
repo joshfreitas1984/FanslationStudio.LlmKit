@@ -225,6 +225,11 @@ accepted), and rates its own confidence 0-100. Entirely opt-in (`qualityReview.e
 - `LlmHelpers` — request payload construction, per-text model selection
   (`CalculateModelConfig` — chooses Standard vs StructuredText model based on text shape).
 - `YamlHelper` — shared YamlDotNet serializer/deserializer configuration.
+- `FileHelper` — retry-wrapped `File.WriteAllText`/`WriteAllLines` (sync and async, 3 attempts,
+  short delays) for the transient "file locked by another process" failure (IDE/antivirus/sync tool
+  briefly holding an output `.yaml` open) that would otherwise abort an entire multi-hour
+  translation/QC run. Every workflow's (and the `DragonHierOverLlm` test project's) output write
+  goes through this rather than calling `File.WriteAllText*`/`WriteAllLines*` directly.
 
 ## Testing conventions
 

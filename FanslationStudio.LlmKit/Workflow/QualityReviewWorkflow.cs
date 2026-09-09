@@ -181,7 +181,7 @@ public static class QualityReviewWorkflow
                 {
                     if (item.File.BufferedRecords > TranslationService.BatchlessBuffer)
                     {
-                        File.WriteAllText(item.File.OutputFile, item.File.Serializer.Serialize(item.File.FileLines));
+                        FileHelper.WriteAllTextWithRetry(item.File.OutputFile, item.File.Serializer.Serialize(item.File.FileLines));
                         item.File.BufferedRecords = 0;
                     }
                 }
@@ -189,7 +189,7 @@ public static class QualityReviewWorkflow
         });
 
         foreach (var file in fileStates)
-            await File.WriteAllTextAsync(file.OutputFile, file.Serializer.Serialize(file.FileLines));
+            await FileHelper.WriteAllTextWithRetryAsync(file.OutputFile, file.Serializer.Serialize(file.FileLines));
 
         Console.WriteLine($"Quality review done: {reviewedCount} reviewed, {correctedCount} corrected, {rejectedCount} rejected by validation gate, {flaggedCount} flagged for human review.");
     }

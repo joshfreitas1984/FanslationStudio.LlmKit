@@ -101,7 +101,7 @@ public static class GameFileHandlingBase
             //if (newCount > 0 || exportLines.Count != fileLines.Count) //Always Write because they might have changed format
             {
                 var serializer = YamlHelper.CreateSerializer();
-                File.WriteAllText(outputFile, serializer.Serialize(exportLines));
+                FileHelper.WriteAllTextWithRetry(outputFile, serializer.Serialize(exportLines));
             }
 
             await Task.CompletedTask;
