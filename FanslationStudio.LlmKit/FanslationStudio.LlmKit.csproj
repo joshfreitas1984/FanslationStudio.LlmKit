@@ -17,6 +17,8 @@
 
     <EmbeddedResource Include="BaseFiles\Glm4\Config.yaml" />
     <EmbeddedResource Include="BaseFiles\Glm4\Prompts\*.txt" />
+    <EmbeddedResource Include="BaseFiles\Glm4\Corrections\*.txt" />
+    <EmbeddedResource Include="BaseFiles\Glm4\Dynamics\*.txt" />
   </ItemGroup>
 
   <ItemGroup>
