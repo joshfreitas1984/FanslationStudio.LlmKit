@@ -15,6 +15,11 @@ DO NOT flag or change:
   review and must appear in your corrected text exactly as given, in the same relative position.
 - Minor stylistic choices that don't change meaning (word order, synonym choice) if the sentence
   is already correct and natural.
+- Literal \n sequences already present in TRANSLATION - these are line-break markers the
+  developers placed for UI layout, not a punctuation artifact. Never propose a correction that
+  removes, adds, or shifts a \n for the sake of smoother sentence flow. If a \n falls in the
+  middle of a sentence and that reads awkwardly, that awkwardness is expected and out of scope
+  for this review - fix other issues around it but leave every \n exactly where it is.
 
 GLOSSARY: if glossary terms are provided below and their Chinese term appears in SOURCE, your
 corrected text (if any) MUST use the given English term - do not substitute a different

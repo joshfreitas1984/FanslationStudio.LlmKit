@@ -132,9 +132,15 @@ authority for the whole column.
        rejected correction is never applied.
 
 `GetFlaggedQcReviews(workingDirectory, textFiles)` — reporting helper mirroring
-`GameFileHandlingBase.GetFailedTranslations`'s `(Text, Translated, Reason)` shape, scanning for
-`FlaggedForQcReview` instead of `FlaggedForRetranslation`, so a human reviewer gets the same
-before/after report tooling they already know how to read.
+`GameFileHandlingBase.GetFailedTranslations`'s reporting shape, scanning for `FlaggedForQcReview`
+instead of `FlaggedForRetranslation`, so a human reviewer gets the same before/after report tooling
+they already know how to read. Groups by column (same shape as `RunAsync`'s work items) rather than
+iterating raw `Splits` directly, and reports two fields that are easy to get wrong for a templated
+column: `Text` is the *reconstructed whole-cell raw text* (`CompoundFieldSplitter.Reconstruct` over
+every fragment's `Text`, not just the anchor fragment's own piece), and the translation field is
+`QcReviewedText` — not the column's current `Translated` — since that's the exact text QC actually
+judged to produce this flag (and matches what a stale review fails to match against a
+since-changed `Translated`, see below).
 
 ## Staleness / freshness (`Utility/QualityReviewHelpers.cs`)
 

@@ -350,9 +350,13 @@ public static class QualityReviewWorkflow
     /// Mirrors <see cref="GameFileHandlingBase.GetFailedTranslations"/>'s reporting shape, scoped to
     /// QC rejections/flags instead of translation failures - lets a human reviewer pull every column
     /// currently flagged for a look (either a rejected correction, or a low quality score) in one
-    /// pass, without reading every line in Files/Converted.
+    /// pass, without reading every line in Files/Converted. <see cref="QcReviewedText"/> (not the
+    /// column's current <c>Translated</c>) is reported as "the translation" here deliberately -
+    /// it's the exact text QC actually judged to produce this flag, which is also what a stale
+    /// review would fail to match against a since-changed <c>Translated</c> (see
+    /// <see cref="Utility.QualityReviewHelpers.IsQcReviewFresh"/>).
     /// </summary>
-    public record FlaggedQcReview(string FilePath, string Text, string Translated, string? RejectedCorrection, string? Reason, int? Score);
+    public record FlaggedQcReview(string FilePath, string Text, string QcReviewedText, string? RejectedCorrection, string? Reason, int? Score);
 
     public static async Task<List<FlaggedQcReview>> GetFlaggedQcReviews(string workingDirectory, TextFileToSplit[] textFiles)
     {
@@ -362,18 +366,30 @@ public static class QualityReviewWorkflow
         {
             foreach (var line in fileLines)
             {
-                foreach (var split in line.Splits)
+                // Group by column (same shape as RunAsync's work items) rather than iterating
+                // raw Splits directly - a templated column's Qc state lives only on its
+                // SubIndex == 0 fragment, but that fragment's OWN Text/Translated is just its own
+                // piece of the cell, not the whole reconstructed raw text QC actually reviewed.
+                foreach (var columnGroup in line.Splits.GroupBy(s => s.Split))
                 {
-                    if (!split.FlaggedForQcReview)
+                    var fragments = columnGroup.OrderBy(s => s.SubIndex).ToList();
+                    var anchor = fragments.FirstOrDefault(f => f.SubIndex == 0) ?? fragments[0];
+
+                    if (!anchor.FlaggedForQcReview)
                         continue;
+
+                    var template = line.Templates.FirstOrDefault(t => t.Split == columnGroup.Key);
+                    var rawText = template != null
+                        ? CompoundFieldSplitter.Reconstruct(template.Template, fragments.Select(f => f.Text).ToList())
+                        : anchor.Text;
 
                     flagged.Add(new FlaggedQcReview(
                         textFile.Path,
-                        split.Text,
-                        split.Translated,
-                        string.IsNullOrEmpty(split.QcRejectedCorrection) ? null : split.QcRejectedCorrection,
-                        string.IsNullOrEmpty(split.QcFailureReason) ? null : split.QcFailureReason,
-                        split.QcQualityScore));
+                        rawText,
+                        anchor.QcReviewedText,
+                        string.IsNullOrEmpty(anchor.QcRejectedCorrection) ? null : anchor.QcRejectedCorrection,
+                        string.IsNullOrEmpty(anchor.QcFailureReason) ? null : anchor.QcFailureReason,
+                        anchor.QcQualityScore));
                 }
             }
 

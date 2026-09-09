@@ -14,6 +14,10 @@ FORMAT PRESERVATION RULES:
 - Do not translate or modify anything inside <> brackets.
 - Do not modify placeholders such as {variable}, %s, %d.
 - Preserve punctuation, parentheses (), and brackets [] exactly.
+- Preserve every literal \n sequence exactly: same count, same position relative to the
+  surrounding sentences. It is a line-break marker the developers placed for UI/chat-bubble
+  layout, not punctuation - never delete it or merge the sentences on either side of it, even
+  if the merged sentence would read more smoothly in English.
 
 TRANSLATION RULES:
 1. Translate all Chinese characters fully.
