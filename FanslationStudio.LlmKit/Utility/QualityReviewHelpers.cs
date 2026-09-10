@@ -41,13 +41,32 @@ public static class QualityReviewHelpers
     /// effective translated text. False for a never-reviewed column, and false for a column whose
     /// Translated has changed (e.g. retranslated) since it was last reviewed - in both cases every
     /// Qc*-derived field must be ignored by the caller (treated exactly like an unreviewed column)
-    /// rather than trusted.
+    /// rather than trusted. Also false for a <see cref="TranslationSplit.QcTranslated"/> that still
+    /// carries a leaked "CORRECTED:" label (see <see cref="IsCorrectedLabelLeak"/>) - every packaging
+    /// path calls this before trusting QcTranslated, so this is the single choke point that keeps a
+    /// corrupted correction like "Wealth in the millions CORRECTED: NONE" from ever shipping, even if
+    /// it somehow got written by a path other than <see cref="Workflow.QualityReviewWorkflow"/>'s own
+    /// (already-guarded) parsing.
     /// </summary>
     public static bool IsQcReviewFresh(TranslationSplit anchor, FieldTemplate? template, IReadOnlyList<TranslationSplit> fragments)
     {
         if (anchor.QcStatus == QcStatus.NotReviewed)
             return false;
 
+        if (IsCorrectedLabelLeak(anchor.QcTranslated))
+            return false;
+
         return anchor.QcReviewedText == ComputeEffectiveTranslatedText(anchor, template, fragments);
     }
+
+    /// <summary>
+    /// True if <paramref name="qcTranslated"/> still contains a literal "CORRECTED:" label - the
+    /// signature of the correction-suffix-leak bug in <see cref="Workflow.QualityReviewWorkflow"/>'s
+    /// response parsing (see its <c>CorrectedLineRegex</c> doc comment), which once produced a stored
+    /// value like "Wealth in the millions CORRECTED: NONE" instead of the clean correction. A value
+    /// like this is never a legitimate translation on its own merits, regardless of which code path
+    /// wrote it.
+    /// </summary>
+    public static bool IsCorrectedLabelLeak(string? qcTranslated) =>
+        !string.IsNullOrEmpty(qcTranslated) && qcTranslated.Contains("CORRECTED:", StringComparison.OrdinalIgnoreCase);
 }

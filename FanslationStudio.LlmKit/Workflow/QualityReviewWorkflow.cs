@@ -28,7 +28,16 @@ public static class QualityReviewWorkflow
     /// recording a guessed score - see ReviewColumnAsync.
     /// </summary>
     private static readonly Regex ScoreLineRegex = new(@"^\s*SCORE:\s*(\d+)", RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Compiled);
-    private static readonly Regex CorrectedLineRegex = new(@"CORRECTED:\s*(.*)", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
+
+    /// <summary>
+    /// Anchored to a single line (Multiline, no Singleline) so a response that restates or trails
+    /// text after its "CORRECTED: ..." line (e.g. the model repeating the label, or adding stray
+    /// commentary despite the prompt's "nothing else" instruction) doesn't get swept into the
+    /// captured group - see the correction-suffix-leak postmortem in DragonHierOverLlm's
+    /// docs/plans/quality-review-pass.md for a real example of the corrupted output this produced
+    /// before this fix (a stored QcTranslated like "Wealth in the millions CORRECTED: NONE").
+    /// </summary>
+    private static readonly Regex CorrectedLineRegex = new(@"^\s*CORRECTED:\s*(.*)$", RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Compiled);
 
     private sealed class QcFileState
     {
@@ -505,6 +514,20 @@ public static class QualityReviewWorkflow
 
         var correctedMatch = CorrectedLineRegex.Match(llmResponse);
         var correctedRaw = correctedMatch.Success ? correctedMatch.Groups[1].Value.Trim() : string.Empty;
+
+        // Defense in depth for the correction-suffix-leak this project already hit once (see
+        // CorrectedLineRegex's doc comment) - even with that regex anchored to a single line, a
+        // model that restates the "CORRECTED:" label INSIDE its own corrected text (rather than on
+        // a trailing line the anchor already excludes) would still leak it into correctedRaw. Any
+        // stored QcTranslated containing this label is definitely not a clean translation, so treat
+        // it exactly like an unparseable response - reviewed again next run - rather than risk
+        // storing/packaging it.
+        if (correctedRaw.Contains("CORRECTED:", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine($"Quality review: parsed correction for '{rawText}' still contains a 'CORRECTED:' label - treating as unparseable. Raw response: {llmResponse}");
+            return new LlmVerdict(false, 0, null);
+        }
+
         var hasCorrection = correctedMatch.Success
             && !string.IsNullOrEmpty(correctedRaw)
             && !correctedRaw.Equals("NONE", StringComparison.OrdinalIgnoreCase);
