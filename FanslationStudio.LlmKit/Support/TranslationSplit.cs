@@ -8,6 +8,14 @@ public class TranslationSplit
     public int Split { get; set; } = 0;
 
     /// <summary>
+    /// Path/name of the source field this split came from (e.g. a JSON property name, optionally
+    /// with an array index suffix like "NameList[2]"), used to re-match a line's fields after a
+    /// re-export by field identity rather than position. Empty for file types that don't need
+    /// field-path matching (PrefabText, DynamicStrings, CSV columns, which use <see cref="Split"/>).
+    /// </summary>
+    public string SplitPath { get; set; } = string.Empty;
+
+    /// <summary>
     /// Index of this fragment within its CSV column when the column is a compound field that was
     /// decomposed into multiple translatable fragments (see <see cref="FieldTemplate"/>). Zero for
     /// plain columns where the whole cell is a single split, preserving old behavior/serialized data.

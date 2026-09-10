@@ -8,6 +8,13 @@ public class TranslationLine
     [YamlMember(ScalarStyle = ScalarStyle.DoubleQuoted)]
     public string Raw { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Stable identifier for this line within its source file, used to re-match a line after a
+    /// re-export even if <see cref="Raw"/> itself changes shape (e.g. a JSON row's key). Empty for
+    /// file types that match purely on <see cref="Raw"/> instead (PrefabText, DynamicStrings).
+    /// </summary>
+    public string RawIndex { get; set; } = string.Empty;
+
     [YamlIgnore]
     public string Translated { get; set; } = string.Empty;
 

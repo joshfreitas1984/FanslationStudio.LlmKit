@@ -19,8 +19,10 @@ public static class PrefabTextWorkflow
 {
     /// <summary>
     /// Reads a plain-text file (one distinct string per line, blank lines ignored) from
-    /// Raw/Dumped/PrefabText/{textFile.Path} and produces the same TranslationLine YAML shape the
-    /// CSV export path uses, so it flows through the existing Converted/merge/translate pipeline
+    /// <paramref name="rawSubfolder"/>/{textFile.Path} (default "Raw/Dumped/PrefabText", matching
+    /// the original convention this generalizes - see <see cref="CsvGameDataWorkflow.ExportToCustomFormat"/>'s
+    /// own rawSubfolder parameter) and produces the same TranslationLine YAML shape the CSV export
+    /// path uses, so it flows through the existing Converted/merge/translate pipeline
     /// (GameFileHandlingBase.MergeFilesIntoTranslatedAsync, Workflow/TranslationWorkflow.cs, etc.)
     /// completely unchanged.
     ///
@@ -36,9 +38,10 @@ public static class PrefabTextWorkflow
     /// for the common case.
     /// </summary>
     public static void ExportPrefabTextToCustomFormat(
-        string workingDirectory, TextFileToSplit textFile, CompoundFieldSplitterOptions? options = null)
+        string workingDirectory, TextFileToSplit textFile, CompoundFieldSplitterOptions? options = null,
+        string rawSubfolder = "Raw/Dumped/PrefabText")
     {
-        var dumpedPath = $"{workingDirectory}/Raw/Dumped/PrefabText/{textFile.Path}";
+        var dumpedPath = $"{workingDirectory}/{rawSubfolder}/{textFile.Path}";
         var exportPath = $"{workingDirectory}/Raw/Export";
         var convertedPath = $"{workingDirectory}/Converted";
 
