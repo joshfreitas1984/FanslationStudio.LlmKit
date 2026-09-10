@@ -17,27 +17,27 @@ public class PromptOptimisationWorkflowTests
     // the parent of both Tests/ and FanslationStudio.LlmKit/.
     private const string BaseFilesSourceRoot = "../../../../FanslationStudio.LlmKit/BaseFiles";
 
-    [Fact(DisplayName = "Optimise Qwen25's own prompt set")]
-    public async Task OptimiseQwen25PromptSet()
-    {
-        await PromptOptimisationWorkflow.RunAsync(ModelPreset.Qwen25, ModelPresetType.Standard, BaseFilesSourceRoot);
-    }
+    //[Fact(DisplayName = "Optimise Qwen25's own prompt set")]
+    //public async Task OptimiseQwen25PromptSet()
+    //{
+    //    await PromptOptimisationWorkflow.RunAsync(ModelPreset.Qwen25, ModelPresetType.Standard, BaseFilesSourceRoot);
+    //}
 
-    [Fact(DisplayName = "Optimise Glm4's own prompt set")]
-    public async Task OptimiseGlm4PromptSet()
-    {
-        await PromptOptimisationWorkflow.RunAsync(ModelPreset.Glm4, ModelPresetType.Standard, BaseFilesSourceRoot);
-    }
+    //[Fact(DisplayName = "Optimise Glm4's own prompt set")]
+    //public async Task OptimiseGlm4PromptSet()
+    //{
+    //    await PromptOptimisationWorkflow.RunAsync(ModelPreset.Glm4, ModelPresetType.Standard, BaseFilesSourceRoot);
+    //}
 
-    // Targeted re-run for the two files that failed validation (and were left untouched) on the
-    // last full Glm4 pass - BaseSystemPrompt and BaseQualityReviewPrompt are the ones that matter
-    // most for a real QC-model comparison, so they're worth the extra retry attempts on their own
-    // rather than being silently skipped alongside a full re-run that would also re-shrink the
-    // already-committed, already-accepted rewrites of every other file.
-    [Fact(DisplayName = "Optimise Glm4's System/QC prompts only")]
-    public async Task OptimiseGlm4SystemAndQcPrompts()
-    {
-        await PromptOptimisationWorkflow.RunAsync(ModelPreset.Glm4, ModelPresetType.Standard, BaseFilesSourceRoot,
-            promptKeys: ["BaseSystemPrompt", "BaseQualityReviewPrompt"]);
-    }
+    //// Targeted re-run for the two files that failed validation (and were left untouched) on the
+    //// last full Glm4 pass - BaseSystemPrompt and BaseQualityReviewPrompt are the ones that matter
+    //// most for a real QC-model comparison, so they're worth the extra retry attempts on their own
+    //// rather than being silently skipped alongside a full re-run that would also re-shrink the
+    //// already-committed, already-accepted rewrites of every other file.
+    //[Fact(DisplayName = "Optimise Glm4's System/QC prompts only")]
+    //public async Task OptimiseGlm4SystemAndQcPrompts()
+    //{
+    //    await PromptOptimisationWorkflow.RunAsync(ModelPreset.Glm4, ModelPresetType.Standard, BaseFilesSourceRoot,
+    //        promptKeys: ["BaseSystemPrompt", "BaseQualityReviewPrompt"]);
+    //}
 }

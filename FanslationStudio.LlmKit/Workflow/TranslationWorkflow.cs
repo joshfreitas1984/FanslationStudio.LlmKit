@@ -202,13 +202,13 @@ public static class TranslationWorkflow
     /// mangled raw produced false "token count" mismatches (a real, correctly preserved token looked
     /// like it had been added out of nowhere, since the raw side's count came up zero).
     /// </summary>
-    private static bool TryApplyGameSpecificRepair(
+    private static bool? TryApplyGameSpecificRepair(
         ConcurrentBag<string> logLines,
         TranslationSplit split,
         TextFileToSplit textFile)
     {
         if (string.IsNullOrEmpty(split.Translated))
-            return false;
+            return null;
 
         var raw = split.Text;
 
@@ -233,7 +233,7 @@ public static class TranslationWorkflow
             }
         }
 
-        return false;
+        return null;
     }
 
     private static bool? TryHandleGameObjectReference(TranslationSplit split, TextFileToSplit textFile)

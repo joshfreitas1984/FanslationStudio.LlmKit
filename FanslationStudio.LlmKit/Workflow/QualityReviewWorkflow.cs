@@ -301,14 +301,15 @@ public static class QualityReviewWorkflow
 
         if (verdict.CorrectedRawMasked == null)
         {
+            // Decided here, at the point the score is actually known, rather than deferred to a
+            // separate step (ApplyRulesToCurrentQcTranslated) that only runs as part of
+            // RunBruteForce - a plain RunAsync call must leave QcStatus just as accurate as a
+            // brute-forced one, not dependent on which caller happened to invoke this.
+            if (TryRetryForLowScore(config, anchor, effectiveTranslated, verdict.Score, item.File.TextFile))
+                return QcOutcome.Passed;
+
             anchor.QcStatus = QcStatus.Passed;
             anchor.FlaggedForQcReview = verdict.Score < config.QualityReview.MinAcceptableScore;
-            // Passed cleanly - whatever streak of rule-check failures this column had against this
-            // same Translated baseline is over. A LATER failure (e.g. a new rule catching this
-            // freshly-reviewed text, or ApplyRulesToCurrentQcTranslated flagging drift down the
-            // line) deserves a full fresh retry budget, not one continuing from before this success.
-            anchor.QcRuleCheckFailureCount = 0;
-            anchor.QcRuleCheckFailureBaseline = string.Empty;
             return QcOutcome.Passed;
         }
 
@@ -393,14 +394,61 @@ public static class QualityReviewWorkflow
             return QcOutcome.RejectedByGate;
         }
 
+        // Same reasoning as the Passed branch above - decided here, at review time, not deferred.
+        // A retry here discards correctedResult entirely (QcTranslated stays empty, from
+        // ResetQcState() above) rather than half-accepting it, exactly like a rule-violation retry
+        // never keeps the rejected text around either - it's not this attempt's job to accept
+        // anything it isn't confident enough to keep.
+        if (TryRetryForLowScore(config, anchor, effectiveTranslated, verdict.Score, item.File.TextFile))
+            return QcOutcome.Corrected;
+
         anchor.QcStatus = QcStatus.Corrected;
         anchor.QcTranslated = correctedResult;
         anchor.FlaggedForQcReview = verdict.Score < config.QualityReview.MinAcceptableScore;
-        // Same reasoning as the Passed branch above - this correction just passed the gate, so any
-        // rule-check failure streak against this Translated baseline is resolved.
-        anchor.QcRuleCheckFailureCount = 0;
-        anchor.QcRuleCheckFailureBaseline = string.Empty;
         return QcOutcome.Corrected;
+    }
+
+    /// <summary>
+    /// Shared by <see cref="ReviewColumnAsync"/>'s Passed and accepted-Corrected paths: decides
+    /// whether <paramref name="score"/> is worth another try, using the SAME retry budget
+    /// (<see cref="TranslationSplit.QcRuleCheckFailureCount"/>/<see cref="Configuration.QualityReviewConfig.MaxRuleCheckRetries"/>)
+    /// a rule violation gets - computed right here, at the point the score is actually known,
+    /// rather than deferred to <see cref="ApplyRulesToCurrentQcTranslated"/>, a separate step that
+    /// only runs as part of <see cref="RunBruteForce"/>. A plain <see cref="RunAsync"/> call must
+    /// leave <see cref="TranslationSplit.QcStatus"/> just as accurate as a brute-forced one.
+    ///
+    /// Returns true if the caller should retry: <paramref name="anchor"/> is already left
+    /// <see cref="QcStatus.NotReviewed"/> (not fresh) for the next <see cref="RunAsync"/> pass to
+    /// pick up, and the caller must not accept whatever it was about to record (mirrors how a
+    /// rule-violation retry never half-accepts the rejected text either). Returns false if the
+    /// score already clears the bar, or if retries are exhausted and the caller should just accept
+    /// the column as final - a low score isn't a defect to discard, it's a confidence signal, so
+    /// giving up here means keeping the result exactly as reviewed, just still flagged for a human.
+    /// </summary>
+    private static bool TryRetryForLowScore(LlmConfig config, TranslationSplit anchor, string effectiveTranslated, int score, TextFileToSplit textFile)
+    {
+        if (score >= config.QualityReview.MinAcceptableScore)
+        {
+            anchor.QcRuleCheckFailureCount = 0;
+            anchor.QcRuleCheckFailureBaseline = string.Empty;
+            return false;
+        }
+
+        anchor.QcRuleCheckFailureCount = anchor.QcRuleCheckFailureBaseline == effectiveTranslated
+            ? anchor.QcRuleCheckFailureCount + 1
+            : 1;
+        anchor.QcRuleCheckFailureBaseline = effectiveTranslated;
+
+        if (anchor.QcRuleCheckFailureCount > config.QualityReview.MaxRuleCheckRetries)
+        {
+            Console.WriteLine($"Quality review: {textFile.Path} gave up chasing a higher score after {anchor.QcRuleCheckFailureCount} attempts (score {score}) - keeping this result.");
+            return false;
+        }
+
+        Console.WriteLine($"Quality review: {textFile.Path} score {score} below minimum ({config.QualityReview.MinAcceptableScore}), retry {anchor.QcRuleCheckFailureCount}/{config.QualityReview.MaxRuleCheckRetries}.");
+        anchor.QcStatus = QcStatus.NotReviewed;
+        anchor.QcReviewedText = string.Empty;
+        return true;
     }
 
     /// <summary>
@@ -554,7 +602,7 @@ public static class QualityReviewWorkflow
     /// path get) is applied to <c>QcTranslated</c> in place; anything that can't be fixed
     /// deterministically (bad words, glossary drift/hallucination, missing ellipsis/required token,
     /// generic structural validation - the exact same checks <see cref="ReviewColumnAsync"/>'s gate
-    /// runs against a freshly proposed correction) either resets the column back to
+    /// runs against a freshly proposed correction) resets the column back to
     /// <see cref="QcStatus.NotReviewed"/> via <see cref="TranslationSplit.ResetQcState"/> for another
     /// try, or - once <see cref="TranslationSplit.QcRuleCheckFailureCount"/> exceeds
     /// <see cref="Configuration.QualityReviewConfig.MaxRuleCheckRetries"/> for this same underlying
@@ -564,8 +612,23 @@ public static class QualityReviewWorkflow
     /// <see cref="QualityReviewHelpers.IsQcReviewFresh"/> first, the column falls back to
     /// (already rule-checked) <c>Translated</c> immediately - never ships broken text while waiting
     /// for (or having given up on) the next LLM review.
+    ///
+    /// A structurally clean column (no rule violation) - whether <see cref="QcStatus.Corrected"/> or
+    /// <see cref="QcStatus.Passed"/> - with a <see cref="TranslationSplit.QcQualityScore"/> still
+    /// below <see cref="Configuration.QualityReviewConfig.MinAcceptableScore"/> is just woken up
+    /// here (<see cref="QcStatus.NotReviewed"/>, not fresh) rather than having its retry-vs-give-up
+    /// decision made in this pass: that decision lives entirely in <see cref="ReviewColumnAsync"/>'s
+    /// <c>TryRetryForLowScore</c>, computed at the point the score is actually known, so a column's
+    /// status is just as accurate whether it was last touched by a plain <see cref="RunAsync"/> call
+    /// or by this retroactive rule-check - never dependent on which one happened to run.
     /// </summary>
-    /// <returns>How many columns needed action this pass (reset for retry, or given up on).</returns>
+    /// <returns>
+    /// How many columns still need another <see cref="RunAsync"/> attempt after this pass - newly
+    /// reset for retry, or already sitting <see cref="QcStatus.NotReviewed"/> mid-retry from an
+    /// earlier pass whose <see cref="RunAsync"/> call skipped it (e.g. an LLM request error) rather
+    /// than producing a real verdict. A column that gave up is tracked separately and not counted
+    /// here - see <see cref="RunBruteForce"/>.
+    /// </returns>
     public static async Task<int> ApplyRulesToCurrentQcTranslated(string workingDirectory, TextFileToSplit[] textFiles)
     {
         var config = ConfigurationExtensions.GetConfiguration(workingDirectory);
@@ -589,7 +652,29 @@ public static class QualityReviewWorkflow
                     var fragments = columnGroup.OrderBy(s => s.SubIndex).ToList();
                     var anchor = fragments.FirstOrDefault(f => f.SubIndex == 0) ?? fragments[0];
 
-                    if (anchor.QcStatus != QcStatus.Corrected || string.IsNullOrEmpty(anchor.QcTranslated))
+                    // A column left NotReviewed mid-retry (QcRuleCheckFailureCount > 0) has nothing
+                    // for ApplyRulesToQcColumn to repair/validate - it's waiting on RunAsync, not on
+                    // this rule-check. But it still represents unfinished work, and RunAsync's own
+                    // reviewedCount won't reflect that if the LLM call for it errored or returned an
+                    // unparseable response this pass (ReviewColumnAsync deliberately leaves such a
+                    // column's state untouched rather than guessing - see its QcOutcome.Skipped
+                    // branch). Without counting it here too, RunBruteForce's loop could see
+                    // "0 reviewed, 0 to reset" and stop even though this column never actually got
+                    // its next real attempt.
+                    if (anchor.QcStatus == QcStatus.NotReviewed)
+                    {
+                        if (anchor.QcRuleCheckFailureCount > 0)
+                            fileFlagged++;
+                        continue;
+                    }
+
+                    // Corrected columns get the full rule re-check below; Passed columns skip
+                    // straight to the low-score retry check inside ApplyRulesToQcColumn (there's no
+                    // QcTranslated of their own to repair/validate). FailedValidation is out of scope
+                    // here - it's a terminal state (see ResetQcRetryLimits to un-stick one manually).
+                    if (anchor.QcStatus != QcStatus.Corrected && anchor.QcStatus != QcStatus.Passed)
+                        continue;
+                    if (anchor.QcStatus == QcStatus.Corrected && string.IsNullOrEmpty(anchor.QcTranslated))
                         continue;
 
                     var template = line.Templates.FirstOrDefault(t => t.Split == columnGroup.Key);
@@ -616,7 +701,7 @@ public static class QualityReviewWorkflow
         });
 
         if (totalFlagged > 0 || totalGivenUp > 0)
-            Console.WriteLine($"Quality review rule check: {totalFlagged} previously-corrected column(s) now break the rules and were reset for re-review, {totalGivenUp} gave up after exhausting retries and were left for human review.");
+            Console.WriteLine($"Quality review rule check: {totalFlagged} column(s) reset for re-review (rule violation or low score), {totalGivenUp} gave up after exhausting retries and were left for human review.");
 
         return totalFlagged;
     }
@@ -624,9 +709,10 @@ public static class QualityReviewWorkflow
     /// <summary>
     /// One column's worth of <see cref="ApplyRulesToCurrentQcTranslated"/> - see its doc comment for
     /// the tiering rationale. <paramref name="priorTranslated"/> is the pre-QC baseline
-    /// (<see cref="TranslationSplit.Translated"/>, reconstructed for a templated column) used only
-    /// by <see cref="CheckCapitalizationRegression"/>, exactly as <see cref="ReviewColumnAsync"/>
-    /// uses it.
+    /// (<see cref="TranslationSplit.Translated"/>, reconstructed for a templated column) used both
+    /// by <see cref="CheckCapitalizationRegression"/> (exactly as <see cref="ReviewColumnAsync"/>
+    /// uses it) and as the retry-counter baseline for a <see cref="QcStatus.Passed"/> column, which
+    /// has no <see cref="TranslationSplit.QcTranslated"/> of its own to key off.
     /// </summary>
     private static (bool changed, bool needsRetry, bool gaveUp) ApplyRulesToQcColumn(
         LlmConfig config,
@@ -635,6 +721,11 @@ public static class QualityReviewWorkflow
         string rawText,
         string priorTranslated)
     {
+        // A Passed column has no QcTranslated of its own to repair/rule-check - the only thing left
+        // to potentially wake up is a low score.
+        if (anchor.QcStatus == QcStatus.Passed)
+            return WakeUpIfLowScore(config, anchor, textFile, alreadyChanged: false);
+
         var current = anchor.QcTranslated;
 
         // Tier 1: deterministic repair, in place - same repair a normal translation attempt (and a
@@ -660,16 +751,10 @@ public static class QualityReviewWorkflow
         var failureReason = capsFailureReason ?? ruleResult.AllReasons.FirstOrDefault();
 
         if (failureReason == null)
-        {
-            // Still clean - clear any rule-check failure streak left over from before this
-            // (now-Corrected) QcTranslated was accepted, same reasoning as ReviewColumnAsync's
-            // Passed/Corrected branches. Without this, a LATER failure against the same Translated
-            // baseline would wrongly resume counting from here instead of starting a fresh budget.
-            var hadFailureHistory = anchor.QcRuleCheckFailureCount != 0 || anchor.QcRuleCheckFailureBaseline != string.Empty;
-            anchor.QcRuleCheckFailureCount = 0;
-            anchor.QcRuleCheckFailureBaseline = string.Empty;
-            return (changed || hadFailureHistory, needsRetry: false, gaveUp: false);
-        }
+            // Structurally clean - if the score is still low, wake it up for a fresh review rather
+            // than deciding retry-vs-give-up here (see WakeUpIfLowScore's doc comment for why that
+            // decision now lives entirely in ReviewColumnAsync).
+            return WakeUpIfLowScore(config, anchor, textFile, alreadyChanged: changed);
 
         // Same underlying Translated as last time this column failed? Keep counting toward the
         // retry cap. Anything else (first failure ever, or Translated changed since - a
@@ -708,6 +793,51 @@ public static class QualityReviewWorkflow
 
         Console.WriteLine($"Quality review rule check: {textFile.Path} QcTranslated now breaks the rules ({failureReason}), retry {anchor.QcRuleCheckFailureCount}/{config.QualityReview.MaxRuleCheckRetries} \n{current}");
         anchor.ResetQcState(); // Leaves QcRuleCheckFailureCount/Baseline alone - see their doc comments.
+        return (true, needsRetry: true, gaveUp: false);
+    }
+
+    /// <summary>
+    /// If <paramref name="anchor"/>'s current <see cref="TranslationSplit.QcQualityScore"/> is still
+    /// below <see cref="Configuration.QualityReviewConfig.MinAcceptableScore"/>, wakes it up
+    /// (<see cref="QcStatus.NotReviewed"/>, not fresh) for a real review rather than deciding
+    /// retry-vs-give-up here itself - that decision now lives entirely in
+    /// <see cref="ReviewColumnAsync"/>'s <see cref="TryRetryForLowScore"/>, computed at the point
+    /// the score is actually known, so it's accurate regardless of which caller last touched this
+    /// column (a plain <see cref="RunAsync"/> call or this retroactive rule-check). Deliberately
+    /// does NOT touch <see cref="TranslationSplit.QcRuleCheckFailureCount"/>/<c>Baseline</c> itself
+    /// when waking it up - <see cref="TryRetryForLowScore"/> will pick up wherever the count already
+    /// stands against the (unchanged) <see cref="TranslationSplit.Translated"/> baseline, so a
+    /// persistently low-scoring column can't get an unlimited supply of fresh starts just because
+    /// this retroactive check happened to run again. If the score is already fine, clears the
+    /// counter for tidiness (nothing left to track) instead. And if the count already exceeds the
+    /// cap, does nothing at all - <see cref="TryRetryForLowScore"/> already gave up and accepted
+    /// this column as final; waking it up again here would review -> give up -> get woken up again
+    /// forever, growing the count without ever actually settling.
+    /// </summary>
+    private static (bool changed, bool needsRetry, bool gaveUp) WakeUpIfLowScore(LlmConfig config, TranslationSplit anchor, TextFileToSplit textFile, bool alreadyChanged)
+    {
+        var scoreOk = anchor.QcQualityScore is not int score || score >= config.QualityReview.MinAcceptableScore;
+
+        if (scoreOk)
+        {
+            var hadFailureHistory = anchor.QcRuleCheckFailureCount != 0 || anchor.QcRuleCheckFailureBaseline != string.Empty;
+            anchor.QcRuleCheckFailureCount = 0;
+            anchor.QcRuleCheckFailureBaseline = string.Empty;
+            return (alreadyChanged || hadFailureHistory, needsRetry: false, gaveUp: false);
+        }
+
+        // Already exceeded the retry cap? TryRetryForLowScore already tried, gave up, and accepted
+        // this as final - waking it up again here would start an endless loop (wake -> review ->
+        // give up again, since the score doesn't retroactively improve just because this check ran
+        // - -> woken up again next pass), growing QcRuleCheckFailureCount forever instead of
+        // settling. Leave it exactly as ReviewColumnAsync left it; ResetQcRetryLimits is the only
+        // way back in from here.
+        if (anchor.QcRuleCheckFailureCount > config.QualityReview.MaxRuleCheckRetries)
+            return (alreadyChanged, needsRetry: false, gaveUp: false);
+
+        Console.WriteLine($"Quality review rule check: {textFile.Path} still scored below minimum ({anchor.QcQualityScore} < {config.QualityReview.MinAcceptableScore}) - requesting a fresh review.");
+        anchor.QcStatus = QcStatus.NotReviewed;
+        anchor.QcReviewedText = string.Empty;
         return (true, needsRetry: true, gaveUp: false);
     }
 
