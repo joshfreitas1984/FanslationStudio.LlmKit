@@ -9,7 +9,7 @@ namespace FanslationStudio.LlmKit.Workflow;
 /// CSV (see the consuming project's asset-dumping test, e.g. DragonHeirOverLlm's
 /// AssetDumperWorkflowTests, which produces the plain "one distinct string per line" input file
 /// this reads). Each line is decomposed via <see cref="CompoundFieldSplitter.Decompose"/> exactly
-/// like a RegularDb CSV cell (the line is treated as the file's only "column", index 0) - a line
+/// like a RawCsv cell (the line is treated as the file's only "column", index 0) - a line
 /// with a single Chinese run spanning its whole length still gets recorded as one plain whole-line
 /// TranslationSplit with no template, but a line packing multiple Chinese runs together with
 /// structural separators/placeholders gets a FieldTemplate + per-fragment TranslationSplits just
@@ -25,7 +25,7 @@ public static class PrefabTextWorkflow
     /// completely unchanged.
     ///
     /// Each line is run through <see cref="CompoundFieldSplitter.Decompose"/> exactly like a
-    /// RegularDb CSV cell (treated as the line's only "column", index 0), rather than always being
+    /// RawCsv cell (treated as the line's only "column", index 0), rather than always being
     /// recorded as a single whole-line fragment. This means a PrefabText line that packs multiple
     /// Chinese runs together with structural separators/placeholders follows the exact same
     /// splitting rules (placeholder gluing via <paramref name="options"/>, digit/percent/CJK
@@ -100,7 +100,7 @@ public static class PrefabTextWorkflow
     /// </code>
     /// A line decomposed into a compound-field template (see <see cref="ExportPrefabTextToCustomFormat"/>)
     /// is rebuilt via <see cref="CompoundFieldSplitter.Reconstruct"/> from its translated fragments,
-    /// exactly like a RegularDb CSV cell - if any fragment is untranslated, flagged for
+    /// exactly like a RawCsv cell - if any fragment is untranslated, flagged for
     /// retranslation, or unsafe, the whole line falls back to its original raw text rather than
     /// reconstructing a partially-translated result (matching the CSV reconstruction path in
     /// GameFileHandling.PackageFinalTranslationAsync). A trivial (non-templated) line falls back to

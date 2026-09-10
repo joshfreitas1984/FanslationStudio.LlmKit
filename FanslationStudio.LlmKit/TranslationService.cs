@@ -225,9 +225,9 @@ public static class TranslationService
     /// Caller owns the returned <see cref="HttpClient"/> and must dispose it.
     /// </summary>
     private static async Task<(LlmConfig Config, ConcurrentDictionary<string, string> Cache, HttpClient Client)> PrepareTranslationRunAsync(
-        string workingDirectory, TextFileToSplit[] textFiles)
+        string workingDirectory, TextFileToSplit[] textFiles, GameHooks? hooks = null)
     {
-        var config = ConfigurationExtensions.GetConfiguration(workingDirectory);
+        var config = ConfigurationExtensions.GetConfiguration(workingDirectory, hooks);
 
         // Translation Cache - dedups repeated strings within this run and across history
         // (manual translations, glossary, TestResults/OldFiles, already-translated splits).
@@ -251,14 +251,14 @@ public static class TranslationService
     /// side by side during the transition.
     /// </summary>
     public static async Task TranslateViaLlmAsync(string workingDirectory, bool forceRetranslation,
-        TextFileToSplit[] textFiles)
+        TextFileToSplit[] textFiles, GameHooks? hooks = null)
     {
-        var config = ConfigurationExtensions.GetConfiguration(workingDirectory);
+        var config = ConfigurationExtensions.GetConfiguration(workingDirectory, hooks);
 
         if (config.UseContinuousWorkerPool)
-            await TranslateViaLlmAsyncPooled(workingDirectory, forceRetranslation, textFiles);
+            await TranslateViaLlmAsyncPooled(workingDirectory, forceRetranslation, textFiles, hooks);
         else
-            await TranslateViaLlmAsyncBatched(workingDirectory, forceRetranslation, textFiles);
+            await TranslateViaLlmAsyncBatched(workingDirectory, forceRetranslation, textFiles, hooks);
     }
 
     /// <summary>
@@ -270,7 +270,7 @@ public static class TranslationService
     /// exists as an alternative.
     /// </summary>
     public static async Task TranslateViaLlmAsyncBatched(string workingDirectory, bool forceRetranslation,
-        TextFileToSplit[] textFiles)
+        TextFileToSplit[] textFiles, GameHooks? hooks = null)
     {
         string inputPath = $"{workingDirectory}/Raw/Export";
         string outputPath = $"{workingDirectory}/Converted";
@@ -279,7 +279,7 @@ public static class TranslationService
         if (!Directory.Exists(outputPath))
             Directory.CreateDirectory(outputPath);
 
-        var (config, translationCache, client) = await PrepareTranslationRunAsync(workingDirectory, textFiles);
+        var (config, translationCache, client) = await PrepareTranslationRunAsync(workingDirectory, textFiles, hooks);
         using var _ = client;
         var charsToCache = TranslationCacheMaxChars;
 
@@ -455,7 +455,7 @@ public static class TranslationService
     /// translated since the last flush) and once more after the whole pool drains.
     /// </summary>
     public static async Task TranslateViaLlmAsyncPooled(string workingDirectory, bool forceRetranslation,
-        TextFileToSplit[] textFiles)
+        TextFileToSplit[] textFiles, GameHooks? hooks = null)
     {
         string inputPath = $"{workingDirectory}/Raw/Export";
         string outputPath = $"{workingDirectory}/Converted";
@@ -463,7 +463,7 @@ public static class TranslationService
         if (!Directory.Exists(outputPath))
             Directory.CreateDirectory(outputPath);
 
-        var (config, translationCache, client) = await PrepareTranslationRunAsync(workingDirectory, textFiles);
+        var (config, translationCache, client) = await PrepareTranslationRunAsync(workingDirectory, textFiles, hooks);
         using var _ = client;
 
         var maxConcurrency = config.MaxConcurrency ?? config.BatchSize ?? 20;
@@ -1009,8 +1009,8 @@ public static class TranslationService
                 }
 
                 var llmResult = await TranslateMessagesAsync(client, config, executingModel, messages);
-                preparedResult = LineValidation.PrepareResult(preparedRaw, llmResult, textFile, column);
-                validationResult = LineValidation.CheckTransalationSuccessful(executingModel, preparedRaw, preparedResult, textFile, column);
+                preparedResult = LineValidation.PrepareResult(preparedRaw, llmResult, config.Hooks, textFile, column);
+                validationResult = LineValidation.CheckTransalationSuccessful(executingModel, preparedRaw, preparedResult, textFile, config.Hooks, column);
                 validationResult.Result = LineValidation.CleanupLineBeforeSaving(validationResult.Result, preparedRaw, textFile, tokenReplacer);
 
                 if (config.SkipLineValidation)
@@ -1038,8 +1038,8 @@ public static class TranslationService
                                 Interlocked.Increment(ref _retryAttemptCounter);
 
                             correctedResult = await CorrectSentenceBySentenceAsync(client, config, executingModel, preparedRaw, correctedResult, textFile);
-                            preparedResult = LineValidation.PrepareResult(preparedRaw, correctedResult, textFile, column);
-                            validationResult = LineValidation.CheckTransalationSuccessful(executingModel, preparedRaw, preparedResult, textFile, column);
+                            preparedResult = LineValidation.PrepareResult(preparedRaw, correctedResult, config.Hooks, textFile, column);
+                            validationResult = LineValidation.CheckTransalationSuccessful(executingModel, preparedRaw, preparedResult, textFile, config.Hooks, column);
                             validationResult.Result = LineValidation.CleanupLineBeforeSaving(validationResult.Result, preparedRaw, textFile, tokenReplacer);
 
                             if (config.SkipLineValidation)

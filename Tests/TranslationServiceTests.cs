@@ -106,7 +106,7 @@ public class TranslationServiceTests
     private static TextFileToSplit BuildTextFile() => new()
     {
         Path = "Test.txt",
-        TextFileType = TextFileType.RegularDb,
+        TextFileType = TextFileType.RawCsv,
         EnableGlossary = false,
         EnableBasePrompts = false,
         AdditionalPromptName = string.Empty,

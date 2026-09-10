@@ -49,7 +49,7 @@ public static class GameFileHandlingBase
             var newCount = 0;
 
             ////Disable for now since they should be same
-            //if (textFileToTranslate.TextFileType == TextFileType.RegularDb)
+            //if (textFileToTranslate.TextFileType == TextFileType.RawCsv)
             //    return;
 
             var deserializer = YamlHelper.CreateDeserializer();

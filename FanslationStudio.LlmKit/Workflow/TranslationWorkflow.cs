@@ -8,39 +8,39 @@ namespace FanslationStudio.LlmKit.Workflow;
 
 public static class TranslationWorkflow
 {
-    public static async Task ApplyAllRulesToCurrentTranslation(string workingDirectory, TextFileToSplit[] textFiles)
+    public static async Task ApplyAllRulesToCurrentTranslation(string workingDirectory, TextFileToSplit[] textFiles, GameHooks? hooks = null)
     {
-        await UpdateCurrentTranslationLines(workingDirectory, true, textFiles);
+        await UpdateCurrentTranslationLines(workingDirectory, true, textFiles, hooks);
     }
 
-    public static async Task TranslateLines(string workingDirectory, TextFileToSplit[] textFiles)
+    public static async Task TranslateLines(string workingDirectory, TextFileToSplit[] textFiles, GameHooks? hooks = null)
     {
-        await PerformTranslateLines(workingDirectory, false, textFiles);
+        await PerformTranslateLines(workingDirectory, false, textFiles, hooks);
     }
 
-    public static async Task TranslateLinesBruteForce(string workingDirectory, TextFileToSplit[] textFiles)
+    public static async Task TranslateLinesBruteForce(string workingDirectory, TextFileToSplit[] textFiles, GameHooks? hooks = null)
     {
-        await PerformTranslateLines(workingDirectory, true, textFiles);
+        await PerformTranslateLines(workingDirectory, true, textFiles, hooks);
     }
 
-    private static async Task PerformTranslateLines(string workingDirectory, bool keepCleaning, TextFileToSplit[] textFileToSplits)
+    private static async Task PerformTranslateLines(string workingDirectory, bool keepCleaning, TextFileToSplit[] textFileToSplits, GameHooks? hooks)
     {
         if (!keepCleaning)
         {
-            await TranslationService.TranslateViaLlmAsync(workingDirectory, false, textFileToSplits);
+            await TranslationService.TranslateViaLlmAsync(workingDirectory, false, textFileToSplits, hooks);
             return;
         }
 
         PrintSeparator();
-        int remaining = await UpdateCurrentTranslationLines(workingDirectory, false, textFileToSplits);
+        int remaining = await UpdateCurrentTranslationLines(workingDirectory, false, textFileToSplits, hooks);
         PrintSeparator();
 
         int iterations = 0;
         while (remaining > 0 && iterations < 30)
         {
-            await TranslationService.TranslateViaLlmAsync(workingDirectory, false, textFileToSplits);
+            await TranslationService.TranslateViaLlmAsync(workingDirectory, false, textFileToSplits, hooks);
             PrintSeparator();
-            remaining = await UpdateCurrentTranslationLines(workingDirectory, false, textFileToSplits);
+            remaining = await UpdateCurrentTranslationLines(workingDirectory, false, textFileToSplits, hooks);
             PrintSeparator();
             iterations++;
         }
@@ -52,9 +52,9 @@ public static class TranslationWorkflow
         Console.WriteLine("-------------------------------------------------------------------");
     }
 
-    private static async Task<int> UpdateCurrentTranslationLines(string workingDirectory, bool resetFlag, TextFileToSplit[] textFileToSplits)
+    private static async Task<int> UpdateCurrentTranslationLines(string workingDirectory, bool resetFlag, TextFileToSplit[] textFileToSplits, GameHooks? hooks)
     {
-        var context = BuildTranslationRuleContext(workingDirectory);
+        var context = BuildTranslationRuleContext(workingDirectory, hooks);
         var totalRecordsModded = 0;
         var logLines = new ConcurrentBag<string>();
 
@@ -74,9 +74,9 @@ public static class TranslationWorkflow
         LlmConfig Config,
         Regex ChineseCharRegex);
 
-    private static TranslationRuleContext BuildTranslationRuleContext(string workingDirectory)
+    private static TranslationRuleContext BuildTranslationRuleContext(string workingDirectory, GameHooks? hooks)
     {
-        var config = ConfigurationExtensions.GetConfiguration(workingDirectory);
+        var config = ConfigurationExtensions.GetConfiguration(workingDirectory, hooks);
         var chineseCharRegex = new Regex(LineValidation.ChineseCharPattern, RegexOptions.Compiled);
 
         return new TranslationRuleContext(config, chineseCharRegex);
@@ -169,7 +169,7 @@ public static class TranslationWorkflow
         if (TryFlagEmptyTranslation(split, preparedRaw))
             return true;
 
-        if (TryApplyGameSpecificRepair(logLines, split, textFile) is bool gameSpecificResult)
+        if (TryApplyGameSpecificRepair(logLines, split, textFile, config) is bool gameSpecificResult)
             return gameSpecificResult;
 
         if (TryFlagAllCapsTranslation(split, preparedRaw))
@@ -179,9 +179,9 @@ public static class TranslationWorkflow
     }
 
     /// <summary>
-    /// Re-runs <see cref="LineValidation.CustomPostRepair"/>/<see cref="LineValidation.CustomColumnRepair"/>
+    /// Re-runs <see cref="Configuration.GameHooks.CustomPostRepair"/>/<see cref="Configuration.GameHooks.CustomColumnRepair"/>
     /// against an *already-translated* split's existing <see cref="TranslationSplit.Translated"/>
-    /// value, and falls back to <see cref="LineValidation.CustomColumnValidator"/> when the repair
+    /// value, and falls back to <see cref="Configuration.GameHooks.CustomColumnValidator"/> when the repair
     /// makes no change. These hooks otherwise only run during a live LLM call (inside
     /// <see cref="LineValidation.PrepareResult"/>/<see cref="LineValidation.CheckTransalationSuccessful"/>,
     /// called from <c>TranslationService</c>), so a deterministic fix added to a game-specific hook
@@ -205,14 +205,15 @@ public static class TranslationWorkflow
     private static bool? TryApplyGameSpecificRepair(
         ConcurrentBag<string> logLines,
         TranslationSplit split,
-        TextFileToSplit textFile)
+        TextFileToSplit textFile,
+        LlmConfig config)
     {
         if (string.IsNullOrEmpty(split.Translated))
             return null;
 
         var raw = split.Text;
 
-        var repaired = LineValidation.PrepareResult(raw, split.Translated, textFile, split.Split);
+        var repaired = LineValidation.PrepareResult(raw, split.Translated, config.Hooks, textFile, split.Split);
         if (repaired != split.Translated)
         {
             logLines.Add($"Game-specific repair {textFile.Path} \n{split.Translated}\n->\n{repaired}");
@@ -221,9 +222,9 @@ public static class TranslationWorkflow
             return true;
         }
 
-        if (LineValidation.CustomColumnValidator != null)
+        if (config.Hooks?.CustomColumnValidator != null)
         {
-            var failureReason = LineValidation.CustomColumnValidator(textFile, split.Split, raw, split.Translated);
+            var failureReason = config.Hooks.CustomColumnValidator(textFile, split.Split, raw, split.Translated);
             if (failureReason != null)
             {
                 logLines.Add($"Game-specific validation failed {textFile.Path} ({failureReason}) \n{split.Translated}");
@@ -349,7 +350,7 @@ public static class TranslationWorkflow
             if (split.Translated != manual.Result)
             {
                 logLines.Add($"Manually Translated {textFile.Path} \n{split.Text}\n{split.Translated}");
-                split.Translated = LineValidation.CleanupLineBeforeSaving(LineValidation.PrepareResult(preparedRaw, manual.Result, textFile, split.Split), split.Text, textFile, new StringTokenReplacer());
+                split.Translated = LineValidation.CleanupLineBeforeSaving(LineValidation.PrepareResult(preparedRaw, manual.Result, config.Hooks, textFile, split.Split), split.Text, textFile, new StringTokenReplacer());
                 split.ResetFlags();
                 return true;
             }
@@ -574,7 +575,7 @@ public static class TranslationWorkflow
     /// feeds the glossary/ellipsis checks and is meant to be <see cref="LineValidation.PrepareRaw"/>'s
     /// output, exactly like the <c>Translated</c> path's own "preparedRaw" local variable it's named
     /// after; <paramref name="splitRaw"/> feeds <see cref="LineValidation.CheckTransalationSuccessful"/>/
-    /// <see cref="FindMissingRequiredToken"/>/<see cref="LineValidation.CustomColumnValidator"/> and
+    /// <see cref="FindMissingRequiredToken"/>/<see cref="Configuration.GameHooks.CustomColumnValidator"/> and
     /// is meant to be the split's untouched raw <see cref="TranslationSplit.Text"/>. QC (which has no
     /// split of its own for a templated/reconstructed cell) calls <c>PrepareRaw(rawText, null)</c> for
     /// its <paramref name="preparedRaw"/> argument - the CJK-punctuation-normalized half only, e.g.
@@ -600,8 +601,8 @@ public static class TranslationWorkflow
         var missingTokenReason = FindMissingRequiredToken(splitRaw, candidate, config.ExtraStringTokenReplacers) is string missingToken
             ? $"Missing required token '{missingToken}'."
             : null;
-        var customValidatorReason = LineValidation.CustomColumnValidator?.Invoke(textFile, column, splitRaw, candidate);
-        var validation = LineValidation.CheckTransalationSuccessful(modelConfig, splitRaw, candidate, textFile, column);
+        var customValidatorReason = config.Hooks?.CustomColumnValidator?.Invoke(textFile, column, splitRaw, candidate);
+        var validation = LineValidation.CheckTransalationSuccessful(modelConfig, splitRaw, candidate, textFile, config.Hooks, column);
         var structuralReason = validation.Valid ? null : validation.CorrectionPrompt;
 
         return new RuleCheckResult(
@@ -773,7 +774,6 @@ public static class TranslationWorkflow
 
     public static async Task ResetAllFlags(string workingDirectory, TextFileToSplit[] textFiles)
     {
-        var config = ConfigurationExtensions.GetConfiguration(workingDirectory);
         var serializer = YamlHelper.CreateSerializer();
 
         await FileIteration.IterateTranslatedFilesInParallelAsync(workingDirectory,
@@ -793,7 +793,6 @@ public static class TranslationWorkflow
         TextFileToSplit[] textFiles,
         List<string> badStrings)
     {
-        var config = ConfigurationExtensions.GetConfiguration(workingDirectory);
         var serializer = YamlHelper.CreateSerializer();
 
         await FileIteration.IterateTranslatedFilesInParallelAsync(workingDirectory,

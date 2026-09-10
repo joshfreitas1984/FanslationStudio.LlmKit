@@ -119,9 +119,9 @@ public static class QualityReviewWorkflow
     /// <see cref="QcStatus.Corrected"/> columns going stale - so without this, the loop could stop
     /// while a retriable rejection is still sitting there waiting for its next attempt.
     /// </returns>
-    public static async Task<int> RunAsync(string workingDirectory, TextFileToSplit[] textFiles, int? sampleSize = null)
+    public static async Task<int> RunAsync(string workingDirectory, TextFileToSplit[] textFiles, int? sampleSize = null, GameHooks? hooks = null)
     {
-        var config = ConfigurationExtensions.GetConfiguration(workingDirectory);
+        var config = ConfigurationExtensions.GetConfiguration(workingDirectory, hooks);
 
         if (!config.QualityReview.Enabled)
         {
@@ -337,7 +337,7 @@ public static class QualityReviewWorkflow
         // "#TargetInteractName#" as "{TargetInteractName}") went straight to the validation gate
         // and got rejected outright instead of being repaired first like it would on the
         // translation path.
-        correctedResult = LineValidation.PrepareResult(rawText, correctedResult, item.File.TextFile, anchor.Split);
+        correctedResult = LineValidation.PrepareResult(rawText, correctedResult, config.Hooks, item.File.TextFile, anchor.Split);
 
         // Validation gate: TranslationWorkflow.EvaluateRules is the single shared rule list a
         // candidate translation must pass - the same one ApplyTranslationRules runs against
@@ -497,7 +497,7 @@ public static class QualityReviewWorkflow
         {
             llmResponse = await TranslationService.TranslateMessagesAsync(client, config, modelConfig, messages);
         }
-        catch (HttpRequestException e)
+        catch (Exception e) when (e is HttpRequestException or OperationCanceledException)
         {
             Console.WriteLine($"Quality review request error: {e.Message}");
             return new LlmVerdict(false, 0, null);
@@ -587,7 +587,7 @@ public static class QualityReviewWorkflow
     /// there's little to gain from a large shared cap here - <see cref="TranslationSplit.QcRuleCheckFailureCount"/>
     /// bounds any one stuck column's own retries independently anyway.
     /// </summary>
-    public static async Task RunBruteForce(string workingDirectory, TextFileToSplit[] textFiles, int? sampleSize = null, int maxIterations = 5)
+    public static async Task RunBruteForce(string workingDirectory, TextFileToSplit[] textFiles, int? sampleSize = null, int maxIterations = 5, GameHooks? hooks = null)
     {
         var iterations = 0;
         int flagged;
@@ -597,12 +597,12 @@ public static class QualityReviewWorkflow
         // word change made since) before spending an LLM call reviewing it - RunAsync's own
         // freshness check would eventually catch this too, but only after this reset makes it
         // non-fresh.
-        await ApplyRulesToCurrentQcTranslated(workingDirectory, textFiles);
+        await ApplyRulesToCurrentQcTranslated(workingDirectory, textFiles, hooks);
 
         do
         {
-            reviewed = await RunAsync(workingDirectory, textFiles, sampleSize);
-            flagged = await ApplyRulesToCurrentQcTranslated(workingDirectory, textFiles);
+            reviewed = await RunAsync(workingDirectory, textFiles, sampleSize, hooks);
+            flagged = await ApplyRulesToCurrentQcTranslated(workingDirectory, textFiles, hooks);
             iterations++;
         }
         while ((flagged > 0 || reviewed > 0) && iterations < maxIterations);
@@ -652,9 +652,9 @@ public static class QualityReviewWorkflow
     /// than producing a real verdict. A column that gave up is tracked separately and not counted
     /// here - see <see cref="RunBruteForce"/>.
     /// </returns>
-    public static async Task<int> ApplyRulesToCurrentQcTranslated(string workingDirectory, TextFileToSplit[] textFiles)
+    public static async Task<int> ApplyRulesToCurrentQcTranslated(string workingDirectory, TextFileToSplit[] textFiles, GameHooks? hooks = null)
     {
-        var config = ConfigurationExtensions.GetConfiguration(workingDirectory);
+        var config = ConfigurationExtensions.GetConfiguration(workingDirectory, hooks);
         var serializer = YamlHelper.CreateSerializer();
         var totalFlagged = 0;
         var totalGivenUp = 0;
@@ -753,7 +753,7 @@ public static class QualityReviewWorkflow
 
         // Tier 1: deterministic repair, in place - same repair a normal translation attempt (and a
         // freshly proposed QC correction) already gets before ever reaching validation.
-        var repaired = LineValidation.PrepareResult(rawText, current, textFile, anchor.Split);
+        var repaired = LineValidation.PrepareResult(rawText, current, config.Hooks, textFile, anchor.Split);
         var cleaned = LineValidation.CleanupLineBeforeSaving(repaired, rawText, textFile, new StringTokenReplacer());
 
         var changed = cleaned != current;

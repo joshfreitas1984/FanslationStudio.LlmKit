@@ -7,10 +7,12 @@ namespace FanslationStudio.LlmKit.Configuration;
 
 public static class ConfigurationExtensions
 {
-    public static LlmConfig GetConfiguration(string workingDirectory)
+    public static LlmConfig GetConfiguration(string workingDirectory, GameHooks? hooks = null)
     {
         var deserializer = YamlHelper.CreateDeserializer();
         var response = deserializer.Deserialize<LlmConfig>(File.ReadAllText($"{workingDirectory}/Config.yaml", Encoding.UTF8));
+
+        response.Hooks = hooks ?? new GameHooks();
 
         // Validate models
         if (response.Models == null || response.Models.Count == 0)

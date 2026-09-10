@@ -133,7 +133,7 @@ treat `useContinuousWorkerPool: true` as the recommended setting going forward.
 
 Since `CompoundFieldSplitter` now decomposes CSV cells at export time (splitting only at genuine
 game-syntax separators — `;`, `-`, `&`, `|`, method-call `--Name`), a `TranslationSplit.Text` for a
-`RegularDb` file has already had those characters stripped out as fragment boundaries by the time
+`RawCsv` file has already had those characters stripped out as fragment boundaries by the time
 it reaches `TranslateSplitAsync`. That means re-enabling `-`, `:`, `|`, `&`, or `;` in
 `Config.yaml: splitCharactersList` for CSV files is now redundant at best (they won't appear in
 the text to split on) and unsafe at worst if a future game/file type feeds whole untouched strings

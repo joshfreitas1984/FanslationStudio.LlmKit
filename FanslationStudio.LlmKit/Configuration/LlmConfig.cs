@@ -81,6 +81,14 @@ public class LlmConfig
 
     [YamlIgnore]
     public RuntimeValues Runtime { get; set; } = new();
+
+    /// <summary>
+    /// Optional, game-specific extension points for the pipeline - see <see cref="GameHooks"/>.
+    /// Set via <see cref="ConfigurationExtensions.GetConfiguration"/>'s optional parameter (or a
+    /// top-level workflow entry point's, which forwards it there); never populated from YAML.
+    /// </summary>
+    [YamlIgnore]
+    public GameHooks Hooks { get; set; } = new();
 }
 
 // Convert this further

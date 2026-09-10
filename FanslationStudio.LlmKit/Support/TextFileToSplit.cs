@@ -5,7 +5,16 @@ namespace FanslationStudio.LlmKit.Support;
 
 public enum TextFileType
 {
-    RegularDb,
+    /// <summary>
+    /// Genuine CSV game data - comma-delimited, quote-aware (parsed/rebuilt via
+    /// <see cref="Utility.CompoundFieldSplitter.ParseCsvRow"/>/<see cref="Utility.CompoundFieldSplitter.RebuildCsvRow"/>),
+    /// one or more columns per row, handled by <see cref="Workflow.CsvGameDataWorkflow"/>. Named
+    /// explicitly (previously "RegularDb", the implicit/default type that every consuming project
+    /// happened to treat as CSV) so this stays a deliberate, narrow assumption instead of an
+    /// implied one - a game whose "main" data file is TSV/JSON/a custom text format is not this
+    /// type and needs its own.
+    /// </summary>
+    RawCsv,
     PrefabText,
     DynamicStrings,
     /// <summary>
@@ -29,7 +38,7 @@ public class TextFileToSplit
 
     public bool PackageOutput { get; set; } = true;
 
-    public TextFileType TextFileType { get; set; } = TextFileType.RegularDb;
+    public TextFileType TextFileType { get; set; } = TextFileType.RawCsv;
 
     public bool IsMainDialogueAsset { get; set; } = false;
 
