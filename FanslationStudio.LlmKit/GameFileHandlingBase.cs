@@ -58,13 +58,24 @@ public static class GameFileHandlingBase
 
             foreach (var line in exportLines)
             {
-                var found = fileLines.FirstOrDefault(x => x.Raw == line.Raw);
+                // A JSON line's identity is its RawIndex (the object's "Key"), not its whole Raw
+                // text - Raw legitimately changes whenever any untranslated field in the object
+                // changes (e.g. a numeric stat updated by a game patch), which must not invalidate
+                // already-translated fields. Every other file type has RawIndex == "" and keeps
+                // matching by Raw equality exactly as before.
+                var found = !string.IsNullOrEmpty(line.RawIndex)
+                    ? fileLines.FirstOrDefault(x => x.RawIndex == line.RawIndex)
+                    : fileLines.FirstOrDefault(x => x.Raw == line.Raw);
+
                 if (found != null)
                 {
                     foreach (var split in line.Splits)
                     {
-                        var found2 = found.Splits.FirstOrDefault(x => x.Split == split.Split && x.SubIndex == split.SubIndex && x.Text == split.Text)
-                            ?? found.Splits.FirstOrDefault(x => x.Text == split.Text);
+                        var found2 = !string.IsNullOrEmpty(split.SplitPath)
+                            ? found.Splits.FirstOrDefault(x => x.SplitPath == split.SplitPath && x.SubIndex == split.SubIndex)
+                                ?? found.Splits.FirstOrDefault(x => x.SplitPath == split.SplitPath && x.Text == split.Text)
+                            : found.Splits.FirstOrDefault(x => x.Split == split.Split && x.SubIndex == split.SubIndex && x.Text == split.Text)
+                                ?? found.Splits.FirstOrDefault(x => x.Text == split.Text);
 
                         if (found2 != null)
                         {
@@ -78,12 +89,19 @@ public static class GameFileHandlingBase
                     // Try matching on split instead of line incase they changed line format
                     foreach (var split in line.Splits)
                     {
-                        var found2 = fileLines
-                            .Select(x => x.Splits.FirstOrDefault(s => s.Split == split.Split && s.SubIndex == split.SubIndex && s.Text == split.Text))
-                            .FirstOrDefault(s => s != null)
-                            ?? fileLines
-                                .Select(x => x.Splits.FirstOrDefault(s => s.Text == split.Text))
-                                .FirstOrDefault(s => s != null);
+                        var found2 = !string.IsNullOrEmpty(split.SplitPath)
+                            ? fileLines
+                                .Select(x => x.Splits.FirstOrDefault(s => s.SplitPath == split.SplitPath && s.SubIndex == split.SubIndex))
+                                .FirstOrDefault(s => s != null)
+                                ?? fileLines
+                                    .Select(x => x.Splits.FirstOrDefault(s => s.SplitPath == split.SplitPath && s.Text == split.Text))
+                                    .FirstOrDefault(s => s != null)
+                            : fileLines
+                                .Select(x => x.Splits.FirstOrDefault(s => s.Split == split.Split && s.SubIndex == split.SubIndex && s.Text == split.Text))
+                                .FirstOrDefault(s => s != null)
+                                ?? fileLines
+                                    .Select(x => x.Splits.FirstOrDefault(s => s.Text == split.Text))
+                                    .FirstOrDefault(s => s != null);
 
                         if (found2 != null)
                         {

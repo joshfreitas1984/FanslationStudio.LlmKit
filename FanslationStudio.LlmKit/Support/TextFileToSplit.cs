@@ -28,7 +28,18 @@ public enum TextFileType
     /// exact-substring-replace approach instead (see DynamicStringWorkflow).
     /// </summary>
     DynamicStringsIL2CPP,
-    LocalTextString
+    LocalTextString,
+    /// <summary>
+    /// JSON array-of-objects game data, each object keyed by a "Key" property, with loose/variable
+    /// per-object schema and translatable fields addressed by JSON property path
+    /// (<see cref="Support.TranslationSplit.SplitPath"/>/<see cref="Support.FieldTemplate.SplitPath"/>)
+    /// rather than column index - handled by <see cref="Workflow.JsonGameDataWorkflow"/>. Distinct
+    /// from <see cref="RawCsv"/> because there is no row/column structure to parse via
+    /// <see cref="Utility.CompoundFieldSplitter.ParseCsvRow"/>/
+    /// <see cref="Utility.CompoundFieldSplitter.RebuildCsvRow"/> - a "row" here is one JSON object,
+    /// addressed by its Key (<see cref="Support.TranslationLine.RawIndex"/>), not by position.
+    /// </summary>
+    RawJson
 }
 
 public class TextFileToSplit
