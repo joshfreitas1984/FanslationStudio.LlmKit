@@ -240,7 +240,7 @@
   result: Senior Brother
   allowalt:
   - Brother 
-  - Disciples
+  - disciples
   literal: Shixiong
 - raw: 大师兄
   rawSimplified: 大师兄
@@ -248,6 +248,9 @@
   result: Big Senior Brother
   direct: Big Senior Brother
   literal: Da Shixiong
+  allowalt:
+    - Senior Brother
+    - Big Brother 
 - raw: 阿兄
   result: Elder Brother
   allowalt:
