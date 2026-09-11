@@ -239,7 +239,8 @@
   rawTraditional: 師兄
   result: Senior Brother
   allowalt:
-  - Brother
+  - Brother 
+  - Disciples
   literal: Shixiong
 - raw: 大师兄
   rawSimplified: 大师兄
