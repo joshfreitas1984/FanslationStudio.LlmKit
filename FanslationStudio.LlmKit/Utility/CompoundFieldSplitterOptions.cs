@@ -29,4 +29,21 @@ public sealed class CompoundFieldSplitterOptions
     /// point between two independently-translated fragments.
     /// </summary>
     public IReadOnlyList<Regex> PlaceholderPatterns { get; init; } = [];
+
+    /// <summary>
+    /// Extra characters to absorb into a translatable run (i.e. treat as natural sentence text
+    /// rather than a fragment boundary), on top of <see cref="CompoundFieldSplitter"/>'s built-in
+    /// defaults (CJK punctuation, curly quotes, ellipsis, em dash - see
+    /// docs/compoundfieldsplitter-design.md for the full default set and why each one is safe for
+    /// any Chinese-source game). Leave empty to keep this game's current, verified behavior, where
+    /// plain ASCII punctuation (',', '?', '!', '.', '-', etc.) is always a hard boundary because
+    /// this game's data only ever uses it as a structural/game-syntax separator (list items, role
+    /// logic, method calls), never as natural Chinese sentence punctuation.
+    /// A different game may genuinely use ASCII punctuation as real sentence punctuation instead
+    /// (e.g. if its exported text was authored without fullwidth auto-conversion) - in that case,
+    /// verify it the same way this default was verified (grep that game's converted/raw text for
+    /// the character sitting directly between two Chinese characters) and add it here rather than
+    /// changing the shared default, which stays tuned to this game's data.
+    /// </summary>
+    public IReadOnlyList<char> AdditionalAbsorbedCharacters { get; init; } = [];
 }

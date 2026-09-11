@@ -11,7 +11,7 @@
 
 - Matches runs via `(?:[+\-](?=[0-9]))?[<CjkTextChars>]+(?:%[<CjkTextChars>]*)*` where
   `<CjkTextChars>` =
-  `\p{IsCJKUnifiedIdeographs}0-9.\p{IsCJKSymbolsandPunctuation}\p{IsHalfwidthandFullwidthForms}‘’“”-[：]`
+  `\p{IsCJKUnifiedIdeographs}0-9.\p{IsCJKSymbolsandPunctuation}\p{IsHalfwidthandFullwidthForms}‘’“”…—-[：]`
   (the trailing `-[：]` is .NET regex character-class subtraction, carving the fullwidth colon
   `：` back OUT of `\p{IsHalfwidthandFullwidthForms}` — see the colon bullet below), then
   **discards** any matched run that turns out to be pure digits/sign/percent/punctuation with no
@@ -46,7 +46,14 @@
   `...摊开，都翻到小数字为"一"的那一页）`), and without the explicit addition they acted as a
   spurious boundary, splitting a quoted word out into its own fragment mid-sentence (a real bug
   fixed Aug 2026 — see the `CurlyChineseQuotationMarksStayGluedIntoSurroundingSentence` test in
-  `Tests/CompoundFieldSplitterTests.cs`). An LLM is free to reposition, merge, or drop punctuation
+  `Tests/CompoundFieldSplitterTests.cs`). **Ellipsis `…` (U+2026) and em dash `—` (U+2014), both
+  always doubled in this game's text (`……`/`——`), are absorbed for the same reason** — fixed
+  Sep 2026 after a real bad-translation report: `呃……学武功有很多好处的，...` ("uh...learning
+  martial arts has many benefits, ...") was decomposing into a bare one-character fragment `呃`, a
+  fixed literal `……`, and a second fragment starting mid-sentence, so the LLM only ever saw the
+  stutter and the rest of the sentence as two disconnected halves — see
+  `EllipsisAndEmDashStayGluedIntoSurroundingSentence`/`EmDashInterruptionStaysGluedIntoSurroundingSentence`
+  in `Tests/CompoundFieldSplitterTests.cs`. An LLM is free to reposition, merge, or drop punctuation
   during translation (move a clause, reorder a parenthetical, change a comma to a full stop), so
   splitting a sentence into separate fragments around its own internal punctuation and reassembling
   with a fixed literal mark in between risks an ungrammatical or nonsensical result. **Plain ASCII
@@ -84,6 +91,47 @@ Known game-data compound patterns worth recognizing when reasoning about `Decomp
 - Full-width/CJK punctuation (`，。？！；、（）` etc.) — never a boundary; always part of natural
   sentence text and stays glued to whichever fragment it's adjacent to. **Exception: the fullwidth
   colon `：` IS a boundary** (see above) — it always splits into a `{0}：{1}`-shaped template.
+
+## Portability to a future game (what's a safe default vs. baked-in assumption)
+
+None of the Unicode-punctuation absorption rules above need per-game configuration — they're
+properties of the *Chinese script itself*, not this one game's data format. Any game whose source
+text is Chinese will use `，。？！、…—` etc. as natural sentence punctuation the same way, so
+`CjkTextChars`'s default set (CJK Symbols and Punctuation, Halfwidth and Fullwidth Forms, curly
+quotes, ellipsis, em dash, and the fullwidth-colon exception) is safe to reuse unchanged.
+
+The one rule that IS a per-game assumption is **"ASCII punctuation is always game-syntax, never
+natural language"** (the `,`/`?`/`!`/`.`/`-` etc. boundary behavior). This is NOT a property of
+Chinese script — it's an empirical observation about *this specific game's data format*
+(`BuildingData`-style columns using `;`/`-`/`&`/`|` as structural separators), verified against this
+game's actual `Files/Converted/*.yaml` (no ASCII `,`/`?`/`!` found sitting directly between two
+Chinese characters — every occurrence is either a genuine ASCII clause boundary or one of the
+documented structural separators above). A future game could easily use halfwidth/ASCII punctuation
+as real dialogue punctuation instead (e.g. if its source text was authored or exported with
+fullwidth auto-conversion disabled), in which case this default would wrongly keep splitting real
+sentences apart the same way ellipsis did before that fix.
+
+This is now a per-game option rather than a hardcoded assumption:
+`CompoundFieldSplitterOptions.AdditionalAbsorbedCharacters` lists extra characters to fold into a
+translatable run on top of the built-in defaults. It defaults to empty, so every existing game
+(with no options, or with `CompoundFieldSplitterOptions.Default`) keeps today's verified behavior
+unchanged.
+
+```csharp
+var options = new CompoundFieldSplitterOptions
+{
+    AdditionalAbsorbedCharacters = [','], // this game's data genuinely uses ASCII ',' as a comma
+};
+var (template, fragments) = CompoundFieldSplitter.Decompose(cell, options);
+```
+
+**Before configuring this for a new game, verify it the same way the current default was
+verified** — grep that game's converted/raw text for the character sitting directly between two
+Chinese characters — rather than assuming ASCII punctuation is safe to absorb just because another
+game needed it. Combines freely with `PlaceholderPatterns` (see below); the fullwidth colon `：`
+stays a fragment boundary regardless of what's configured here, since the subtraction that carves
+it out of `\p{IsHalfwidthandFullwidthForms}` is applied after any per-game additions
+(`BuildRunRegexForOptions` in `CompoundFieldSplitter.cs`).
 
 ## Game-specific placeholder tokens (`CompoundFieldSplitterOptions`)
 

@@ -13,6 +13,13 @@ namespace FanslationStudio.LlmKit.Utility;
 /// <see cref="Decompose"/> - the shared library itself has no hardcoded knowledge of any one
 /// game's placeholder syntax, since another game could just as easily use the same character
 /// (e.g. '#') as a genuine structural separator instead.
+/// See docs/compoundfieldsplitter-design.md for the full absorbed-vs-boundary rules and the
+/// history/rationale behind each one - read that (and <see cref="CjkTextChars"/>'s comment) before
+/// changing what's absorbed into a run vs. treated as a split point, and add a new rule there
+/// alongside the code change. It also flags which rules are safe game-agnostic defaults (Unicode
+/// punctuation blocks) vs. which ones are really "current game's data" assumptions (the
+/// ASCII-punctuation-is-always-game-syntax default) that a future game with different data
+/// conventions may need to override via <see cref="CompoundFieldSplitterOptions.AdditionalAbsorbedCharacters"/>.
 /// </summary>
 public static partial class CompoundFieldSplitter
 {
@@ -37,6 +44,13 @@ public static partial class CompoundFieldSplitter
     // is intentionally NOT absorbed: in this data ASCII punctuation only ever appears as genuine
     // structural/game-syntax separators - list items, role logic, method calls - never as natural
     // Chinese sentence punctuation, so it should keep acting as a fragment boundary.)
+    // Ellipsis and em dash (U+2026/U+2014, always doubled in this game's text) are absorbed too,
+    // even though they live in the "General Punctuation" block rather than the two CJK blocks
+    // above, for the same reason as the punctuation just above: they mark a natural pause or
+    // trailing-off within a Chinese sentence (e.g. a stuttered "uh...learning martial arts has many
+    // benefits"), not a game-syntax separator, so splitting around them loses sentence context and
+    // produces a worse translation. See the dedicated comment on CjkTextChars below for the full
+    // rationale and a worked example.
     // The fullwidth colon '：' (U+FF1A) is the one exception carved out of the "Halfwidth and
     // Fullwidth Forms" block: unlike other CJK punctuation, a colon here consistently introduces an
     // enumerated/named item (e.g. "...小有名气的门派：仙霞派。" naming a specific sect, or
@@ -55,10 +69,27 @@ public static partial class CompoundFieldSplitter
     // a spurious fragment boundary and split a quoted word out of its sentence, e.g.
     // "...摊开，都翻到小数字为“一”的那一页）" would otherwise split into three fragments around "一"
     // instead of staying one continuous sentence fragment.
+    // Ellipsis (U+2026, always doubled as an ellipsis pair in this game's text) and em dash
+    // (U+2014, also doubled) are absorbed for the same "General Punctuation block, but used as
+    // ordinary Chinese sentence punctuation here" reason as the curly quotes above: both mark a
+    // natural pause, trailing-off, or interruption mid-sentence (e.g. a stuttered
+    // "uh...learning martial arts has many benefits"), never a game-syntax separator. Left
+    // unabsorbed, that kind of sentence split into a bare one-character fragment + a fixed literal
+    // ellipsis + a second independent fragment - sending the LLM two disconnected halves of one
+    // sentence produced much worse translations than sending the whole stuttered sentence as one
+    // fragment and letting it translate/re-punctuate the pause naturally (see
+    // CompoundFieldSplitterTests.cs's EllipsisAndEmDashStayGluedIntoSurroundingSentence).
     // Character class subtraction ('-[\uFF1A]') carves the fullwidth colon back out of
     // \p{IsHalfwidthandFullwidthForms} so it acts as a fragment boundary instead of being absorbed -
-    // see the comment above.
-    private const string CjkTextChars = @"\p{IsCJKUnifiedIdeographs}0-9.\p{IsCJKSymbolsandPunctuation}\p{IsHalfwidthandFullwidthForms}\u2018\u2019\u201C\u201D-[\uFF1A]";
+    // see the comment above. Split into a base set (everything absorbed by default, game-agnostic
+    // for any Chinese-source game) and the subtraction suffix, kept separate so
+    // BuildRunRegexForOptions can splice a per-game CompoundFieldSplitterOptions.AdditionalAbsorbedCharacters
+    // string in BETWEEN the two - the '-[...]' subtraction only works as the LAST element of a .NET
+    // character class, so anything added on top of the default set must be inserted before it, not
+    // appended after.
+    private const string CjkTextCharsBase = @"\p{IsCJKUnifiedIdeographs}0-9.\p{IsCJKSymbolsandPunctuation}\p{IsHalfwidthandFullwidthForms}\u2018\u2019\u201C\u201D\u2026\u2014";
+    private const string CjkTextCharsSubtraction = @"-[\uFF1A]";
+    private const string CjkTextChars = CjkTextCharsBase + CjkTextCharsSubtraction;
 
     [GeneratedRegex(@"(?:[+\-](?=[0-9]))?[" + CjkTextChars + @"]+(?:%[" + CjkTextChars + @"]*)*", RegexOptions.Compiled)]
     private static partial Regex TranslatableRunRegex();
@@ -75,10 +106,12 @@ public static partial class CompoundFieldSplitter
 
     /// <summary>
     /// Returns the regex used to find translatable runs for the given options. When
-    /// <paramref name="options"/> has no <see cref="CompoundFieldSplitterOptions.PlaceholderPatterns"/>
-    /// configured, this is just the static <see cref="TranslatableRunRegex"/>. Otherwise a regex is
-    /// built (and cached per options instance) where each placeholder pattern is folded in as just
-    /// another alternative a run can extend through, alongside individual CJK/fullwidth characters -
+    /// <paramref name="options"/> has neither <see cref="CompoundFieldSplitterOptions.PlaceholderPatterns"/>
+    /// nor <see cref="CompoundFieldSplitterOptions.AdditionalAbsorbedCharacters"/> configured, this
+    /// is just the static <see cref="TranslatableRunRegex"/> (the current game's default rules,
+    /// unchanged). Otherwise a regex is built (and cached per options instance) where each
+    /// placeholder pattern is folded in as just another alternative a run can extend through,
+    /// alongside individual CJK/fullwidth characters plus any extra per-game absorbed characters -
     /// so a placeholder token sitting between/adjacent to Chinese text becomes part of the *same*
     /// regex match as that text, rather than a separate literal gap that has to be merged back in
     /// after the fact. This is what lets something like "...一方。\n#PlayerName#若是..." correctly
@@ -88,7 +121,7 @@ public static partial class CompoundFieldSplitter
     /// </summary>
     private static Regex GetTranslatableRunRegex(CompoundFieldSplitterOptions options)
     {
-        if (options.PlaceholderPatterns.Count == 0)
+        if (options.PlaceholderPatterns.Count == 0 && options.AdditionalAbsorbedCharacters.Count == 0)
             return TranslatableRunRegex();
 
         return RunRegexCache.GetValue(options, BuildRunRegexForOptions);
@@ -96,9 +129,19 @@ public static partial class CompoundFieldSplitter
 
     private static Regex BuildRunRegexForOptions(CompoundFieldSplitterOptions options)
     {
+        // Extra per-game characters are spliced in BEFORE the fullwidth-colon subtraction (see
+        // CjkTextCharsSubtraction's comment above CjkTextChars) - '-[...]' character-class
+        // subtraction only works as the last element of a .NET character class, so anything added
+        // on top of the default set has to sit between the base set and the subtraction, never
+        // after it. Regex.Escape guards against a game passing a character (e.g. '-', ']', '^')
+        // that would otherwise need special handling inside a character class.
+        var charClass = options.AdditionalAbsorbedCharacters.Count == 0
+            ? CjkTextChars
+            : CjkTextCharsBase + string.Concat(options.AdditionalAbsorbedCharacters.Select(c => Regex.Escape(c.ToString()))) + CjkTextCharsSubtraction;
+
         var alternatives = options.PlaceholderPatterns
             .Select(pattern => $"(?:{pattern})")
-            .Append($"[{CjkTextChars}]");
+            .Append($"[{charClass}]");
         var core = $"(?:{string.Join('|', alternatives)})";
 
         return new Regex($@"(?:[+\-](?=[0-9]))?{core}+(?:%{core}*)*", RegexOptions.Compiled);

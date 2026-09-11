@@ -39,6 +39,61 @@ public static class QualityReviewWorkflow
     /// </summary>
     private static readonly Regex CorrectedLineRegex = new(@"^\s*CORRECTED:\s*(.*)$", RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Compiled);
 
+    /// <summary>
+    /// The literal protocol labels the QC prompt (<c>BaseQualityReviewPrompt.txt</c>, every model
+    /// family) puts in front of the model - the two output-format labels it's told to produce
+    /// (<c>SCORE:</c>/<c>CORRECTED:</c>) plus the two input labels it's shown and told not to repeat
+    /// (<c>SOURCE (Chinese):</c>/<c>CURRENT TRANSLATION (English):</c> - see GetLlmVerdictAsync).
+    /// Any of these appearing inside a parsed correction means the model echoed part of its own
+    /// instructions back (the documented qwen2.5 quirk - see the correction-suffix-leak postmortem
+    /// in DragonHierOverLlm's docs/plans/quality-review-pass.md) rather than producing clean
+    /// translated text, regardless of which specific label leaked. <see cref="StandaloneNoneRegex"/>/
+    /// <see cref="TrailingNoneRegex"/> cover the fifth, narrower case: the sentinel value
+    /// <c>NONE</c> is only legitimate as the *entire* correction (meaning "no correction"); found
+    /// stuck onto real text instead, it's the same kind of leak, just of the output value rather
+    /// than a label.
+    /// </summary>
+    private static readonly string[] ProtocolLeakMarkers =
+    {
+        "SCORE:",
+        "CORRECTED:",
+        "SOURCE (CHINESE)",
+        "CURRENT TRANSLATION (ENGLISH)",
+    };
+
+    /// <summary>Catches "NONE" as its own word anywhere in the text (a leading/trailing/mid-sentence
+    /// sentinel separated by whitespace or punctuation, e.g. "NONE Sword Technique Power").</summary>
+    private static readonly Regex StandaloneNoneRegex = new(@"(?<![A-Za-z])NONE(?![A-Za-z])", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// Catches "NONE" glued directly onto the end of the preceding word with no separator at all -
+    /// a real observed case in DragonHierOverLlm's AchievementData.csv.yaml:
+    /// "Defeat more than 10 enemies in a single battle with your own handsNONE". Anchored to
+    /// end-of-string only (not <see cref="StandaloneNoneRegex"/>'s both-sides word-boundary check,
+    /// which this exact case fails on its left side) - safe because no real English word ends in
+    /// "none", so any text ending in those four letters is this leak, never a legitimate word.
+    /// </summary>
+    private static readonly Regex TrailingNoneRegex = new(@"NONE\s*$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// True when <paramref name="correctedText"/> contains leaked QC-protocol text rather than a
+    /// clean translation - see <see cref="ProtocolLeakMarkers"/>/<see cref="StandaloneNoneRegex"/>/
+    /// <see cref="TrailingNoneRegex"/>. <paramref name="correctedText"/> being exactly "NONE" (the
+    /// legitimate "no correction needed" sentinel) is never a leak, so it's checked and excluded
+    /// first. Shared between <see cref="GetLlmVerdictAsync"/> (guards a fresh response before it's
+    /// ever stored) and <see cref="ResetLeakedQcCorrections"/> (finds and repairs any already-stored
+    /// value that got past an older, narrower version of this check).
+    /// </summary>
+    internal static bool ContainsLeakedProtocolText(string correctedText)
+    {
+        if (correctedText.Equals("NONE", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        return ProtocolLeakMarkers.Any(marker => correctedText.Contains(marker, StringComparison.OrdinalIgnoreCase))
+            || StandaloneNoneRegex.IsMatch(correctedText)
+            || TrailingNoneRegex.IsMatch(correctedText);
+    }
+
     private sealed class QcFileState
     {
         public required TextFileToSplit TextFile { get; init; }
@@ -515,16 +570,17 @@ public static class QualityReviewWorkflow
         var correctedMatch = CorrectedLineRegex.Match(llmResponse);
         var correctedRaw = correctedMatch.Success ? correctedMatch.Groups[1].Value.Trim() : string.Empty;
 
-        // Defense in depth for the correction-suffix-leak this project already hit once (see
+        // Defense in depth for the correction-suffix-leak this project already hit (see
         // CorrectedLineRegex's doc comment) - even with that regex anchored to a single line, a
-        // model that restates the "CORRECTED:" label INSIDE its own corrected text (rather than on
-        // a trailing line the anchor already excludes) would still leak it into correctedRaw. Any
-        // stored QcTranslated containing this label is definitely not a clean translation, so treat
-        // it exactly like an unparseable response - reviewed again next run - rather than risk
-        // storing/packaging it.
-        if (correctedRaw.Contains("CORRECTED:", StringComparison.OrdinalIgnoreCase))
+        // model that restates a protocol label or the "NONE" sentinel INSIDE its own corrected text
+        // (rather than on a trailing line the anchor already excludes) would still leak it into
+        // correctedRaw. Any stored QcTranslated containing leaked protocol text is definitely not a
+        // clean translation, so treat it exactly like an unparseable response - reviewed again next
+        // run - rather than risk storing/packaging it. See ContainsLeakedProtocolText's doc comment
+        // for the full set of markers this catches (not just "CORRECTED:").
+        if (ContainsLeakedProtocolText(correctedRaw))
         {
-            Console.WriteLine($"Quality review: parsed correction for '{rawText}' still contains a 'CORRECTED:' label - treating as unparseable. Raw response: {llmResponse}");
+            Console.WriteLine($"Quality review: parsed correction for '{rawText}' contains leaked QC-protocol text - treating as unparseable. Raw response: {llmResponse}");
             return new LlmVerdict(false, 0, null);
         }
 
@@ -895,6 +951,48 @@ public static class QualityReviewWorkflow
             }
 
             await FileHelper.WriteAllTextWithRetryAsync(outputFile, serializer.Serialize(fileLines));
+        });
+    }
+
+    /// <summary>
+    /// Sweeps every already-reviewed column for a stored <see cref="TranslationSplit.QcTranslated"/>
+    /// or <see cref="TranslationSplit.QcRejectedCorrection"/> that contains leaked QC-protocol text
+    /// (see <see cref="ContainsLeakedProtocolText"/>) - i.e. one that was accepted by an earlier,
+    /// narrower version of the leak guard in <see cref="GetLlmVerdictAsync"/> (the "NONE" exact-match
+    /// check let a response like "Sword Technique Power NONE" through untouched, since the whole
+    /// value wasn't literally "NONE"). A full <see cref="TranslationSplit.ResetQcState"/> rather than
+    /// just blanking the leaked field - a review that stored a corrupted correction is not a review
+    /// worth trusting the rest of either (score, reviewed-text baseline), so the column goes back to
+    /// <see cref="QcStatus.NotReviewed"/> and gets a genuinely fresh review next run, exactly like a
+    /// column that failed to parse at all. Safe to run any time, including after the leak guard
+    /// itself has already been fixed - a clean corpus is a no-op.
+    /// </summary>
+    public static async Task ResetLeakedQcCorrections(string workingDirectory, TextFileToSplit[] textFiles)
+    {
+        var serializer = YamlHelper.CreateSerializer();
+
+        await FileIteration.IterateTranslatedFilesInParallelAsync(workingDirectory, textFiles, async (outputFile, textFile, fileLines) =>
+        {
+            var resetCount = 0;
+
+            foreach (var line in fileLines)
+            {
+                foreach (var split in line.Splits)
+                {
+                    var leaked = ContainsLeakedProtocolText(split.QcTranslated)
+                        || ContainsLeakedProtocolText(split.QcRejectedCorrection);
+
+                    if (!leaked)
+                        continue;
+
+                    Console.WriteLine($"Quality review cleanup: '{textFile.Path}' split {split.Split} had leaked QC-protocol text in QcTranslated ('{split.QcTranslated}') - resetting for re-review.");
+                    split.ResetQcState();
+                    resetCount++;
+                }
+            }
+
+            if (resetCount > 0)
+                await FileHelper.WriteAllTextWithRetryAsync(outputFile, serializer.Serialize(fileLines));
         });
     }
 

@@ -232,6 +232,49 @@ public class CompoundFieldSplitterTests
         Assert.Equal(["欢迎回来，", "，今天也要加油哦"], fragments);
     }
 
+    [Fact(DisplayName = "Without AdditionalAbsorbedCharacters configured, ASCII punctuation stays a hard fragment boundary (default game behavior unchanged)")]
+    public void WithoutAdditionalAbsorbedCharactersAsciiPunctuationIsFixedBoundary()
+    {
+        var original = "你好,世界";
+
+        var (template, fragments) = CompoundFieldSplitter.Decompose(original);
+
+        Assert.Equal("{0},{1}", template);
+        Assert.Equal(["你好", "世界"], fragments);
+    }
+
+    [Fact(DisplayName = "With AdditionalAbsorbedCharacters configured, that ASCII punctuation glues into a single fragment instead")]
+    public void WithAdditionalAbsorbedCharactersAsciiPunctuationGluesIntoSingleFragment()
+    {
+        var original = "你好,世界";
+        var options = new CompoundFieldSplitterOptions
+        {
+            AdditionalAbsorbedCharacters = [','],
+        };
+
+        var (template, fragments) = CompoundFieldSplitter.Decompose(original, options);
+
+        Assert.True(CompoundFieldSplitter.IsTrivialTemplate(template, fragments.Count));
+        Assert.Equal(original, fragments[0]);
+        Assert.Equal(original, CompoundFieldSplitter.Reconstruct(template, fragments));
+    }
+
+    [Fact(DisplayName = "AdditionalAbsorbedCharacters combines with PlaceholderPatterns and the fullwidth-colon boundary still applies")]
+    public void AdditionalAbsorbedCharactersCombinesWithPlaceholderPatternsAndColonStillSplits()
+    {
+        var original = "你好,#PlayerName#：世界";
+        var options = new CompoundFieldSplitterOptions
+        {
+            PlaceholderPatterns = [new Regex(@"#\w+#", RegexOptions.Compiled)],
+            AdditionalAbsorbedCharacters = [','],
+        };
+
+        var (template, fragments) = CompoundFieldSplitter.Decompose(original, options);
+
+        Assert.Equal("{0}：{1}", template);
+        Assert.Equal(["你好,#PlayerName#", "世界"], fragments);
+    }
+
     [Fact(DisplayName = "With placeholder options configured, a game placeholder token glues into a single fragment")]
     public void WithPlaceholderOptionsTokenGluesIntoSingleFragment()
     {

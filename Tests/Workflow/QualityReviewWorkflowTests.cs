@@ -50,4 +50,27 @@ public class QualityReviewWorkflowTests
 
         Assert.Null(reason);
     }
+
+    // Regression test for a real corrupted QcTranslated found in DragonHierOverLlm's
+    // KungFuData.csv.yaml: "Sword Technique Power NONE" - the model appended the "NONE" sentinel
+    // onto real corrected text instead of using it as the whole response. The old guard only caught
+    // a "CORRECTED:" label leak and an exact-match "NONE"; it let this one through because
+    // correctedRaw wasn't literally just "NONE". ContainsLeakedProtocolText is the generalized check
+    // that must catch this, plus every other protocol label the QC prompt shows the model.
+    [Theory(DisplayName = "ContainsLeakedProtocolText catches every QC-protocol leak, not just a bare label")]
+    [InlineData("Sword Technique Power NONE", true)] // NONE stuck onto real text
+    [InlineData("Defeat more than 10 enemies in a single battle with your own handsNONE", true)] // glued with no separator at all (real AchievementData.csv.yaml case)
+    [InlineData("NONE Sword Technique Power", true)] // leading instead of trailing
+    [InlineData("Wealth in the millions CORRECTED: NONE", true)] // the original documented leak
+    [InlineData("Become the top fighter SCORE: 90", true)] // a different label leaking
+    [InlineData("SOURCE (Chinese): 剑法威力", true)] // model echoing the input label
+    [InlineData("CURRENT TRANSLATION (English): Sword Technique Power", true)] // ditto, other label
+    [InlineData("Nonetheless, it works", false)] // "None" as a word-fragment prefix, not standalone
+    [InlineData("Sword Technique Power", false)] // clean correction, no leak
+    [InlineData("NONE", false)] // the legitimate "no correction needed" sentinel
+    [InlineData("none", false)] // sentinel, case-insensitive
+    public void ContainsLeakedProtocolTextDetectsLeaks(string correctedText, bool expectedLeak)
+    {
+        Assert.Equal(expectedLeak, QualityReviewWorkflow.ContainsLeakedProtocolText(correctedText));
+    }
 }
