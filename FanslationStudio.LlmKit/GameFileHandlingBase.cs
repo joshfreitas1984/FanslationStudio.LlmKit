@@ -72,7 +72,7 @@ public static class GameFileHandlingBase
                     foreach (var split in line.Splits)
                     {
                         var found2 = !string.IsNullOrEmpty(split.SplitPath)
-                            ? found.Splits.FirstOrDefault(x => x.SplitPath == split.SplitPath && x.SubIndex == split.SubIndex)
+                            ? found.Splits.FirstOrDefault(x => x.SplitPath == split.SplitPath && x.SubIndex == split.SubIndex && x.Text == split.Text)
                                 ?? found.Splits.FirstOrDefault(x => x.SplitPath == split.SplitPath && x.Text == split.Text)
                             : found.Splits.FirstOrDefault(x => x.Split == split.Split && x.SubIndex == split.SubIndex && x.Text == split.Text)
                                 ?? found.Splits.FirstOrDefault(x => x.Text == split.Text);
@@ -91,7 +91,7 @@ public static class GameFileHandlingBase
                     {
                         var found2 = !string.IsNullOrEmpty(split.SplitPath)
                             ? fileLines
-                                .Select(x => x.Splits.FirstOrDefault(s => s.SplitPath == split.SplitPath && s.SubIndex == split.SubIndex))
+                                .Select(x => x.Splits.FirstOrDefault(s => s.SplitPath == split.SplitPath && s.SubIndex == split.SubIndex && s.Text == split.Text))
                                 .FirstOrDefault(s => s != null)
                                 ?? fileLines
                                     .Select(x => x.Splits.FirstOrDefault(s => s.SplitPath == split.SplitPath && s.Text == split.Text))
