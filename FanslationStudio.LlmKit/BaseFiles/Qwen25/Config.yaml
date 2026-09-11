@@ -1,6 +1,6 @@
 apiKeyRequired: false
 url: "http://localhost:11434/api/chat"
-model: "qwen2.5:7b"
+model: "qwen2.5:14b-instruct"
 modelParams:
   temperature: 0.15
   top_p: 0.92
