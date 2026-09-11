@@ -160,7 +160,7 @@ public static class PromptOptimisationWorkflow
             {
                 suggestion = await TranslationService.TranslateMessagesAsync(client, config, modelConfig, messages);
             }
-            catch (HttpRequestException e)
+            catch (Exception e) when (e is HttpRequestException or OperationCanceledException)
             {
                 Console.WriteLine($"Prompt optimisation request error for '{promptFile}' (attempt {attempt}/{MaxAttemptsPerFile}): {e.Message}");
                 continue;

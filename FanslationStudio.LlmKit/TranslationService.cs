@@ -970,7 +970,7 @@ public static class TranslationService
 
             return validationResult;
         }
-        catch (HttpRequestException e)
+        catch (Exception e) when (e is HttpRequestException or OperationCanceledException)
         {
             Console.WriteLine($"Request error: {e.Message}");
             return new ValidationResult(string.Empty);

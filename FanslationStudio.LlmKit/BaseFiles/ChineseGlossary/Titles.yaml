@@ -147,6 +147,9 @@
   - Hero
   direct: three heroes
   literal: san xia
+- raw: 侠士
+  result: "Hero"
+  literal: xia shi
 - raw: 少俠
   rawSimplified: 少侠
   rawTraditional: 少俠
@@ -221,6 +224,7 @@
 - raw: 弟弟
   result: Younger Brother
   allowalt:
+  - Little Brother
   - Brother
   literal: Di Di
   context: Refers to one's younger brother.
@@ -479,6 +483,9 @@
   rawSimplified: 小师妹
   rawTraditional: 小師妹
   result: Little Junior Sister
+  allowalt: 
+    - Junior Sister
+    - Little Sister
 - raw: 三師兄
   rawSimplified: 三师兄
   rawTraditional: 三師兄
@@ -522,3 +529,26 @@
   badtrans: true
   direct: rivers lakes wine guest
   literal: jiang hu jiu ke
+
+
+# Disciples
+- raw: 入门弟
+  rawSimplified: 入门弟
+  rawTraditional: 入門弟
+  result: "Initiate Disciple"
+- raw: 外门弟子
+  rawSimplified: 外门弟子
+  rawTraditional: 外門弟子
+  result: "Outer Disciple"
+- raw: 内门弟子
+  rawSimplified: 内门弟子
+  rawTraditional: 內門弟子
+  result: "Inner Disciple"
+- raw: 亲传弟子
+  rawSimplified: 亲传弟子
+  rawTraditional: 親傳弟子
+  result: "Direct Disciple"
+- raw: 正式弟子
+  rawSimplified: 正式弟子
+  rawTraditional: 正式弟子
+  result: "Formal Disciple"

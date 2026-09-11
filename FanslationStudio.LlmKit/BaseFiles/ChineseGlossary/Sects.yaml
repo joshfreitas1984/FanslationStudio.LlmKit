@@ -101,6 +101,13 @@
   result: Tang Clan
   direct: Tang gate
   literal: Tangmen
+- raw: 唐门掌门
+  rawSimplified: 唐门掌门
+  rawTraditional: 唐門掌門
+  result: Tang Clan Sect Leader
+  literal: Tangmen Zhangmen
+  allowalt:
+  - Tang Clan Sect Master
 - raw: 飛石幫
   rawSimplified: 飞石帮
   rawTraditional: 飛石幫
