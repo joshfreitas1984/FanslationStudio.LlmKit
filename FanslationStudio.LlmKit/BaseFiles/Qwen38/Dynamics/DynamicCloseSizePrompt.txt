@@ -1,2 +1,2 @@
-**Special markup:**
+Special markup:
 - Preserve `</size>` tags; include in translation and final output.

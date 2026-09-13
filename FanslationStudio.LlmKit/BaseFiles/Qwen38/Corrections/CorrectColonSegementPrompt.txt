@@ -1,1 +1,1 @@
-Segments rules for `:` were not followed.
+Enforce `:` segmentation rules.

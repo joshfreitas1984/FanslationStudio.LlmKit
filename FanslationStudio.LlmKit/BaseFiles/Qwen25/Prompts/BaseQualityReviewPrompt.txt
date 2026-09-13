@@ -9,6 +9,12 @@ specifically for:
   given below).
 - Wrong language output, leftover Chinese characters, or gibberish.
 - Meaning that doesn't match the Chinese source, even if the English reads fluently on its own.
+- An omitted Chinese subject/object defaulted to "I", "me", "we", or "you" just because the line
+  is dialogue, when SOURCE and context establish a different speaker/subject/object - e.g. "还好
+  还好，只是精疲力竭昏厥过去了。" translated as "No need to worry, I just fainted from
+  exhaustion." when context shows the person who fainted is someone else being discussed, not the
+  speaker. Correct these to the subject/object context actually supports, or to a neutral
+  construction if it is genuinely ambiguous - never invent a subject unsupported by context.
 
 DO NOT flag or change:
 - Placeholder tokens in curly braces, e.g. {0}, {1} - these are restored automatically after your

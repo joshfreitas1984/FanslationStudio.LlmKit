@@ -23,11 +23,11 @@ public class PromptOptimisationWorkflowTests
     //    await PromptOptimisationWorkflow.RunAsync(ModelPreset.Qwen25, ModelPresetType.Standard, BaseFilesSourceRoot);
     //}
 
-    [Fact(DisplayName = "Optimise Qwen38's own prompt set")]
-    public async Task OptimiseQwen38PromptSet()
-    {
-        await PromptOptimisationWorkflow.RunAsync(ModelPreset.Qwen38, ModelPresetType.Standard, BaseFilesSourceRoot);
-    }
+    //[Fact(DisplayName = "Optimise Qwen38's own prompt set")]
+    //public async Task OptimiseQwen38PromptSet()
+    //{
+    //    await PromptOptimisationWorkflow.RunAsync(ModelPreset.Qwen38, ModelPresetType.Standard, BaseFilesSourceRoot);
+    //}
 
 
     //[Fact(DisplayName = "Optimise Glm4's own prompt set")]

@@ -187,6 +187,50 @@ from a whole-cell QC correction without the same ambiguous reverse-mapping probl
 convention exists to avoid, so a QC-corrected multi-part dynamic-string line loses its bare-label
 entry. The full reconstructed entry still packages correctly regardless.
 
+## Per-column exclusion (`GameHooks.CustomQcExclusionRule`) — keeping structurally opaque text out of QC entirely
+
+Some columns look like ordinary translated prose to the QC pass but are actually machine-readable
+records - a raw/effective-translated cell that's really `"{label};FunctionName"` or similar, where
+only part of the string is real language and the rest is an opaque runtime identifier. A QC model
+has no way to know that, and two problems follow: it can waste a call trying to "fix" formatting
+around the non-language part, and - because packaging accepts an accepted `QcTranslated` for a
+templated column as the literal final cell value (bypassing `CompoundFieldSplitter.Reconstruct()`
+entirely, see "Packaging" above) - a corrupted correction has nothing to catch it unless the
+consuming project has separately registered a `GameHooks.CustomColumnValidator` for that exact
+file/column.
+
+`GameHooks.CustomQcExclusionRule` (`Func<TextFileToSplit, int?, string, bool>`, receiving
+`(textFile, column, rawText)`) lets a downstream project keep a column out of the QC pass entirely,
+decided once per column while `QualityReviewWorkflow.RunAsync` builds its work-item list - BEFORE
+any LLM call, not after. `rawText` is already the fully reconstructed whole-cell raw text (same
+`CompoundFieldSplitter.Reconstruct` call `ReviewColumnAsync` itself uses), so the hook sees exactly
+what the QC model would have been shown. Returning `true` means the column never becomes a
+`QcWorkItem` this run - it isn't `Skipped`-and-retried the way an in-progress retranslation is, it
+simply never enters the pipeline. This is deliberately a separate, cheaper mechanism from
+`CustomColumnValidator`: excluding a column removes the risk (and the LLM cost) altogether, rather
+than reviewing it and hoping a validator catches a bad correction after the fact.
+
+### Writing one for a new project
+
+The pattern that's worked in practice (see DragonHierOverLlm's `GameFileHandling.
+ExcludeFunctionRoutedDynamicStringFromQc` for the real example): identify a raw-text signature that
+reliably marks "this is a machine record, not prose" for your game - ideally a structural character
+your game's raw dumps essentially never contain in genuine translated text (DragonHierOverLlm uses
+a literal ASCII `;` in a `DynamicStringsIL2CPP` entry, since that game's dialogue-choice/function-
+routing convention is `"{choiceText};FunctionName;params..."` and ordinary Chinese text never
+contains an ASCII semicolon) - then scope the check to the file/`TextFileType` where that
+convention actually applies, not a blanket rule that could misfire on an unrelated file where the
+same character is legitimate elsewhere. Before trusting a candidate pattern, sample the real corpus
+for every raw entry containing it and eyeball a chunk of the results - the goal is a rule that's
+both narrow enough to leave ordinary prose alone and broad enough to catch every real instance of
+the structural shape (a stricter "must look exactly like `;Identifier`" regex risks missing
+structural variants, e.g. a trailing bare `;` with nothing after it, or a multi-`;`/`&`-separated
+numeric-parameter record).
+
+Register it on the same `GameHooks` instance already passed to every `QualityReviewWorkflow`/
+`TranslationWorkflow` call site (`CustomPostRepair`/`CustomColumnRepair`/`CustomColumnValidator`
+live there too) - no separate wiring needed.
+
 ## Configuration (`Configuration/QualityReviewConfig.cs`)
 
 `LlmConfig.QualityReview` (`qualityReview:` in `Config.yaml`):

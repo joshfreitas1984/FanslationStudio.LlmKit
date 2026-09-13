@@ -1,2 +1,3 @@
-**Special markup:**
-Preserve </color> tags in translation and final output.
+Detect `</color>` tags in source text.
+Preserve `</color>` tags in translation.
+Preserve `</color>` tags in final output.

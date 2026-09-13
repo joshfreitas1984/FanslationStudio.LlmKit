@@ -93,9 +93,12 @@ confidence 0-100. Additive `TranslationSplit` fields only (`QcTranslated`, `QcSt
 stale, so anything that would trust `QcTranslated`/`QcQualityScore` (packaging, or the QC pass
 deciding whether to re-review) must first check
 `Utility.QualityReviewHelpers.IsQcReviewFresh(...)`. The QC prompt (`BaseQualityReviewPrompt`) is
-per-model-family like `BaseSystemPrompt`, not a shared/generic file. See
+per-model-family like `BaseSystemPrompt`, not a shared/generic file. `GameHooks.
+CustomQcExclusionRule` lets a per-game rule keep a column out of the pass entirely (before any LLM
+call) when it looks like prose but is actually a machine-readable record (e.g. a dialogue-choice
+entry with an embedded function-routing suffix) - see
 [`docs/quality-review-pass-architecture.md`](../docs/quality-review-pass-architecture.md) for the
-full design.
+full design, including guidance for writing a new exclusion rule.
 
 ## Testing conventions
 
@@ -119,3 +122,6 @@ full design.
 - `LineValidation.CustomPostRepair`/`CustomColumnRepair`/`CustomColumnValidator` — per-game
   deterministic repair/validation hooks, invoked from both a live LLM call and the no-LLM-call
   rules pass (`Workflow/TranslationWorkflow.cs`'s `ApplyAllRulesToCurrentTranslation`).
+- `GameHooks.CustomQcExclusionRule` — per-game rule deciding whether a column should be kept out of
+  the quality review pass entirely, checked once per column before any QC LLM call (see
+  `docs/quality-review-pass-architecture.md`).

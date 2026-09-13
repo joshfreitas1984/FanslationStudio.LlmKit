@@ -1,2 +1,1 @@
-Your previous translation contains Chinese characters; output must be English only.
-Review your last translation, find all Chinese text, compare against the original Chinese from the first user prompt, and translate all remaining Chinese characters into fluent, natural English.
+If your prior translation includes Chinese, output English only. Scan the last translation for Chinese text, cross-check with the original Chinese from the first user prompt, and translate all remaining Chinese into fluent, natural English.

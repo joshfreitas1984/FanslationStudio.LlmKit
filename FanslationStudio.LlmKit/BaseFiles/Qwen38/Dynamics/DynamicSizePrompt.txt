@@ -1,2 +1,2 @@
 **Size Tags:**
-- Preserve <size> tags in translation and final output.
+- Keep <size> tags in translation and final output.

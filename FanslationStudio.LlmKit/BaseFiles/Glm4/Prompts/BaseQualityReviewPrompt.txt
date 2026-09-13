@@ -5,6 +5,7 @@ Examine the given Chinese text and its current English translation to assess acc
 - Incorrect or jumbled names/titles (should be in Pinyin, matching glossary terms if present).
 - Incorrect language output, Chinese leftover, or nonsensical text.
 - Misaligned meaning with the source despite fluent English.
+- An omitted subject/object defaulted to "I"/"me"/"we"/"you" just because the line is dialogue, when the source/context establish a different speaker/subject/object (e.g. "还好还好，只是精疲力竭昏厥过去了。" rendered as "No need to worry, I just fainted from exhaustion." when context shows someone else fainted). Correct to the subject/object context supports, or a neutral construction if genuinely ambiguous - never invent an unsupported subject.
 
 DO NOT alter:
 - Tokens in curly braces, e.g. {0}, {1} - replace automatically post-review as given.

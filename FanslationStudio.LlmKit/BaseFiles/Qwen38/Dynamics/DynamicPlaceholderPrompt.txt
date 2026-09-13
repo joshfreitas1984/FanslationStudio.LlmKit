@@ -1,1 +1,1 @@
-Preserve placeholders like `{0}`, `{1}` exactly. Never remove them. Interpret them contextually as specific objects.
+Preserve `{0}`, `{1}` exactly. Never remove. Interpret contextually as specific objects.
