@@ -9,11 +9,41 @@
 
   <ItemGroup>
     <EmbeddedResource Include="BaseFiles\ChineseGlossary\*.yaml" />
+    <EmbeddedResource Include="BaseFiles\Qwen38\Config.yaml" />
+    <EmbeddedResource Include="BaseFiles\Qwen38\Corrections\CorrectAdditionalContextPrompt.txt" />
+    <EmbeddedResource Include="BaseFiles\Qwen38\Corrections\CorrectAdditionalPrompt.txt" />
+    <EmbeddedResource Include="BaseFiles\Qwen38\Corrections\CorrectAlternativesPrompt.txt" />
+    <EmbeddedResource Include="BaseFiles\Qwen38\Corrections\CorrectChinesePrompt.txt" />
+    <EmbeddedResource Include="BaseFiles\Qwen38\Corrections\CorrectColonSegementPrompt.txt" />
+    <EmbeddedResource Include="BaseFiles\Qwen38\Corrections\CorrectExplainationPrompt.txt" />
+    <EmbeddedResource Include="BaseFiles\Qwen38\Corrections\CorrectLeadingCommaPrompt.txt" />
+    <EmbeddedResource Include="BaseFiles\Qwen38\Corrections\CorrectNewLinesPrompt.txt" />
+    <EmbeddedResource Include="BaseFiles\Qwen38\Corrections\CorrectRemovalPrompt.txt" />
+    <EmbeddedResource Include="BaseFiles\Qwen38\Corrections\CorrectRemovedQuotesPrompt.txt" />
+    <EmbeddedResource Include="BaseFiles\Qwen38\Corrections\CorrectTagPrompt.txt" />
+    <EmbeddedResource Include="BaseFiles\Qwen38\Dynamics\DynamicCloseColorPrompt.txt" />
+    <EmbeddedResource Include="BaseFiles\Qwen38\Dynamics\DynamicCloseSizePrompt.txt" />
+    <EmbeddedResource Include="BaseFiles\Qwen38\Dynamics\DynamicColorPrompt.txt" />
+    <EmbeddedResource Include="BaseFiles\Qwen38\Dynamics\DynamicPlaceholderPrompt.txt" />
+    <EmbeddedResource Include="BaseFiles\Qwen38\Dynamics\DynamicSegement1Prompt.txt" />
+    <EmbeddedResource Include="BaseFiles\Qwen38\Dynamics\DynamicSizePrompt.txt" />
+    <EmbeddedResource Include="BaseFiles\Qwen38\Dynamics\DynamicTagPrompt.txt" />
+    <EmbeddedResource Include="BaseFiles\Qwen38\Prompts\BaseCorrectionPrompt.txt" />
+    <EmbeddedResource Include="BaseFiles\Qwen38\Prompts\BaseCorrectionSuffixPrompt.txt" />
+    <EmbeddedResource Include="BaseFiles\Qwen38\Prompts\BaseGlossaryPrompt.txt" />
+    <EmbeddedResource Include="BaseFiles\Qwen38\Prompts\BaseQualityReviewPrompt.txt" />
+    <EmbeddedResource Include="BaseFiles\Qwen38\Prompts\BaseSystemPrompt.txt" />
+    <EmbeddedResource Include="BaseFiles\Qwen38\Prompts\BaseSystemSuffixPrompt.txt" />
 
     <EmbeddedResource Include="BaseFiles\Qwen25\Config.yaml" />
     <EmbeddedResource Include="BaseFiles\Qwen25\Prompts\*.txt" />
     <EmbeddedResource Include="BaseFiles\Qwen25\Corrections\*.txt" />
     <EmbeddedResource Include="BaseFiles\Qwen25\Dynamics\*.txt" />
+
+    <EmbeddedResource Include="BaseFiles\Qwen38\Config.yaml" />
+    <EmbeddedResource Include="BaseFiles\Qwen38\Prompts\*.txt" />
+    <EmbeddedResource Include="BaseFiles\Qwen38\Corrections\*.txt" />
+    <EmbeddedResource Include="BaseFiles\Qwen38\Dynamics\*.txt" />
 
     <EmbeddedResource Include="BaseFiles\Glm4\Config.yaml" />
     <EmbeddedResource Include="BaseFiles\Glm4\Prompts\*.txt" />

@@ -20,6 +20,7 @@ public enum ModelPreset
 {
     None,
     Qwen25,
+    Qwen38,
     Glm4,
 }
 

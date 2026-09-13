@@ -59,8 +59,11 @@ public static class ConfigurationExtensions
             // Load Presets - add more here
             if (model.ModelPreset == ModelPreset.Qwen25)
                 runtimeConfig = MergeModelConfig(GetQwen25Preset(deserializer, model), runtimeConfig);
+            else if (model.ModelPreset == ModelPreset.Qwen38)
+                runtimeConfig = MergeModelConfig(GetQwen38Preset(deserializer, model), runtimeConfig);
             else if (model.ModelPreset == ModelPreset.Glm4)
                 runtimeConfig = MergeModelConfig(GetGlm4Preset(deserializer, model), runtimeConfig);
+      
 
             // Set the merged config to runtime
             response.Runtime.Models[model.Name] = runtimeConfig;
@@ -124,6 +127,9 @@ public static class ConfigurationExtensions
     private static ModelExecutionConfig GetQwen25Preset(IDeserializer deserializer, ModelConfig model) =>
         GetPresetModelConfig(ModelPreset.Qwen25, model.ModelPresetType);
 
+    private static ModelExecutionConfig GetQwen38Preset(IDeserializer deserializer, ModelConfig model) =>
+        GetPresetModelConfig(ModelPreset.Qwen38, model.ModelPresetType);
+
     /// <summary>
     /// GLM-4 preset - ships the full Qwen25-equivalent prompt set (BaseSystemPrompt, Corrections,
     /// Dynamics) under BaseFiles/Glm4/ so it can be used as a drop-in swap. Its
@@ -145,6 +151,7 @@ public static class ConfigurationExtensions
         var presetName = preset switch
         {
             ModelPreset.Qwen25 => "Qwen25",
+            ModelPreset.Qwen38 => "Qwen38",
             ModelPreset.Glm4 => "Glm4",
             _ => throw new InvalidOperationException($"No preset configuration available for '{preset}'."),
         };
