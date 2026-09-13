@@ -1,1 +1,1 @@
-﻿`{0}` has been incorrectly removed from the translation.
+`{0}` was incorrectly removed from the translation.

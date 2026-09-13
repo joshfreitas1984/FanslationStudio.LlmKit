@@ -39,6 +39,7 @@ public static class LlmHelpers
             dynamic requestBody = new ExpandoObject();
             requestBody.model = modelConfig.Model;
             requestBody.stream = false;
+            requestBody.think = false;
             requestBody.messages = messages;
 
             // Add each key-value pair from Params to the dynamic object
@@ -64,6 +65,7 @@ public static class LlmHelpers
                 frequency_penalty = 0,
                 presence_penalty = 0,
                 stream = false,
+                think = false,
                 messages
             };
 

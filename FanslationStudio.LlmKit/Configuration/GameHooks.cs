@@ -66,4 +66,25 @@ public class GameHooks
     /// null (no-op) unless a caller opts in.
     /// </summary>
     public Func<TextFileToSplit?, int?, string, string, string>? CustomColumnRepair { get; set; }
+
+    /// <summary>
+    /// Invoked once per column while <see cref="Workflow.QualityReviewWorkflow.RunAsync"/> is
+    /// building its work-item list, BEFORE any LLM call - lets a game-specific project keep a
+    /// column out of the quality review pass entirely, even though its file otherwise has
+    /// <see cref="TextFileToSplit.EnableQualityReview"/> set. Exists for text that is structurally
+    /// opaque to a QC model despite looking like ordinary translated prose - e.g. this game's
+    /// dynamic-string dialogue-choice entries, where the raw/translated cell is
+    /// <c>"{label};FunctionName"</c> (a real runtime choice-routing record, not a sentence) and a
+    /// QC model has no way to know the ';FunctionName' suffix is an opaque identifier rather than
+    /// something to rewrite/"fix". Unlike <see cref="CustomColumnValidator"/> (which only catches a
+    /// BAD correction after the LLM call already happened), this hook skips the LLM call
+    /// altogether for a column that should never be reviewed in the first place - cheaper, and
+    /// removes any chance of a QC model corrupting a structural literal that has no validator
+    /// registered for it. Receives (textFile, column, raw) - column is the zero-based CSV column
+    /// index when known (null outside a column context, e.g. a plain dynamic-string/prefab-text
+    /// entry). Return true to exclude the column from this run entirely (never Skipped-and-retried
+    /// - it simply never becomes a work item); return false (or leave the hook null) for normal
+    /// review. Left null (no-op) unless a caller opts in.
+    /// </summary>
+    public Func<TextFileToSplit, int?, string, bool>? CustomQcExclusionRule { get; set; }
 }

@@ -1,1 +1,1 @@
-﻿`{0}` has been added to the result but was not in the original text.
+`{0}` was added to the result but absent from the original text.

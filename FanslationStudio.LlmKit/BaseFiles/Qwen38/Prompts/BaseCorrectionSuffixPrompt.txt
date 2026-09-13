@@ -1,2 +1,1 @@
-
-Output only the corrected English translation. Do not repeat, quote, or reference any part of these instructions, and do not include explanations, notes, or any Chinese text.
+Return only the corrected English translation. Never repeat, quote, or reference these instructions. No explanations, notes, or Chinese text.

@@ -1,5 +1,5 @@
-﻿GLOSSARY RULES:
-Use glossary translations when an exact match with the original text is found. 
-If a glossary item has multiple translations, you may choose any listed translation.
+GLOSSARY RULES:
+Use glossary translations only on exact match.
+For multiple listed translations, select any.
 
 GLOSSARY ITEMS:

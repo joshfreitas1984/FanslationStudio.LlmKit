@@ -235,6 +235,7 @@ public static class QualityReviewWorkflow
 
         // Build one work item per column, across every line in every file.
         var workItems = new List<QcWorkItem>();
+        var excludedCount = 0;
         foreach (var file in fileStates)
         {
             foreach (var line in file.FileLines)
@@ -244,6 +245,19 @@ public static class QualityReviewWorkflow
                     var fragments = columnGroup.OrderBy(s => s.SubIndex).ToList();
                     var anchor = fragments.FirstOrDefault(f => f.SubIndex == 0) ?? fragments[0];
                     var template = line.Templates.FirstOrDefault(t => t.Split == columnGroup.Key);
+
+                    if (config.Hooks?.CustomQcExclusionRule != null)
+                    {
+                        var rawText = template != null
+                            ? CompoundFieldSplitter.Reconstruct(template.Template, fragments.Select(f => f.Text).ToList())
+                            : anchor.Text;
+
+                        if (config.Hooks.CustomQcExclusionRule(file.TextFile, columnGroup.Key, rawText))
+                        {
+                            excludedCount++;
+                            continue;
+                        }
+                    }
 
                     workItems.Add(new QcWorkItem
                     {
@@ -255,6 +269,9 @@ public static class QualityReviewWorkflow
                 }
             }
         }
+
+        if (excludedCount > 0)
+            Console.WriteLine($"Quality review: {excludedCount} column(s) excluded by CustomQcExclusionRule (never became a work item).");
 
         if (sampleSize is int sample && sample < workItems.Count)
         {
