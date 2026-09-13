@@ -758,12 +758,12 @@ public static class TranslationWorkflow
     {
         HashSet<string> words =
         [
-            "hiu", "tut", "thut", "oi", "avo", "porqe", "obrigado",
-                "knight", "knights", "knight-at-arms", "knights-errant",
-                "nom", "esto", "tem", "mais", "com", "ver", "nos", "sobre", "vermos",
-                "dar", "nam", "J'ai", "je", "veux", "pas", "ele", "una", "keqi", "shiwu",
-                "ich", "ein", "der", "ganzes", "Leben", "dort", //"de", NAmes can have de
-                "knight", "thay", "tien", "div", "html", "tiantu", "ngoc", "truong", "Phong"
+            //"hiu", "tut", "thut", "oi", "avo", "porqe", "obrigado",
+                "knight", "knight", "knights", "knight-at-arms", "knights-errant",
+                //"nom", "esto", "tem", "mais", "com", "ver", "nos", "sobre", "vermos",
+                //"dar", "nam", "J'ai", "je", "veux", "pas", "ele", "una", "keqi", "shiwu",
+                //"ich", "ein", "der", "ganzes", "Leben", "dort", //"de", NAmes can have de
+                //"thay", "tien", "div", "html", "tiantu", "ngoc", "truong", "Phong"
         ];
 
         string pattern = $@"\b({string.Join("|", words)})\b";

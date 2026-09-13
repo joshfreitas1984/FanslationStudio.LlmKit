@@ -2,6 +2,7 @@ using FanslationStudio.LlmKit.Configuration;
 using FanslationStudio.LlmKit.Support;
 using FanslationStudio.LlmKit.Utility;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text;
 using System.Text.RegularExpressions;
 using YamlDotNet.Serialization;
@@ -110,6 +111,20 @@ public static class QualityReviewWorkflow
         public required ISerializer Serializer { get; init; }
         public readonly object WriteLock = new();
         public int BufferedRecords;
+
+        /// <summary>
+        /// How many of THIS file's work items are still to be dispatched this run - set once
+        /// (after exclusion/freshness-filtering/sampling decide the final work item list, so it
+        /// reflects what's actually going to happen, not the whole corpus) and decremented as each
+        /// of the file's items finishes, regardless of outcome (a Skipped item still counts - once
+        /// nothing is left pending for a file, nothing will touch it again this run, so it's due for
+        /// a flush even if it was a skip). When this hits 0, RunAsync's loop flushes the file
+        /// immediately rather than waiting for every OTHER file to finish too - see the loop body.
+        /// Without this, a small file that finishes early (never crosses BatchlessBuffer on its own)
+        /// sits unwritten in memory for the rest of a potentially multi-hour run, just as exposed to
+        /// a mid-run crash/interruption as a file still being actively reviewed.
+        /// </summary>
+        public int PendingItems;
     }
 
     /// <summary>One work item per column (a group of <see cref="TranslationSplit"/>s sharing the
@@ -126,6 +141,28 @@ public static class QualityReviewWorkflow
     }
 
     private enum QcOutcome { Skipped, Passed, Corrected, RejectedByGate }
+
+    /// <summary>
+    /// Cumulative wall-clock time spent in the two costs a run can plausibly bottleneck on, so the
+    /// periodic progress log can say which one is actually responsible for a slow interval instead
+    /// of leaving that to guesswork - see the progress log line in <see cref="RunAsync"/>.
+    /// <see cref="LlmMs"/>/<see cref="LlmCalls"/> only count a real cache-miss LLM round trip (see
+    /// where this is used inside the <see cref="ReviewLlmCache"/> factory - a cache hit just awaits
+    /// the same already-timed Task and adds nothing here). <see cref="IoMs"/>/<see cref="IoWrites"/>
+    /// only count an actual periodic buffered flush to disk (see the outcome != Skipped guard around
+    /// it in <see cref="RunAsync"/>'s loop body) - the one-time final write-back loop at the end of
+    /// <see cref="RunAsync"/> is deliberately not counted here, since it always happens exactly once
+    /// regardless of how the run went and isn't part of the "what's eating this interval" question.
+    /// All fields updated via <see cref="Interlocked"/> - this instance is shared/mutated
+    /// concurrently across every <c>Parallel.ForEachAsync</c> worker.
+    /// </summary>
+    private sealed class QcTimingStats
+    {
+        public long LlmMs;
+        public int LlmCalls;
+        public long IoMs;
+        public int IoWrites;
+    }
 
     /// <summary>
     /// The model's raw verdict for one (source text, current translation, applicable glossary
@@ -276,6 +313,24 @@ public static class QualityReviewWorkflow
         if (excludedCount > 0)
             Console.WriteLine($"Quality review: {excludedCount} column(s) excluded by CustomQcExclusionRule (never became a work item).");
 
+        // Pre-scan out anything that would just be QcOutcome.Skipped anyway (readiness/freshness -
+        // see EvaluateReadiness) before it ever reaches Parallel.ForEachAsync. Purely CPU-bound, no
+        // LLM call either way, so this changes nothing about which columns get reviewed - it only
+        // means:
+        //  - "remaining" in the progress log reflects real work left, not a count that includes
+        //    thousands of already-fresh columns that will resolve in microseconds (misleading on a
+        //    mostly-already-reviewed corpus - see the log this was added in response to).
+        //  - sampleSize (below) draws its random sample from columns that actually need review,
+        //    instead of potentially wasting sample slots on columns that would've just been skipped.
+        // Safe to do once up front: nothing in this workflow makes reviewing column A change
+        // column B's own readiness/freshness, so a column's answer here can't go stale mid-run.
+        var alreadyFreshCount = workItems.Count;
+        workItems = workItems.Where(item => EvaluateReadiness(item).needsReview).ToList();
+        alreadyFreshCount -= workItems.Count;
+
+        if (alreadyFreshCount > 0)
+            Console.WriteLine($"Quality review: {alreadyFreshCount} column(s) already reviewed and unchanged (or not yet ready) - skipped without dispatching.");
+
         if (sampleSize is int sample && sample < workItems.Count)
         {
             // Random, not first-N - a first-N sample would be biased toward whichever file(s)
@@ -287,6 +342,11 @@ public static class QualityReviewWorkflow
 
         Console.WriteLine($"Quality review: {workItems.Count} column(s) across {fileStates.Count} file(s) to consider, max concurrency {maxConcurrency}, model '{config.QualityReview.ModelName}'.");
 
+        // Set once the final work item list is settled (post exclusion/freshness-filter/sampling),
+        // so it reflects what will actually be dispatched this run - see QcFileState.PendingItems.
+        foreach (var fileGroup in workItems.GroupBy(i => i.File))
+            fileGroup.Key.PendingItems = fileGroup.Count();
+
         using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(300) };
         var reviewCache = new ReviewLlmCache();
 
@@ -297,9 +357,19 @@ public static class QualityReviewWorkflow
         var rejectedCount = 0;
         var flaggedCount = 0;
 
+        // See QcTimingStats' doc comment - lets the progress log attribute an interval's real
+        // wall-clock cost to "LLM calls" vs "disk flush" instead of leaving that to guesswork, which
+        // is exactly what motivated adding this (a mostly-Skip run that was still slow turned out to
+        // be the flush, not the LLM - see the outcome != Skipped guard below and its comment).
+        var timing = new QcTimingStats();
+        var runStopwatch = Stopwatch.StartNew();
+        var progressLogLock = new object();
+        long lastLogElapsedMs = 0, lastLogLlmMs = 0, lastLogIoMs = 0;
+        int lastLogLlmCalls = 0, lastLogIoWrites = 0, lastLogReviewedCount = 0;
+
         await Parallel.ForEachAsync(workItems, new ParallelOptions { MaxDegreeOfParallelism = maxConcurrency }, async (item, _) =>
         {
-            var outcome = await ReviewColumnAsync(config, modelConfig, client, item, reviewCache);
+            var outcome = await ReviewColumnAsync(config, modelConfig, client, item, reviewCache, timing);
 
             // Every dispatched work item counts toward processedCount, Skipped included, so the
             // progress log's denominator reflects real "N left" progress rather than going quiet
@@ -316,19 +386,96 @@ public static class QualityReviewWorkflow
             }
 
             if (processed % TranslationService.BatchlessLog == 0 || processed == totalCount)
-                Console.WriteLine($"Quality review progress: {processed}/{totalCount} column(s) processed ({totalCount - processed} remaining) - " +
-                    $"reviewed: {reviewedCount}, corrected: {correctedCount}, rejected by gate: {rejectedCount}, flagged: {flaggedCount}");
+            {
+                lock (progressLogLock)
+                {
+                    var elapsedNow = runStopwatch.ElapsedMilliseconds;
+                    var intervalMs = elapsedNow - lastLogElapsedMs;
 
-            var buffered = Interlocked.Increment(ref item.File.BufferedRecords);
-            if (buffered > TranslationService.BatchlessBuffer)
+                    var currentLlmMs = Volatile.Read(ref timing.LlmMs);
+                    var currentLlmCalls = Volatile.Read(ref timing.LlmCalls);
+                    var currentIoMs = Volatile.Read(ref timing.IoMs);
+                    var currentIoWrites = Volatile.Read(ref timing.IoWrites);
+
+                    var intervalLlmMs = currentLlmMs - lastLogLlmMs;
+                    var intervalLlmCalls = currentLlmCalls - lastLogLlmCalls;
+                    var intervalIoMs = currentIoMs - lastLogIoMs;
+                    var intervalIoWrites = currentIoWrites - lastLogIoWrites;
+                    var intervalReviewed = reviewedCount - lastLogReviewedCount;
+
+                    // The three numbers worth actually comparing run-to-run/setting-to-setting
+                    // (raw "interval took Xms" isn't, since it moves with batch composition - a
+                    // skip-heavy interval and a review-heavy one aren't comparable at all):
+                    // - avgLlmMs: mean wall-clock cost of one real LLM round trip this interval -
+                    //   the number to watch when judging a model/prompt-size change, independent of
+                    //   concurrency.
+                    // - effectiveConcurrency: intervalLlmMs / intervalMs - how many LLM calls were
+                    //   genuinely running in parallel on average. Compare this to
+                    //   qualityReview.maxConcurrency: at (or very near) the configured max, workers
+                    //   are never sitting idle waiting on something else (io, readiness checks) -
+                    //   below it means concurrency itself isn't the bottleneck right now.
+                    // - reviewedPerSecond: real throughput (columns actually reviewed, not
+                    //   dispatched/skipped, per second) - the one number to compare directly across
+                    //   a maxConcurrency or model change to see if it actually helped.
+                    var avgLlmMs = intervalLlmCalls > 0 ? intervalLlmMs / (double)intervalLlmCalls : 0;
+                    var effectiveConcurrency = intervalMs > 0 ? intervalLlmMs / (double)intervalMs : 0;
+                    var reviewedPerSecond = intervalMs > 0 ? intervalReviewed * 1000.0 / intervalMs : 0;
+
+                    Console.WriteLine(
+                        $"Quality review progress: {processed}/{totalCount} column(s) processed ({totalCount - processed} remaining) - " +
+                        $"reviewed: {reviewedCount}, corrected: {correctedCount}, rejected by gate: {rejectedCount}, flagged: {flaggedCount} | " +
+                        $"interval took {intervalMs}ms - llm: {intervalLlmCalls} call(s)/{intervalLlmMs}ms, io: {intervalIoWrites} write(s)/{intervalIoMs}ms " +
+                        $"(elapsed: {elapsedNow}ms) | avg {avgLlmMs:F0}ms/call, {effectiveConcurrency:F1}x effective concurrency, {reviewedPerSecond:F2} reviewed/s");
+
+                    lastLogElapsedMs = elapsedNow;
+                    lastLogLlmMs = currentLlmMs;
+                    lastLogLlmCalls = currentLlmCalls;
+                    lastLogIoMs = currentIoMs;
+                    lastLogIoWrites = currentIoWrites;
+                    lastLogReviewedCount = reviewedCount;
+                }
+            }
+
+            // Skipped means nothing on this column changed (no LLM call, no Qc field mutated), so
+            // it has nothing new to persist - counting it toward the flush threshold anyway used to
+            // force a full serialize+write of the WHOLE file's FileLines on a mostly-skip run (a
+            // corpus re-review where almost everything is still fresh), burning CPU/IO and stalling
+            // one of only maxConcurrency worker slots on synchronous disk I/O for no reason. The
+            // final write-back loop at the end of RunAsync still guarantees everything reaches disk.
+            if (outcome != QcOutcome.Skipped)
+            {
+                var buffered = Interlocked.Increment(ref item.File.BufferedRecords);
+                if (buffered > TranslationService.BatchlessBuffer)
+                {
+                    lock (item.File.WriteLock)
+                    {
+                        if (item.File.BufferedRecords > TranslationService.BatchlessBuffer)
+                        {
+                            var ioStopwatch = Stopwatch.StartNew();
+                            FileHelper.WriteAllTextWithRetry(item.File.OutputFile, item.File.Serializer.Serialize(item.File.FileLines));
+                            Interlocked.Add(ref timing.IoMs, ioStopwatch.ElapsedMilliseconds);
+                            Interlocked.Increment(ref timing.IoWrites);
+                            item.File.BufferedRecords = 0;
+                        }
+                    }
+                }
+            }
+
+            // Last item dispatched for this file this run (see QcFileState.PendingItems) - nothing
+            // else will touch it, so flush now instead of leaving it in memory until every OTHER
+            // file's work finishes too (the final write-back loop below). Counted down regardless of
+            // outcome (a Skipped last item still means the file is done) - and checked even when the
+            // buffer-threshold branch above JUST flushed it, since BufferedRecords could be 0 again
+            // here for an unrelated reason; a redundant write of unchanged content is harmless.
+            if (Interlocked.Decrement(ref item.File.PendingItems) == 0)
             {
                 lock (item.File.WriteLock)
                 {
-                    if (item.File.BufferedRecords > TranslationService.BatchlessBuffer)
-                    {
-                        FileHelper.WriteAllTextWithRetry(item.File.OutputFile, item.File.Serializer.Serialize(item.File.FileLines));
-                        item.File.BufferedRecords = 0;
-                    }
+                    var ioStopwatch = Stopwatch.StartNew();
+                    FileHelper.WriteAllTextWithRetry(item.File.OutputFile, item.File.Serializer.Serialize(item.File.FileLines));
+                    Interlocked.Add(ref timing.IoMs, ioStopwatch.ElapsedMilliseconds);
+                    Interlocked.Increment(ref timing.IoWrites);
+                    item.File.BufferedRecords = 0;
                 }
             }
         });
@@ -336,12 +483,27 @@ public static class QualityReviewWorkflow
         foreach (var file in fileStates)
             await FileHelper.WriteAllTextWithRetryAsync(file.OutputFile, file.Serializer.Serialize(file.FileLines));
 
-        Console.WriteLine($"Quality review done: {reviewedCount} reviewed, {correctedCount} corrected, {rejectedCount} rejected by validation gate, {flaggedCount} flagged for human review.");
+        Console.WriteLine($"Quality review done: {reviewedCount} reviewed, {correctedCount} corrected, {rejectedCount} rejected by validation gate, {flaggedCount} flagged for human review. " +
+            $"Totals - llm: {timing.LlmCalls} call(s)/{timing.LlmMs}ms, io: {timing.IoWrites} write(s)/{timing.IoMs}ms, elapsed: {runStopwatch.ElapsedMilliseconds}ms.");
 
         return reviewedCount;
     }
 
-    private static async Task<QcOutcome> ReviewColumnAsync(LlmConfig config, ModelExecutionConfig modelConfig, HttpClient client, QcWorkItem item, ReviewLlmCache reviewCache)
+    /// <summary>
+    /// Everything <see cref="ReviewColumnAsync"/> needs to decide "does this column need an LLM
+    /// call at all" - readiness (every fragment has a real, non-flagged translation) plus the
+    /// freshness check (already reviewed and nothing's changed since) - with no LLM call and no
+    /// side effects, so it's safe to run speculatively before a column is ever dispatched. Reused
+    /// two ways: <see cref="RunAsync"/> pre-scans every work item with it purely to size the run
+    /// (accurate "remaining" count, and a sampleSize draw that only picks from columns that'll
+    /// actually be reviewed) without dispatching known-skips into Parallel.ForEachAsync at all;
+    /// <see cref="ReviewColumnAsync"/> calls it again right before actually reviewing a column and
+    /// reuses the returned <c>effectiveTranslated</c> instead of recomputing it - the pre-scan and
+    /// the real pass never end up disagreeing since they're the same code path. Returns
+    /// <c>effectiveTranslated</c> even when <paramref name="item"/> isn't ready (empty string) -
+    /// callers that only care about <c>needsReview</c> (the pre-scan) simply ignore it.
+    /// </summary>
+    private static (bool needsReview, string effectiveTranslated) EvaluateReadiness(QcWorkItem item)
     {
         var anchor = item.Anchor;
 
@@ -351,19 +513,15 @@ public static class QualityReviewWorkflow
         foreach (var fragment in item.Fragments)
         {
             if (fragment.FlaggedForRetranslation || !fragment.SafeToTranslate)
-                return QcOutcome.Skipped;
+                return (false, string.Empty);
             if (string.IsNullOrEmpty(fragment.Translated) && !string.IsNullOrEmpty(fragment.Text))
-                return QcOutcome.Skipped;
+                return (false, string.Empty);
         }
-
-        var rawText = item.Template != null
-            ? CompoundFieldSplitter.Reconstruct(item.Template.Template, item.Fragments.Select(f => f.Text).ToList())
-            : anchor.Text;
 
         var effectiveTranslated = QualityReviewHelpers.ComputeEffectiveTranslatedText(anchor, item.Template, item.Fragments);
 
         if (string.IsNullOrEmpty(effectiveTranslated))
-            return QcOutcome.Skipped;
+            return (false, effectiveTranslated);
 
         // Already reviewed and nothing has changed since (Translated is the immutable
         // source-of-truth compared here, never QcTranslated - see QcReviewedText's doc comment) -
@@ -371,7 +529,22 @@ public static class QualityReviewWorkflow
         // prior Qc* outcome can still be trusted (see QualityReviewHelpers.IsQcReviewFresh) -
         // here it means "no re-review needed" instead of "no longer trustworthy".
         if (QualityReviewHelpers.IsQcReviewFresh(anchor, item.Template, item.Fragments))
+            return (false, effectiveTranslated);
+
+        return (true, effectiveTranslated);
+    }
+
+    private static async Task<QcOutcome> ReviewColumnAsync(LlmConfig config, ModelExecutionConfig modelConfig, HttpClient client, QcWorkItem item, ReviewLlmCache reviewCache, QcTimingStats timing)
+    {
+        var anchor = item.Anchor;
+
+        var (needsReview, effectiveTranslated) = EvaluateReadiness(item);
+        if (!needsReview)
             return QcOutcome.Skipped;
+
+        var rawText = item.Template != null
+            ? CompoundFieldSplitter.Reconstruct(item.Template.Template, item.Fragments.Select(f => f.Text).ToList())
+            : anchor.Text;
 
         // Mask dynamic tokens/placeholders the same way the translation pipeline already does
         // (StringTokenReplacer), so the QC model never sees/mangles a raw `#PlayerName#`-style
@@ -383,8 +556,18 @@ public static class QualityReviewWorkflow
         var glossaryPrompt = GlossaryLine.AppendPromptsFor(rawText, config.Runtime.GlossaryLines, item.File.TextFile.Path);
 
         var cacheKey = new ReviewCacheKey(rawText, effectiveTranslated, glossaryPrompt);
-        var verdict = await reviewCache.GetOrAdd(cacheKey, _ => new Lazy<Task<LlmVerdict>>(
-            () => GetLlmVerdictAsync(config, modelConfig, client, rawText, maskedRaw, maskedTranslated, glossaryPrompt))).Value;
+        // Timed inside the Lazy factory, not around the GetOrAdd/.Value await - that way only the
+        // thread that actually runs a fresh HTTP round trip (a cache miss) records time against
+        // timing.LlmMs; every other thread racing the same key just awaits the same in-flight Task
+        // and correctly contributes nothing (see ReviewLlmCache's doc comment for the Lazy dedup).
+        var verdict = await reviewCache.GetOrAdd(cacheKey, _ => new Lazy<Task<LlmVerdict>>(async () =>
+        {
+            var llmStopwatch = Stopwatch.StartNew();
+            var result = await GetLlmVerdictAsync(config, modelConfig, client, rawText, maskedRaw, maskedTranslated, glossaryPrompt);
+            Interlocked.Add(ref timing.LlmMs, llmStopwatch.ElapsedMilliseconds);
+            Interlocked.Increment(ref timing.LlmCalls);
+            return result;
+        })).Value;
 
         if (!verdict.Success)
             // Either the request errored, or the response didn't parse - leave the column's Qc
