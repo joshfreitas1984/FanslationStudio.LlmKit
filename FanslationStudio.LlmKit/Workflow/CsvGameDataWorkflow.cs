@@ -50,7 +50,7 @@ public static class CsvGameDataWorkflow
                 if (textFile.SkipColumns.Contains(i))
                     continue;
 
-                var (template, fragments) = CompoundFieldSplitter.Decompose(splits[i], options);
+                var (template, fragments) = CompoundFieldSplitter.Decompose(splits[i], options, textFile.EnableSizeShrink);
                 if (fragments.Count == 0)
                     continue;
 

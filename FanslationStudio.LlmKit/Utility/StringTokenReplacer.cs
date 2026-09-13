@@ -52,6 +52,34 @@ public class StringTokenReplacer
         return (int)Math.Round(Convert.ToInt32(sizeString) * 0.7);
     }
 
+    /// <summary>
+    /// Shrinks the numeric value inside every <c>&lt;size=N&gt;</c>/<c>{size=N}</c> tag in
+    /// <paramref name="input"/> via <see cref="CalculateNewSize"/>, as a plain deterministic string
+    /// transform - no tokenization/placeholder mapping, since this runs once (in
+    /// <see cref="CompoundFieldSplitter.Decompose"/>, before any LLM ever sees the text) rather than
+    /// per-LLM-call like <see cref="Replace"/>.
+    /// </summary>
+    public static string ShrinkSizeTagsOnly(string input)
+    {
+        var result = new StringBuilder(input);
+
+        result.Replace(SizeValueCurlyRegex, match =>
+        {
+            var sizeValue = CalculateNewSize(match.Groups[1].Value);
+            return $"{{size={sizeValue}}}";
+        });
+
+        result.Replace(SizeRegex, match =>
+        {
+            var sizeTag = match.Value;
+            var sizeValue = CalculateNewSize(sizeTag);
+            var hasHash = sizeTag.Contains("#");
+            return hasHash ? $"<size=#{sizeValue}>" : $"<size={sizeValue}>";
+        });
+
+        return result.ToString();
+    }
+
     public string Replace(string input)
     {
         int index = 0;
@@ -59,15 +87,18 @@ public class StringTokenReplacer
         int sizeIndex = 0;
         placeholderMap.Clear();
         colorMap.Clear();
+        sizeMap.Clear();
         var result = new StringBuilder(input);
 
-        // Handle {size=24} style tags
+        // Handle {size=24} style tags. Masking only, no arithmetic here - the value has already
+        // been shrunk once, up front, by CompoundFieldSplitter.Decompose (via ShrinkSizeTagsOnly)
+        // before this text was ever split into fragments/templates, so re-shrinking here would
+        // double-apply CalculateNewSize's 0.7 multiplier.
         result.Replace(SizeValueCurlyRegex, match =>
         {
             var sizeString = match.Groups[1].Value;
-            var sizeValue = CalculateNewSize(sizeString);
             var key = $"{{size={sizeIndex++}}}";
-            var replacement = $"{{size={sizeValue}}}";
+            var replacement = $"{{size={sizeString}}}";
             sizeMap.Add(key, replacement);
             return key;
         });
@@ -97,16 +128,15 @@ public class StringTokenReplacer
             return $"{{{index++}}}";
         });
 
-        // Check for size tags and replace the numeric value inside
+        // Mask size tags from the LLM. No arithmetic here - see the {size=N} block above for why:
+        // the value was already shrunk once by CompoundFieldSplitter.Decompose.
         result.Replace(SizeRegex, match =>
         {
             var sizeTag = match.Value;
-            var sizeValue = CalculateNewSize(sizeTag);
             var hasHash = sizeTag.Contains("#");
             var key = hasHash ? $"<size=#{sizeIndex++}>" : $"<size={sizeIndex++}>";
-            var replacement = hasHash ? $"<size=#{sizeValue}>" : $"<size={sizeValue}>";
 
-            sizeMap.Add(key, replacement);
+            sizeMap.Add(key, sizeTag);
             return key;
         });
 

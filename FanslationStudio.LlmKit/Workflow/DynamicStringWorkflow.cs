@@ -59,7 +59,7 @@ public static class DynamicStringWorkflow
                 // Reverse StringMapExtractor.EscapeNewlinesForFlatFile's "\n" escape - see the
                 // XML doc above for why this needs to happen before Decompose/Raw are computed.
                 var line = dumpedLine.Replace("\\n", "\n");
-                var (template, fragments) = CompoundFieldSplitter.Decompose(line, options);
+                var (template, fragments) = CompoundFieldSplitter.Decompose(line, options, textFile.EnableSizeShrink);
 
                 if (fragments.Count == 0)
                 {

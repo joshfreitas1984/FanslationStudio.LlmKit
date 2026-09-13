@@ -231,12 +231,25 @@ public static partial class CompoundFieldSplitter
     /// placeholder with no Chinese text anywhere in its run (nothing to glue onto) is left as plain
     /// literal template text, same as any other non-Chinese run.
     /// </summary>
-    public static (string Template, List<string> Fragments) Decompose(string cell, CompoundFieldSplitterOptions? options = null)
+    public static (string Template, List<string> Fragments) Decompose(
+        string cell, CompoundFieldSplitterOptions? options = null, bool enableSizeShrink = true)
     {
         var fragments = new List<string>();
 
         if (string.IsNullOrEmpty(cell))
             return (cell, fragments);
+
+        // Size tags (<size=N>/{size=N}) are never Chinese text, so they always end up in the
+        // literal template half below rather than a translatable fragment - meaning they pass
+        // through this method (and Reconstruct, at packaging time) completely untouched by the
+        // rest of the pipeline. Shrinking here, once, up front, is the only place that reliably
+        // covers every field regardless of whether it later gets corrected/passed by QC. See
+        // StringTokenReplacer.ShrinkSizeTagsOnly - StringTokenReplacer itself no longer resizes
+        // (only tokenizes, since it operates on fragments that never contain a size tag anyway,
+        // except in the QC path where it masks the *already-shrunk* tag from the reconstructed
+        // line before sending it to the LLM).
+        if (enableSizeShrink)
+            cell = StringTokenReplacer.ShrinkSizeTagsOnly(cell);
 
         // Escape any literal '{'/'}' already present in the cell - e.g. this game's own
         // String.Format placeholders (like "{0}年{1}月{2}日" or "{0}存档成功！") surviving

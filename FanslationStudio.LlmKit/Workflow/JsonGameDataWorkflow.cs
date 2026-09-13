@@ -69,7 +69,7 @@ public static class JsonGameDataWorkflow
 
                     if (property.Value.ValueKind == JsonValueKind.String)
                     {
-                        DecomposeInto(line, property.Name, property.Value.GetString(), options);
+                        DecomposeInto(line, property.Name, property.Value.GetString(), options, textFile.EnableSizeShrink);
                     }
                     else if (property.Value.ValueKind == JsonValueKind.Array)
                     {
@@ -77,7 +77,7 @@ public static class JsonGameDataWorkflow
                         foreach (var element in property.Value.EnumerateArray())
                         {
                             if (element.ValueKind == JsonValueKind.String)
-                                DecomposeInto(line, $"{property.Name}[{index}]", element.GetString(), options);
+                                DecomposeInto(line, $"{property.Name}[{index}]", element.GetString(), options, textFile.EnableSizeShrink);
 
                             index++;
                         }
@@ -109,12 +109,12 @@ public static class JsonGameDataWorkflow
         return normalized.EndsWith("tw") || normalized.EndsWith("final");
     }
 
-    private static void DecomposeInto(TranslationLine line, string splitPath, string? text, CompoundFieldSplitterOptions? options)
+    private static void DecomposeInto(TranslationLine line, string splitPath, string? text, CompoundFieldSplitterOptions? options, bool enableSizeShrink)
     {
         if (string.IsNullOrEmpty(text))
             return;
 
-        var (template, fragments) = CompoundFieldSplitter.Decompose(text, options);
+        var (template, fragments) = CompoundFieldSplitter.Decompose(text, options, enableSizeShrink);
         if (fragments.Count == 0)
             return;
 

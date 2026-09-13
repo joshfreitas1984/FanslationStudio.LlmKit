@@ -53,7 +53,7 @@ public static class PrefabTextWorkflow
             .Where(line => !string.IsNullOrEmpty(line))
             .Select(line =>
             {
-                var (template, fragments) = CompoundFieldSplitter.Decompose(line, options);
+                var (template, fragments) = CompoundFieldSplitter.Decompose(line, options, textFile.EnableSizeShrink);
 
                 if (fragments.Count == 0)
                 {

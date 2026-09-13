@@ -69,6 +69,11 @@ public class QualityReviewWorkflowTests
     [InlineData("Sword Technique Power", false)] // clean correction, no leak
     [InlineData("NONE", false)] // the legitimate "no correction needed" sentinel
     [InlineData("none", false)] // sentinel, case-insensitive
+    // Regression test for a false positive found in real QC output: the standalone/trailing "NONE"
+    // checks used to be case-insensitive, so an ordinary lowercase "none" inside genuine, correct
+    // English prose got misidentified as the leaked protocol sentinel and the whole response was
+    // discarded as unparseable.
+    [InlineData("When the Buddha was first born, he roared like a lion, declaring that in heaven and on earth, none but I am supreme.", false)]
     public void ContainsLeakedProtocolTextDetectsLeaks(string correctedText, bool expectedLeak)
     {
         Assert.Equal(expectedLeak, QualityReviewWorkflow.ContainsLeakedProtocolText(correctedText));

@@ -97,4 +97,15 @@ public class TextFileToSplit
     /// from the original raw CSV.
     /// </summary>
     public HashSet<int> SkipColumns { get; set; } = [];
+
+    /// <summary>
+    /// When true (default), <see cref="Utility.CompoundFieldSplitter.Decompose"/> shrinks the
+    /// numeric value inside any <c>&lt;size=N&gt;</c>/<c>{size=N}</c> tag it finds in this file's
+    /// text (see <see cref="Utility.StringTokenReplacer.CalculateNewSize"/>) before splitting -
+    /// translated text tends to run longer than the Chinese source, so UI elements sized for the
+    /// original text can overflow unless the font size is scaled down to compensate. Set to false
+    /// for a file where the source size tags are already correct for the translated text, or where
+    /// this game's UI doesn't need the compensation.
+    /// </summary>
+    public bool EnableSizeShrink { get; set; } = true;
 }

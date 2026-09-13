@@ -62,8 +62,14 @@ public static class QualityReviewWorkflow
     };
 
     /// <summary>Catches "NONE" as its own word anywhere in the text (a leading/trailing/mid-sentence
-    /// sentinel separated by whitespace or punctuation, e.g. "NONE Sword Technique Power").</summary>
-    private static readonly Regex StandaloneNoneRegex = new(@"(?<![A-Za-z])NONE(?![A-Za-z])", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    /// sentinel separated by whitespace or punctuation, e.g. "NONE Sword Technique Power").
+    /// Deliberately case-SENSITIVE (no IgnoreCase): the leaked sentinel is always the literal
+    /// uppercase "NONE" copied verbatim from the prompt's format, whereas a genuine QC correction is
+    /// normal-cased English prose that can legitimately contain the ordinary lowercase word "none"
+    /// (e.g. "...declaring that in heaven and on earth, none but I am supreme..." - a real correction
+    /// that this regex used to misidentify as a protocol leak and discard as unparseable when it was
+    /// IgnoreCase).</summary>
+    private static readonly Regex StandaloneNoneRegex = new(@"(?<![A-Za-z])NONE(?![A-Za-z])", RegexOptions.Compiled);
 
     /// <summary>
     /// Catches "NONE" glued directly onto the end of the preceding word with no separator at all -
@@ -72,8 +78,10 @@ public static class QualityReviewWorkflow
     /// end-of-string only (not <see cref="StandaloneNoneRegex"/>'s both-sides word-boundary check,
     /// which this exact case fails on its left side) - safe because no real English word ends in
     /// "none", so any text ending in those four letters is this leak, never a legitimate word.
+    /// Case-sensitive for the same reason as <see cref="StandaloneNoneRegex"/> - the leak is always
+    /// literal uppercase "NONE".
     /// </summary>
-    private static readonly Regex TrailingNoneRegex = new(@"NONE\s*$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex TrailingNoneRegex = new(@"NONE\s*$", RegexOptions.Compiled);
 
     /// <summary>
     /// True when <paramref name="correctedText"/> contains leaked QC-protocol text rather than a
