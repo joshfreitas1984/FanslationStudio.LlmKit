@@ -31,12 +31,18 @@ TRANSLATION RULES:
 7. Translate idioms by meaning rather than literal wording.
 8. Maintain natural, grammatically correct English.
 9. Translate months into full English names.
-10. Chinese frequently omits subjects and objects. Resolve an omitted subject/object from the
-    surrounding dialogue and context - do not default it to "I", "me", "we", or "you" just because
-    the sentence is spoken dialogue. Preserve the actual speaker, subject, and object
-    relationships implied by context. If the subject is genuinely ambiguous, prefer a neutral
-    construction over inventing one. Never add information that is not supported by the source
-    text or the available context.
+10. Chinese frequently omits subjects and objects across consecutive sentences and dialogue lines.
+    Resolve each omission from the surrounding narrative/dialogue context - who is being
+    addressed, observed, examined, described, or acted upon - rather than mechanically carrying
+    forward the subject of the preceding sentence, or defaulting to "I", "me", "we", or "you" just
+    because the text is dialogue. Preserve the actual speaker, subject, and object relationships
+    the context implies, even across multiple consecutive lines. If context genuinely does not
+    establish a subject, prefer natural English that avoids an unsupported commitment (a neutral
+    or agentless construction) rather than arbitrarily choosing the speaker. For example,
+    "莫慌，让为师看看……\n还好还好，只是精疲力竭昏厥过去了。" should translate along the lines of
+    "Don't panic, let me take a look... / Thank goodness, thank goodness. She only passed out from
+    exhaustion." - not "...I just fainted from exhaustion.", which wrongly inherits the speaker as
+    the subject of the second line.
 
 SPECIAL RULES:
 - Text inside single quotes '...' must remain unchanged.

@@ -27,7 +27,7 @@ TRANSLATION RULES:
 - Translate idioms by meaning, not literal wording.
 - Maintain natural, grammatically correct English.
 - Translate months into full English names.
-- Chinese frequently omits subjects/objects; resolve them from surrounding dialogue and context - do not default an omitted subject to "I", "me", "we", or "you" just because the line is dialogue. Preserve the actual speaker/subject/object relationships implied by context. If the subject is genuinely ambiguous, prefer a neutral construction over inventing one. Never add information not supported by the source text or context.
+- Chinese frequently omits subjects/objects across consecutive sentences and dialogue lines; resolve each from surrounding narrative/dialogue context - who is addressed, observed, examined, described, or acted upon - rather than mechanically inheriting the previous sentence's subject or defaulting to "I", "me", "we", or "you" just because the line is dialogue. Preserve the actual speaker/subject/object relationships across multiple lines. If context doesn't establish a subject, use a neutral/agentless construction rather than guessing the speaker. E.g. "莫慌，让为师看看……\n还好还好，只是精疲力竭昏厥过去了。" → "Don't panic, let me take a look... / Thank goodness, thank goodness. She only passed out from exhaustion." (not "...I just fainted from exhaustion.", which wrongly inherits the speaker as subject).
 
 SPECIAL RULES:
 - Text inside single quotes '...' remains unchanged.

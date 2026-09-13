@@ -9,12 +9,16 @@ specifically for:
   given below).
 - Wrong language output, leftover Chinese characters, or gibberish.
 - Meaning that doesn't match the Chinese source, even if the English reads fluently on its own.
-- An omitted Chinese subject/object defaulted to "I", "me", "we", or "you" just because the line
-  is dialogue, when SOURCE and context establish a different speaker/subject/object - e.g. "还好
-  还好，只是精疲力竭昏厥过去了。" translated as "No need to worry, I just fainted from
-  exhaustion." when context shows the person who fainted is someone else being discussed, not the
-  speaker. Correct these to the subject/object context actually supports, or to a neutral
-  construction if it is genuinely ambiguous - never invent a subject unsupported by context.
+- An omitted Chinese subject/object translated by mechanically carrying forward the subject of a
+  preceding sentence, or defaulted to "I", "me", "we", or "you" just because the line is dialogue,
+  when SOURCE and the surrounding context (who is addressed, observed, examined, described, or
+  acted upon) establish a different speaker/subject/object. This can span multiple consecutive
+  dialogue lines - e.g. "莫慌，让为师看看……\n还好还好，只是精疲力竭昏厥过去了。" has the speaker
+  examining someone else, so the second line means roughly "Thank goodness, thank goodness. She
+  only passed out from exhaustion." - not "No need to worry, I just fainted from exhaustion.",
+  which wrongly inherits the speaker as subject. Correct these to the subject/object context
+  actually supports, or to a neutral construction if it is genuinely ambiguous - never invent a
+  subject unsupported by context.
 
 DO NOT flag or change:
 - Placeholder tokens in curly braces, e.g. {0}, {1} - these are restored automatically after your
@@ -41,9 +45,16 @@ GLOSSARY: if glossary terms are provided below and their Chinese term appears in
 corrected text (if any) MUST use the given English term - do not substitute a different
 translation for a name/term the glossary already fixes.
 
+CONSISTENCY: SCORE and CORRECTED must agree with each other. A low SCORE is itself a claim that
+TRANSLATION has a real, identifiable problem - if you give a low SCORE, CORRECTED must contain the
+actual fix, never NONE. Only output CORRECTED: NONE when SCORE itself reflects an accurate,
+natural translation with nothing left to fix.
+
 OUTPUT FORMAT - respond with EXACTLY these lines and nothing else:
 SCORE: <a number from 0 to 100, your confidence that TRANSLATION is accurate and well-constructed>
-CORRECTED: <a corrected version of TRANSLATION, or the literal word NONE if no correction is needed>
+CORRECTED: <a corrected version of TRANSLATION, or the literal word NONE if no correction is needed>.
+If your correction spans what was multiple \n-joined sentences, keep it all on this one line using
+the literal two-character "\n" exactly as SOURCE/TRANSLATION do - never a real line break.
 
 Do not explain your reasoning. Do not repeat the SOURCE. Do not add any other lines or commentary.
 If TRANSLATION is already good, output SCORE followed by "CORRECTED: NONE" - do not rewrite a

@@ -5,7 +5,7 @@ Examine the given Chinese text and its current English translation to assess acc
 - Incorrect or jumbled names/titles (should be in Pinyin, matching glossary terms if present).
 - Incorrect language output, Chinese leftover, or nonsensical text.
 - Misaligned meaning with the source despite fluent English.
-- An omitted subject/object defaulted to "I"/"me"/"we"/"you" just because the line is dialogue, when the source/context establish a different speaker/subject/object (e.g. "还好还好，只是精疲力竭昏厥过去了。" rendered as "No need to worry, I just fainted from exhaustion." when context shows someone else fainted). Correct to the subject/object context supports, or a neutral construction if genuinely ambiguous - never invent an unsupported subject.
+- An omitted subject/object translated by mechanically carrying forward the subject of a preceding sentence, or defaulted to "I"/"me"/"we"/"you" just because the line is dialogue, when the source/context (who's addressed, observed, examined, described, or acted upon) establish a different speaker/subject/object - can span multiple consecutive dialogue lines (e.g. "莫慌，让为师看看……\n还好还好，只是精疲力竭昏厥过去了。" - second line means roughly "Thank goodness, thank goodness. She only passed out from exhaustion.", not "No need to worry, I just fainted from exhaustion.", which wrongly inherits the speaker as subject). Correct to the subject/object context supports, or a neutral construction if genuinely ambiguous - never invent an unsupported subject.
 
 DO NOT alter:
 - Tokens in curly braces, e.g. {0}, {1} - replace automatically post-review as given.
@@ -14,8 +14,10 @@ DO NOT alter:
 
 GLOSSARY: If a glossary is provided and the Chinese term is in the source, use the provided English term in your corrected text; don't substitute for a fixed name/term.
 
+CONSISTENCY: SCORE and CORRECTED must agree. A low SCORE claims TRANSLATION has a real problem - if you give a low SCORE, CORRECTED must contain the actual fix, never NONE. Only output CORRECTED: NONE when SCORE itself reflects an accurate, natural translation with nothing to fix.
+
 FORMAT: Respond with these exact lines and nothing else:
 SCORE: <0-100 confidence score for the translation's accuracy and structure>
-CORRECTED: <corrected translation, or "NONE" if no correction is needed>
+CORRECTED: <corrected translation, or "NONE" if no correction is needed>. If it spans what was multiple \n-joined sentences, keep it on this one line using the literal two-character "\n" exactly as SOURCE/TRANSLATION do - never a real line break.
 
 No explanations, source repetition, or additional lines. If good, SCORE followed by "CORRECTED: NONE"; don't rewrite correct translations.

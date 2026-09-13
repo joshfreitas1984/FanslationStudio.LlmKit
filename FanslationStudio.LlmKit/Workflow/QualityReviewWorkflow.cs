@@ -30,14 +30,14 @@ public static class QualityReviewWorkflow
     private static readonly Regex ScoreLineRegex = new(@"^\s*SCORE:\s*(\d+)", RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Compiled);
 
     /// <summary>
-    /// Anchored to a single line (Multiline, no Singleline) so a response that restates or trails
-    /// text after its "CORRECTED: ..." line (e.g. the model repeating the label, or adding stray
-    /// commentary despite the prompt's "nothing else" instruction) doesn't get swept into the
-    /// captured group - see the correction-suffix-leak postmortem in DragonHierOverLlm's
-    /// docs/plans/quality-review-pass.md for a real example of the corrupted output this produced
-    /// before this fix (a stored QcTranslated like "Wealth in the millions CORRECTED: NONE").
+    /// Captures from "CORRECTED:" to the end of the response (Singleline - dot matches newline),
+    /// not just its first physical line - a multi-sentence correction is frequently joined with a
+    /// real line break rather than SOURCE/TRANSLATION's literal "\n", and an earlier single-line-
+    /// anchored version of this regex silently truncated those. <see cref="ContainsLeakedProtocolText"/>
+    /// still independently guards the original leak concern this regex was narrowed to prevent. See
+    /// "Postmortems" (bug #2) in `docs/quality-review-pass-architecture.md` (FanslationStudio.LlmKit).
     /// </summary>
-    private static readonly Regex CorrectedLineRegex = new(@"^\s*CORRECTED:\s*(.*)$", RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Compiled);
+    private static readonly Regex CorrectedLineRegex = new(@"^\s*CORRECTED:\s*(.*)$", RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Singleline | RegexOptions.Compiled);
 
     /// <summary>
     /// The literal protocol labels the QC prompt (<c>BaseQualityReviewPrompt.txt</c>, every model
@@ -130,9 +130,12 @@ public static class QualityReviewWorkflow
     /// <summary>
     /// The model's raw verdict for one (source text, current translation, applicable glossary
     /// prompt) triple, before any file/column-specific repair or validation is applied to it -
-    /// see <see cref="ReviewCacheKey"/>/<see cref="ReviewLlmCache"/>.
+    /// see <see cref="ReviewCacheKey"/>/<see cref="ReviewLlmCache"/>. Internal (not private) so a
+    /// consuming repo's regression tests can call <see cref="GetLlmVerdictAsync"/> directly against
+    /// a known SOURCE/TRANSLATION pair without needing a corpus row (see DragonHierOverLlm's
+    /// `"3g. QcOmittedSubjectRegression"` test).
     /// </summary>
-    private sealed record LlmVerdict(bool Success, int Score, string? CorrectedRawMasked);
+    internal sealed record LlmVerdict(bool Success, int Score, string? CorrectedRawMasked);
 
     /// <summary>
     /// SOURCE + CURRENT TRANSLATION + the glossary prompt built for them (see
@@ -287,7 +290,8 @@ public static class QualityReviewWorkflow
         using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(300) };
         var reviewCache = new ReviewLlmCache();
 
-        var consideredCount = 0;
+        var totalCount = workItems.Count;
+        var processedCount = 0;
         var reviewedCount = 0;
         var correctedCount = 0;
         var rejectedCount = 0;
@@ -297,17 +301,23 @@ public static class QualityReviewWorkflow
         {
             var outcome = await ReviewColumnAsync(config, modelConfig, client, item, reviewCache);
 
-            if (outcome == QcOutcome.Skipped)
-                return;
+            // Every dispatched work item counts toward processedCount, Skipped included, so the
+            // progress log's denominator reflects real "N left" progress rather than going quiet
+            // for long stretches whenever most columns are already-fresh Skips (see
+            // docs/quality-review-pass-architecture.md's "Progress logging" section).
+            var processed = Interlocked.Increment(ref processedCount);
 
-            var considered = Interlocked.Increment(ref consideredCount);
-            Interlocked.Increment(ref reviewedCount);
-            if (outcome == QcOutcome.Corrected) Interlocked.Increment(ref correctedCount);
-            if (outcome == QcOutcome.RejectedByGate) Interlocked.Increment(ref rejectedCount);
-            if (item.Anchor.FlaggedForQcReview) Interlocked.Increment(ref flaggedCount);
+            if (outcome != QcOutcome.Skipped)
+            {
+                Interlocked.Increment(ref reviewedCount);
+                if (outcome == QcOutcome.Corrected) Interlocked.Increment(ref correctedCount);
+                if (outcome == QcOutcome.RejectedByGate) Interlocked.Increment(ref rejectedCount);
+                if (item.Anchor.FlaggedForQcReview) Interlocked.Increment(ref flaggedCount);
+            }
 
-            if (considered % TranslationService.BatchlessLog == 0)
-                Console.WriteLine($"Quality review progress: {considered} reviewed so far (corrected: {correctedCount}, rejected by gate: {rejectedCount}, flagged: {flaggedCount})");
+            if (processed % TranslationService.BatchlessLog == 0 || processed == totalCount)
+                Console.WriteLine($"Quality review progress: {processed}/{totalCount} column(s) processed ({totalCount - processed} remaining) - " +
+                    $"reviewed: {reviewedCount}, corrected: {correctedCount}, rejected by gate: {rejectedCount}, flagged: {flaggedCount}");
 
             var buffered = Interlocked.Increment(ref item.File.BufferedRecords);
             if (buffered > TranslationService.BatchlessBuffer)
@@ -483,14 +493,13 @@ public static class QualityReviewWorkflow
             return QcOutcome.RejectedByGate;
         }
 
-        // Same reasoning as the Passed branch above - decided here, at review time, not deferred.
-        // A retry here discards correctedResult entirely (QcTranslated stays empty, from
-        // ResetQcState() above) rather than half-accepting it, exactly like a rule-violation retry
-        // never keeps the rejected text around either - it's not this attempt's job to accept
-        // anything it isn't confident enough to keep.
-        if (TryRetryForLowScore(config, anchor, effectiveTranslated, verdict.Score, item.File.TextFile))
-            return QcOutcome.Corrected;
-
+        // Accept immediately - do NOT re-run TryRetryForLowScore here. correctedResult has already
+        // cleared the validation gate above, so a low verdict.Score is just the model's own
+        // (frequently miscalibrated) confidence, not a sign the correction is wrong - re-rolling on
+        // it used to discard known-good fixes for a coin-flip re-answer. See "Postmortems" (bug #3)
+        // in `docs/quality-review-pass-architecture.md` (FanslationStudio.LlmKit).
+        anchor.QcRuleCheckFailureCount = 0;
+        anchor.QcRuleCheckFailureBaseline = string.Empty;
         anchor.QcStatus = QcStatus.Corrected;
         anchor.QcTranslated = correctedResult;
         anchor.FlaggedForQcReview = verdict.Score < config.QualityReview.MinAcceptableScore;
@@ -498,13 +507,20 @@ public static class QualityReviewWorkflow
     }
 
     /// <summary>
-    /// Shared by <see cref="ReviewColumnAsync"/>'s Passed and accepted-Corrected paths: decides
-    /// whether <paramref name="score"/> is worth another try, using the SAME retry budget
-    /// (<see cref="TranslationSplit.QcRuleCheckFailureCount"/>/<see cref="Configuration.QualityReviewConfig.MaxRuleCheckRetries"/>)
-    /// a rule violation gets - computed right here, at the point the score is actually known,
-    /// rather than deferred to <see cref="ApplyRulesToCurrentQcTranslated"/>, a separate step that
-    /// only runs as part of <see cref="RunBruteForce"/>. A plain <see cref="RunAsync"/> call must
-    /// leave <see cref="TranslationSplit.QcStatus"/> just as accurate as a brute-forced one.
+    /// Used only by <see cref="ReviewColumnAsync"/>'s Passed path (<c>verdict.CorrectedRawMasked ==
+    /// null</c> - the model found nothing worth correcting): decides whether <paramref name="score"/>
+    /// is worth another try, using the SAME retry budget (<see cref="TranslationSplit.QcRuleCheckFailureCount"/>/
+    /// <see cref="Configuration.QualityReviewConfig.MaxRuleCheckRetries"/>) a rule violation gets -
+    /// computed right here, at the point the score is actually known, rather than deferred to
+    /// <see cref="ApplyRulesToCurrentQcTranslated"/>, a separate step that only runs as part of
+    /// <see cref="RunBruteForce"/>. A plain <see cref="RunAsync"/> call must leave
+    /// <see cref="TranslationSplit.QcStatus"/> just as accurate as a brute-forced one.
+    ///
+    /// Deliberately NOT used by the accepted-Corrected path anymore - retrying there discarded an
+    /// already-validated correction for nothing but a low self-reported score (see "Postmortems"
+    /// bug #3 in `docs/quality-review-pass-architecture.md`, FanslationStudio.LlmKit). A Passed
+    /// column has nothing to lose by retrying here - there's no correction to discard, just a
+    /// re-review of the same already-accepted <see cref="TranslationSplit.Translated"/>.
     ///
     /// Returns true if the caller should retry: <paramref name="anchor"/> is already left
     /// <see cref="QcStatus.NotReviewed"/> (not fresh) for the next <see cref="RunAsync"/> pass to
@@ -548,7 +564,7 @@ public static class QualityReviewWorkflow
     /// <see cref="ReviewLlmCache"/>). File/column-specific repair and validation happen afterward,
     /// back in <see cref="ReviewColumnAsync"/>, once per column.
     /// </summary>
-    private static async Task<LlmVerdict> GetLlmVerdictAsync(
+    internal static async Task<LlmVerdict> GetLlmVerdictAsync(
         LlmConfig config,
         ModelExecutionConfig modelConfig,
         HttpClient client,
@@ -855,10 +871,15 @@ public static class QualityReviewWorkflow
         var failureReason = capsFailureReason ?? ruleResult.AllReasons.FirstOrDefault();
 
         if (failureReason == null)
-            // Structurally clean - if the score is still low, wake it up for a fresh review rather
-            // than deciding retry-vs-give-up here (see WakeUpIfLowScore's doc comment for why that
-            // decision now lives entirely in ReviewColumnAsync).
-            return WakeUpIfLowScore(config, anchor, textFile, alreadyChanged: changed);
+        {
+            // Structurally clean - mirrors ReviewColumnAsync's fix: a low QcQualityScore is not
+            // grounds to wake an already-validated Corrected column back up (see "Postmortems"
+            // bug #3, docs/quality-review-pass-architecture.md). Just tidy up the retry counters.
+            var hadFailureHistory = anchor.QcRuleCheckFailureCount != 0 || anchor.QcRuleCheckFailureBaseline != string.Empty;
+            anchor.QcRuleCheckFailureCount = 0;
+            anchor.QcRuleCheckFailureBaseline = string.Empty;
+            return (changed || hadFailureHistory, needsRetry: false, gaveUp: false);
+        }
 
         // Same underlying Translated as last time this column failed? Keep counting toward the
         // retry cap. Anything else (first failure ever, or Translated changed since - a
@@ -901,15 +922,20 @@ public static class QualityReviewWorkflow
     }
 
     /// <summary>
-    /// If <paramref name="anchor"/>'s current <see cref="TranslationSplit.QcQualityScore"/> is still
-    /// below <see cref="Configuration.QualityReviewConfig.MinAcceptableScore"/>, wakes it up
+    /// Only called for a <see cref="QcStatus.Passed"/> column now (see <see cref="ApplyRulesToQcColumn"/>'s
+    /// early return and its own Corrected-column branch) - a Corrected column's already-validated
+    /// QcTranslated is no longer woken up purely for a low score (see "Postmortems" bug #3,
+    /// docs/quality-review-pass-architecture.md). A Passed column has nothing of its own to lose by
+    /// retrying, though: if <paramref name="anchor"/>'s current
+    /// <see cref="TranslationSplit.QcQualityScore"/> is still below
+    /// <see cref="Configuration.QualityReviewConfig.MinAcceptableScore"/>, wakes it up
     /// (<see cref="QcStatus.NotReviewed"/>, not fresh) for a real review rather than deciding
-    /// retry-vs-give-up here itself - that decision now lives entirely in
-    /// <see cref="ReviewColumnAsync"/>'s <see cref="TryRetryForLowScore"/>, computed at the point
-    /// the score is actually known, so it's accurate regardless of which caller last touched this
-    /// column (a plain <see cref="RunAsync"/> call or this retroactive rule-check). Deliberately
-    /// does NOT touch <see cref="TranslationSplit.QcRuleCheckFailureCount"/>/<c>Baseline</c> itself
-    /// when waking it up - <see cref="TryRetryForLowScore"/> will pick up wherever the count already
+    /// retry-vs-give-up here itself - that decision lives in <see cref="ReviewColumnAsync"/>'s
+    /// <see cref="TryRetryForLowScore"/>, computed at the point the score is actually known, so it's
+    /// accurate regardless of which caller last touched this column (a plain <see cref="RunAsync"/>
+    /// call or this retroactive rule-check). Deliberately does NOT touch
+    /// <see cref="TranslationSplit.QcRuleCheckFailureCount"/>/<c>Baseline</c> itself when waking it
+    /// up - <see cref="TryRetryForLowScore"/> will pick up wherever the count already
     /// stands against the (unchanged) <see cref="TranslationSplit.Translated"/> baseline, so a
     /// persistently low-scoring column can't get an unlimited supply of fresh starts just because
     /// this retroactive check happened to run again. If the score is already fine, clears the
@@ -972,6 +998,48 @@ public static class QualityReviewWorkflow
 
                     if (anchor.QcStatus == QcStatus.FailedValidation)
                         anchor.ResetQcState();
+                }
+            }
+
+            await FileHelper.WriteAllTextWithRetryAsync(outputFile, serializer.Serialize(fileLines));
+        });
+    }
+
+    /// <summary>
+    /// Full do-over: wipes EVERY column's Qc* state back to <see cref="QcStatus.NotReviewed"/>
+    /// (<see cref="TranslationSplit.ResetQcState"/> plus <see cref="TranslationSplit.QcRuleCheckFailureCount"/>/
+    /// <c>Baseline</c>), regardless of its current status - unlike <see cref="ResetQcRetryLimits"/>
+    /// (only un-sticks stuck/<see cref="QcStatus.FailedValidation"/> columns) or
+    /// <see cref="ResetLeakedQcCorrections"/> (only repairs corrupted stored corrections), so the
+    /// next <see cref="RunAsync"/>/<see cref="RunBruteForce"/> pass reviews the entire corpus again
+    /// from scratch. Intentionally separate from those two, narrower resets rather than folded into
+    /// either - this is a much bigger, deliberate action (re-reviewing everything is the same
+    /// many-hours job a first full run was), not something that should run as a side effect of a
+    /// routine "un-stick what's stuck" pass.
+    ///
+    /// Use this after swapping the QC model or materially changing its prompt - <see
+    /// cref="Utility.QualityReviewHelpers.IsQcReviewFresh"/> only tracks whether the underlying
+    /// <see cref="TranslationSplit.Translated"/> changed, never whether the model/prompt that
+    /// produced an existing <see cref="QcStatus.Passed"/>/<see cref="QcStatus.Corrected"/> verdict
+    /// did, so a prompt/model change alone would otherwise never trigger a re-review of anything
+    /// already reviewed. See docs/quality-review-pass-architecture.md's "Postmortems" section for
+    /// the case that prompted adding this: a fix to the omitted-subject QC rule and to a low-score-
+    /// discard retry bug both mean a PRIOR verdict may be less trustworthy than its stored status
+    /// suggests, with nothing about the column's own text having changed to signal that.
+    /// </summary>
+    public static async Task ResetAllQcState(string workingDirectory, TextFileToSplit[] textFiles)
+    {
+        var serializer = YamlHelper.CreateSerializer();
+
+        await FileIteration.IterateTranslatedFilesInParallelAsync(workingDirectory, textFiles, async (outputFile, textFile, fileLines) =>
+        {
+            foreach (var line in fileLines)
+            {
+                foreach (var split in line.Splits)
+                {
+                    split.ResetQcState();
+                    split.QcRuleCheckFailureCount = 0;
+                    split.QcRuleCheckFailureBaseline = string.Empty;
                 }
             }
 

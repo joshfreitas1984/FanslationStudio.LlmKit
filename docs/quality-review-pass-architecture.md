@@ -117,19 +117,23 @@ authority for the whole column.
    left completely untouched (not recorded as a guess) — picked up again next run.
 7. `anchor.ResetQcState()` then records the fresh outcome:
    - No correction (or `CORRECTED: NONE`) → `QcStatus = Passed`, `QcQualityScore` set,
-     `QcReviewedText` set, `FlaggedForQcReview = score < minAcceptableScore`.
+     `QcReviewedText` set. If the score is below `minAcceptableScore`, `TryRetryForLowScore` retries
+     (bounded by `QcRuleCheckFailureCount`/`MaxRuleCheckRetries`) rather than accepting outright —
+     there's no correction here to lose by re-rolling, just the original `Translated`, which stays
+     untouched either way.
    - A correction is proposed → restored via `tokenReplacer.Restore`, then run through the
-     **validation gate**: `LineValidation.CheckTransalationSuccessful` (the exact same structural
-     checks — placeholder/tag preservation, banned phrases, length sanity — a normal translation
-     attempt goes through) plus a QC-specific **glossary-drift check**
-     (`CheckGlossaryDrift`): every glossary term whose `Raw`/`RawSimplified`/`RawTraditional`
-     matched in the raw source must still have its `Result` (or an allowed alternative) present in
-     the corrected text, or the correction is rejected outright regardless of what the generic
-     checks say.
-     - Gate passes → `QcStatus = Corrected`, `QcTranslated` = the validated correction.
-     - Gate fails → `QcStatus = FailedValidation`, `FlaggedForQcReview = true`,
-       `QcRejectedCorrection`/`QcFailureReason` recorded, **`Translated` is left untouched** — a
-       rejected correction is never applied.
+     **validation gate**: `TranslationWorkflow.EvaluateRules` (the same shared rule list a normal
+     translation attempt's result has to pass — glossary-drift, bad words, required-token/ellipsis
+     checks, structural validation) plus `CheckCapitalizationRegression` (QC-specific: rejects a
+     correction that flips normal casing to an all-caps "shout").
+     - Gate fails → `QcStatus = NotReviewed` (retried next run) or, once
+       `QcRuleCheckFailureCount` exceeds `MaxRuleCheckRetries`, `QcStatus = FailedValidation`
+       (terminal, `FlaggedForQcReview = true`) — either way `QcRejectedCorrection`/`QcFailureReason`
+       recorded and **`Translated` is left untouched**.
+     - Gate passes → **accepted immediately**: `QcStatus = Corrected`, `QcTranslated` = the
+       validated correction, `FlaggedForQcReview = score < minAcceptableScore`. Critically, a low
+       score here does **not** trigger another retry — see "Postmortems" below for why re-rolling a
+       validated correction on a low self-reported score was itself a bug, not a safeguard.
 
 `GetFlaggedQcReviews(workingDirectory, textFiles)` — reporting helper mirroring
 `GameFileHandlingBase.GetFailedTranslations`'s reporting shape, scanning for `FlaggedForQcReview`
@@ -231,6 +235,27 @@ Register it on the same `GameHooks` instance already passed to every `QualityRev
 `TranslationWorkflow` call site (`CustomPostRepair`/`CustomColumnRepair`/`CustomColumnValidator`
 live there too) - no separate wiring needed.
 
+## Resetting Qc state
+
+Three levels, narrowest to broadest:
+
+- **`ResetQcRetryLimits`** (`"3d"`) — clears every column's accumulated retry counters and gives any
+  column currently parked at `FailedValidation` a fresh review. Routine: run after fixing whatever
+  caused a persistent rule violation (a false-positive bad word, a loosened glossary rule).
+- **`ResetLeakedQcCorrections`** (`"3e"`) — resets only columns whose stored correction/rejected-
+  correction contains leaked QC-protocol text (see `ContainsLeakedProtocolText`). Routine, safe to
+  run any time - a no-op once the corpus is clean.
+- **`ResetAllQcState`** (`"3h"`) — wipes **every** column's Qc* state back to `NotReviewed`
+  regardless of current status, so the next full pass reviews the entire corpus again from scratch.
+  NOT routine - this is a deliberate full do-over, the same many-hours cost as an original full run.
+  Use it when the QC model or prompt has changed enough that already-recorded `Passed`/`Corrected`
+  verdicts can no longer be trusted: `IsQcReviewFresh` only tracks whether `Translated` changed,
+  never whether the model/prompt that produced an existing verdict did, so swapping models alone
+  never triggers any re-review on its own. See "Postmortems" below for the case that prompted adding
+  this - a `Passed` column reviewed before the omitted-subject prompt rule existed, or a `Corrected`
+  column that may have been through the low-score-discard bug, both look identical (and equally
+  "trustworthy") to a freshness check that only looks at whether the underlying translation changed.
+
 ## Configuration (`Configuration/QualityReviewConfig.cs`)
 
 `LlmConfig.QualityReview` (`qualityReview:` in `Config.yaml`):
@@ -274,3 +299,85 @@ downstream repo's numbered `"3a. RunQualityReviewPassSample"` test fact and the 
 run before committing to a full-corpus pass" section for the full methodology and reasoning
 (expected corpus size, why a full run is a many-hour job regardless of model choice, what to look
 for in the sample's results).
+
+### Progress logging
+
+`RunAsync` logs `"Quality review: N column(s) ... to consider"` up front, then, every
+`TranslationService.BatchlessLog` columns *processed* (not just reviewed — every work item counts,
+`Skipped` included) and again on the very last one: `"Quality review progress: {processed}/{total}
+column(s) processed ({remaining} remaining) - reviewed: …, corrected: …, rejected by gate: …,
+flagged: …"`. Using every processed item (not just ones that made a real LLM call) as the
+denominator matters on a re-run over a large corpus: most columns are `Skipped` (already fresh),
+so gating the log on real reviews alone would go quiet for long stretches even while the pass is
+actively working through the file — this way the "remaining" count is always real wall-clock
+progress, not just LLM-call progress.
+
+## Postmortems
+
+Real bugs found and fixed against a genuine local-model run (2026-09), kept here because each one
+looks like a different kind of problem on the surface (a prompt issue, a parsing issue, a retry
+policy issue) and the fix for each lives in a different layer — worth knowing which is which before
+assuming a low-quality QC result must be a model-capability limit.
+
+### 1. Omitted-subject/object mistranslation surviving QC
+
+Chinese frequently omits the subject/object of a sentence, resolved only by surrounding dialogue
+context. The primary translation pipeline translates each fragment/split independently (see
+`TranslateSplitAsync`), so a fragment like `"还好还好，只是精疲力竭昏厥过去了。"` (no subject stated)
+translated in isolation from the preceding line has no way to know the subject is someone else, not
+the speaker — producing e.g. `"No need to worry, I just fainted from exhaustion."` when the
+speaker is actually examining another character. QC reviews the whole reconstructed multi-line
+cell (see "review unit" above), so it *does* have the context to catch and fix this — but the base
+prompts needed an explicit rule to reliably do so. Fix: `BaseSystemPrompt.txt` and
+`BaseQualityReviewPrompt.txt` (every model family) gained a rule to resolve an omitted subject/
+object from context rather than defaulting to "I"/"me"/"we"/"you" for dialogue or mechanically
+inheriting the preceding sentence's subject, and to prefer a neutral construction over inventing one
+when context is genuinely ambiguous — never adding unsupported information.
+
+### 2. `CorrectedLineRegex` truncating a multi-sentence correction
+
+Even with the prompt fixed, the model's proposed correction for a multi-line cell often joined its
+sentences with a real line break rather than the literal two-character `\n` escape
+SOURCE/TRANSLATION use. `CorrectedLineRegex` was `Multiline` without `Singleline`, so `(.*)$`
+stopped at the first physical line break — silently truncating the captured correction to its first
+sentence, which then failed downstream validation as missing content regardless of how well the
+model had actually resolved the translation. Fix: added `RegexOptions.Singleline`, so the capture
+runs to the end of the response — `CORRECTED:` is always the last line of the prompt's two-line
+output format, so nothing legitimate follows it; `ContainsLeakedProtocolText` still independently
+guards the original leak concern (a model restating protocol text) this regex was originally
+narrowed to prevent. `BaseQualityReviewPrompt.txt` also now asks the model to keep `CORRECTED` on
+one physical line using the same literal `\n` convention, as a belt-and-suspenders nudge — not
+load-bearing now that the parser tolerates either.
+
+### 3. A validated correction discarded for a low self-reported score
+
+Once both bugs above were fixed, a model would still reliably: (a) produce a genuinely correct fix,
+(b) have that fix pass the validation gate, but (c) rate its own answer low (30-60/100) anyway.
+`ReviewColumnAsync`'s acceptance path used to call the same `TryRetryForLowScore` the no-correction
+(`Passed`) path uses, which discards a low-scoring result and retries from scratch — for an
+already-validated correction, that meant throwing away a known-good fix and re-rolling, converging
+(if at all) only once `QcRuleCheckFailureCount` exceeded `MaxRuleCheckRetries`, at which point
+whatever that *last* attempt happened to produce got force-accepted — a coin flip between the same
+good fix and a hedged `CORRECTED: NONE` that ships the original mistranslation. Fix: a correction
+that clears the validation gate is now accepted immediately regardless of score (`FlaggedForQcReview`
+still surfaces a genuinely low-confidence case for a human) — see `ReviewColumnAsync`'s final
+acceptance block and `ApplyRulesToQcColumn`'s mirrored branch for an already-`Corrected` column.
+`TryRetryForLowScore`/`WakeUpIfLowScore` retry-on-low-score behavior is now exclusively for the
+`Passed` path, where there's nothing to lose by retrying (the original `Translated` stays either
+way). Also added a `BaseQualityReviewPrompt.txt` `CONSISTENCY` rule (a low `SCORE` must come with an
+actual `CORRECTED` fix, never `NONE`) as a belt-and-suspenders prompt-level nudge against the same
+self-contradiction, though the retry-policy fix is what actually closes the bug.
+
+### Regression coverage
+
+`Tests/TranslationWorkflowTests.cs`'s `"3g. QcOmittedSubjectRegression"` (DragonHierOverLlm repo)
+calls `QualityReviewWorkflow.GetLlmVerdictAsync` (internal, exposed to that repo's `Tests` project
+via `[assembly: InternalsVisibleTo("Tests")]` in `AssemblyInfo.cs`) directly against a fixed,
+known-bad SOURCE/TRANSLATION pair from bug #1 above — independent of corpus state, so it survives
+corpus edits/repackaging and needs no `ResetQcRetryLimits`/`ResetQcState` dance to re-run. It reads
+`Config.yaml`'s `qualityReview.modelName` at run time, so swapping which model the project uses for
+QC automatically re-validates this exact regression case against the new model with zero test
+changes. Samples the model a few times (temperature is low but non-zero) and asserts no sample
+reproduces the first-person mistranslation or the low-score-with-no-correction inconsistency from
+bug #3 — a single call could get a differently-worded correct answer or, rarely, a still-bad one,
+so any one sample reproducing the bug is treated as a real regression rather than averaged away.
