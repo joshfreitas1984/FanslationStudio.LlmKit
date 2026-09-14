@@ -432,6 +432,20 @@ public static class TranslationService
         public readonly Stopwatch Stopwatch = Stopwatch.StartNew();
         public int RecordsProcessed;
         public int BufferedRecords;
+
+        /// <summary>
+        /// How many of THIS file's work items are still to be dispatched this run - set once (from
+        /// the flattened <c>workItems</c> pool, so it reflects exactly what's actually going to run)
+        /// and decremented as each of the file's items finishes, regardless of whether it actually
+        /// needed translation. When this hits 0, nothing will touch the file again this run, so
+        /// <see cref="TranslateViaLlmAsyncPooled"/> flushes it immediately instead of waiting for
+        /// every OTHER file in the shared pool to drain too - see that method's finally block.
+        /// Without this, a small file that finishes early (never crosses <c>BatchlessBuffer</c> on
+        /// its own) sits unwritten in memory for the rest of a potentially multi-hour run, exactly as
+        /// exposed to a mid-run crash/kill as a file still being actively translated - the same gap
+        /// <c>QcFileState.PendingItems</c> was added to close in the quality-review pass.
+        /// </summary>
+        public int PendingItems;
     }
 
     /// <summary>
@@ -525,6 +539,11 @@ public static class TranslationService
 
         Console.WriteLine($"Pooled translation: {workItems.Count} unique split(s) across {fileStates.Count} file(s) ({pendingCount} need translation), max concurrency {maxConcurrency}");
 
+        // Set once from the final flattened pool, so it reflects exactly what this run will
+        // dispatch - see PooledFileState.PendingItems.
+        foreach (var fileGroup in workItems.GroupBy(wi => wi.File))
+            fileGroup.Key.PendingItems = fileGroup.Count();
+
         // Progress-logging state: lets each "Processed: N" line report how long that interval of
         // BatchlessLog items took and how many retry/correction round-trips happened in it, instead
         // of just a running total - this is what shows whether a run is slow-to-start (cold cache,
@@ -538,6 +557,12 @@ public static class TranslationService
         await Parallel.ForEachAsync(workItems, new ParallelOptions { MaxDegreeOfParallelism = maxConcurrency }, async (item, _) =>
         {
             var (file, split) = item;
+
+            // Wraps the whole per-item body (including every early return below) so the
+            // PendingItems decrement/last-item flush in the finally block always runs exactly once
+            // per dispatched item, regardless of which path this item takes.
+            try
+            {
 
             if (string.IsNullOrEmpty(split.Text) || !split.SafeToTranslate)
                 return;
@@ -630,6 +655,27 @@ public static class TranslationService
             else if (!cacheHit && !isFileRestricted && split.Text.Length <= TranslationCacheMaxChars)
                 //Two translations could be doing this at the same time
                 translationCache.TryAdd(split.Text, split.Translated);
+
+            }
+            finally
+            {
+                // Last item dispatched for this file this run (see PooledFileState.PendingItems) -
+                // nothing else will touch it, so flush now instead of leaving it in memory until
+                // every OTHER file in the shared pool drains too (the final per-file loop below).
+                // Counted down regardless of outcome/early-return above (an already-translated or
+                // unsafe-to-translate last item still means the file is done) - and checked even when
+                // the buffer-threshold branch above just flushed it; a redundant write of unchanged
+                // content is harmless.
+                if (Interlocked.Decrement(ref file.PendingItems) == 0)
+                {
+                    lock (file.WriteLock)
+                    {
+                        PropagateDuplicates(file, forceRetranslation, config, ref totalRecordsProcessed);
+                        FileHelper.WriteAllTextWithRetry(file.OutputFile, file.Serializer.Serialize(file.FileLines));
+                        file.BufferedRecords = 0;
+                    }
+                }
+            }
         });
 
         // Final pass per file: duplicates may still remain if a file's last flush happened before

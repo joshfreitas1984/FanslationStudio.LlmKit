@@ -397,11 +397,24 @@ public static class QualityReviewWorkflow
                     var currentIoMs = Volatile.Read(ref timing.IoMs);
                     var currentIoWrites = Volatile.Read(ref timing.IoWrites);
 
+                    // Snapshotted the same way as timing.* above, even though these are plain int
+                    // fields (not long) mutated elsewhere via Interlocked.Increment from concurrent
+                    // workers - Volatile.Read is what actually guarantees this thread observes the
+                    // latest value rather than a stale cached one, the same guarantee the writer side
+                    // gets for free from Interlocked.Increment. Using them directly (as before) is
+                    // very unlikely to misbehave on .NET's current runtime, but relying on that
+                    // incidental atomicity instead of an explicit acquire-style read is exactly the
+                    // kind of inconsistency worth closing while touching this block.
+                    var currentReviewedCount = Volatile.Read(ref reviewedCount);
+                    var currentCorrectedCount = Volatile.Read(ref correctedCount);
+                    var currentRejectedCount = Volatile.Read(ref rejectedCount);
+                    var currentFlaggedCount = Volatile.Read(ref flaggedCount);
+
                     var intervalLlmMs = currentLlmMs - lastLogLlmMs;
                     var intervalLlmCalls = currentLlmCalls - lastLogLlmCalls;
                     var intervalIoMs = currentIoMs - lastLogIoMs;
                     var intervalIoWrites = currentIoWrites - lastLogIoWrites;
-                    var intervalReviewed = reviewedCount - lastLogReviewedCount;
+                    var intervalReviewed = currentReviewedCount - lastLogReviewedCount;
 
                     // The three numbers worth actually comparing run-to-run/setting-to-setting
                     // (raw "interval took Xms" isn't, since it moves with batch composition - a
@@ -423,7 +436,7 @@ public static class QualityReviewWorkflow
 
                     Console.WriteLine(
                         $"Quality review progress: {processed}/{totalCount} column(s) processed ({totalCount - processed} remaining) - " +
-                        $"reviewed: {reviewedCount}, corrected: {correctedCount}, rejected by gate: {rejectedCount}, flagged: {flaggedCount} | " +
+                        $"reviewed: {currentReviewedCount}, corrected: {currentCorrectedCount}, rejected by gate: {currentRejectedCount}, flagged: {currentFlaggedCount} | " +
                         $"interval took {intervalMs}ms - llm: {intervalLlmCalls} call(s)/{intervalLlmMs}ms, io: {intervalIoWrites} write(s)/{intervalIoMs}ms " +
                         $"(elapsed: {elapsedNow}ms) | avg {avgLlmMs:F0}ms/call, {effectiveConcurrency:F1}x effective concurrency, {reviewedPerSecond:F2} reviewed/s");
 
@@ -432,7 +445,7 @@ public static class QualityReviewWorkflow
                     lastLogLlmCalls = currentLlmCalls;
                     lastLogIoMs = currentIoMs;
                     lastLogIoWrites = currentIoWrites;
-                    lastLogReviewedCount = reviewedCount;
+                    lastLogReviewedCount = currentReviewedCount;
                 }
             }
 
