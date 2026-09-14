@@ -1389,7 +1389,7 @@ public static class QualityReviewWorkflow
     /// review would fail to match against a since-changed <c>Translated</c> (see
     /// <see cref="Utility.QualityReviewHelpers.IsQcReviewFresh"/>).
     /// </summary>
-    public record FlaggedQcReview(string FilePath, string Text, string QcReviewedText, string QcTranslated, char? Ok, string? RejectedCorrection, string? Reason, int? Score);
+    public record FlaggedQcReview(string FilePath, string Text, string QcReviewedText, string QcTranslated, string? RejectedCorrection, string? Reason, int? Score);
 
     public static async Task<List<FlaggedQcReview>> GetFlaggedQcReviews(string workingDirectory, TextFileToSplit[] textFiles)
     {
@@ -1424,7 +1424,6 @@ public static class QualityReviewWorkflow
                         rawText,
                         anchor.QcReviewedText,
                         anchor.QcTranslated,
-                        null,
                         string.IsNullOrEmpty(anchor.QcRejectedCorrection) ? null : anchor.QcRejectedCorrection,
                         string.IsNullOrEmpty(anchor.QcFailureReason) ? null : anchor.QcFailureReason,
                         anchor.QcQualityScore));

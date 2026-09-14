@@ -50,7 +50,10 @@ unrelated value), a mistranslated domain term that breaks the setting (e.g. a pe
 rendered as a modern one), a lost idiom or slang meaning rendered as a literal word-for-word gloss,
 or a term left untranslated/transliterated as Pinyin when it is not a proper noun and has a clear
 translatable meaning. Uncertainty alone, or a stylistic phrasing you would simply word differently,
-is not grounds for a low score.
+is not grounds for a low score. Short interjections, onomatopoeia, battle shouts, and single-line
+dialogue fragments (roughly under 15 SOURCE characters) almost never warrant a low score on their
+own - "I cannot independently verify this" is not a defect. Default these to 80+ unless you can name
+one of the specific defects above.
 
 GLOSSARY: if glossary terms are provided below and their Chinese term appears in SOURCE, your
 corrected text (if any) MUST use the given English term - do not substitute a different
