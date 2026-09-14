@@ -237,7 +237,7 @@ live there too) - no separate wiring needed.
 
 ## Resetting Qc state
 
-Three levels, narrowest to broadest:
+Four levels, narrowest to broadest:
 
 - **`ResetQcRetryLimits`** — clears every column's accumulated retry counters and gives any
   column currently parked at `FailedValidation` a fresh review. Routine: run after fixing whatever
@@ -245,6 +245,17 @@ Three levels, narrowest to broadest:
 - **`ResetLeakedQcCorrections`** — resets only columns whose stored correction/rejected-
   correction contains leaked QC-protocol text (see `ContainsLeakedProtocolText`). Routine, safe to
   run any time - a no-op once the corpus is clean.
+- **`ResetLowScoreQcState(workingDirectory, textFiles, hooks, scoreThreshold: null)`** — resets
+  only columns whose current `QcQualityScore` is below `scoreThreshold` (default:
+  `qualityReview.minAcceptableScore`), leaving every already-accepted column with an acceptable
+  score untouched. Use this after changing how the score is judged - tuning
+  `BaseQualityReviewPrompt.txt`'s scoring rubric, or switching `qualityReview.modelName` to a model
+  that scores on a different scale - so columns sitting below threshold under the OLD calculation
+  get a genuinely fresh score under the new one, without paying for a full corpus re-review. A
+  rejected-correction column (`Reason` set) is never touched here - its `QcQualityScore` is already
+  `null` (see the `RejectedByGate` branch in `ReviewColumnAsync`), so it falls outside the score
+  comparison entirely; use `ResetQcRetryLimits` for those. Pass a wider `scoreThreshold` (e.g. 101)
+  if the change is broad enough that even comfortably-passing scores are suspect.
 - **`ResetAllQcState`** — wipes **every** column's Qc* state back to `NotReviewed`
   regardless of current status, so the next full pass reviews the entire corpus again from scratch.
   NOT routine - this is a deliberate full do-over, the same many-hours cost as an original full run.

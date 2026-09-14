@@ -1323,6 +1323,63 @@ public static class QualityReviewWorkflow
     }
 
     /// <summary>
+    /// Resets only columns whose current <see cref="TranslationSplit.QcQualityScore"/> is below
+    /// <paramref name="scoreThreshold"/> (default: <c>qualityReview.minAcceptableScore</c>) back to
+    /// <see cref="QcStatus.NotReviewed"/> for a genuinely fresh review - narrower than
+    /// <see cref="ResetAllQcState"/> (leaves every already-accepted column with an acceptable score
+    /// untouched, so a re-run only spends LLM calls on the columns actually worth another look) and
+    /// unrelated to <see cref="ResetQcRetryLimits"/>/<see cref="ResetLeakedQcCorrections"/> (those
+    /// un-stick a validation-gate rejection or a protocol-text leak, not a plain low score). A column
+    /// with <see cref="TranslationSplit.QcFailureReason"/> set (a rejected correction -
+    /// <see cref="TranslationSplit.QcQualityScore"/> is already cleared to <c>null</c> for those, see
+    /// the <c>RejectedByGate</c> branch in <see cref="ReviewColumnAsync"/>) is never touched here,
+    /// since <c>QcQualityScore.HasValue</c> is false for it - use <see cref="ResetQcRetryLimits"/>
+    /// for those instead.
+    ///
+    /// Intended for the case a project changes how it judges the QC model's score - e.g. tuning
+    /// <c>BaseQualityReviewPrompt.txt</c>'s scoring rubric, or switching <c>qualityReview.modelName</c>
+    /// to a model that scores on a different scale - so every column currently sitting at a low score
+    /// under the OLD calculation gets a genuinely fresh score under the new one, rather than keeping
+    /// a stale score around indefinitely (nothing else re-triggers a review just because the scoring
+    /// approach changed - see <see cref="Utility.QualityReviewHelpers.IsQcReviewFresh"/>, which only
+    /// tracks whether the underlying translated text changed). <paramref name="scoreThreshold"/> can
+    /// be widened past the configured <c>minAcceptableScore</c> if the change is broad enough that
+    /// even comfortably-passing scores are suspect (e.g. pass 101 to reset every scored column
+    /// regardless of its old score) - see <see cref="ResetAllQcState"/> instead if the goal is a full
+    /// from-scratch re-review including columns that were never scored at all (a rejected correction,
+    /// or a column still <see cref="QcStatus.NotReviewed"/>).
+    /// </summary>
+    public static async Task ResetLowScoreQcState(string workingDirectory, TextFileToSplit[] textFiles, GameHooks? hooks = null, int? scoreThreshold = null)
+    {
+        var config = ConfigurationExtensions.GetConfiguration(workingDirectory, hooks);
+        var threshold = scoreThreshold ?? config.QualityReview.MinAcceptableScore;
+        var serializer = YamlHelper.CreateSerializer();
+
+        await FileIteration.IterateTranslatedFilesInParallelAsync(workingDirectory, textFiles, async (outputFile, textFile, fileLines) =>
+        {
+            var resetCount = 0;
+
+            foreach (var line in fileLines)
+            {
+                foreach (var columnGroup in line.Splits.GroupBy(s => s.Split))
+                {
+                    var anchor = columnGroup.OrderBy(s => s.SubIndex).FirstOrDefault(f => f.SubIndex == 0) ?? columnGroup.First();
+
+                    if (anchor.QcQualityScore is not int score || score >= threshold)
+                        continue;
+
+                    Console.WriteLine($"Quality review cleanup: '{textFile.Path}' split {anchor.Split} scored {score} (below {threshold}) under the old scoring - resetting for re-review.");
+                    anchor.ResetQcState();
+                    resetCount++;
+                }
+            }
+
+            if (resetCount > 0)
+                await FileHelper.WriteAllTextWithRetryAsync(outputFile, serializer.Serialize(fileLines));
+        });
+    }
+
+    /// <summary>
     /// Mirrors <see cref="GameFileHandlingBase.GetFailedTranslations"/>'s reporting shape, scoped to
     /// QC rejections/flags instead of translation failures - lets a human reviewer pull every column
     /// currently flagged for a look (either a rejected correction, or a low quality score) in one
