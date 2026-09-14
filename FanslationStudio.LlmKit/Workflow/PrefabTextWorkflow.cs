@@ -109,7 +109,7 @@ public static class PrefabTextWorkflow
     /// GameFileHandling.PackageFinalTranslationAsync). A trivial (non-templated) line falls back to
     /// its single split's original text under the same conditions.
     /// </summary>
-    public static async Task<(int Passed, int Failed)> PackagePrefabTextAsync(string workingDirectory, TextFileToSplit textFile)
+    public static async Task<(int Passed, int QcRejected, int RawFallback)> PackagePrefabTextAsync(string workingDirectory, TextFileToSplit textFile)
     {
         var outputPath = $"{workingDirectory}/Mod";
         Directory.CreateDirectory(outputPath);
@@ -118,13 +118,14 @@ public static class PrefabTextWorkflow
 
         var results = new List<PrefabTextResult>();
         var passedCount = 0;
-        var failedCount = 0;
+        var qcRejectedCount = 0;
+        var rawFallbackCount = 0;
 
         await FileIteration.IterateTranslatedFilesAsync(workingDirectory, [textFile], async (_, _, fileLines) =>
         {
             foreach (var line in fileLines)
             {
-                var (result, failed) = ReconstructLine(line, textFile, minAcceptableScore);
+                var (result, reason) = ReconstructLine(line, textFile, minAcceptableScore);
                 if (result == null)
                     continue;
 
@@ -133,10 +134,18 @@ public static class PrefabTextWorkflow
 
                 results.Add(new PrefabTextResult(line.Raw, result));
 
-                if (failed)
-                    failedCount++;
-                else
-                    passedCount++;
+                switch (reason)
+                {
+                    case PackagingFailureReason.QcRejected:
+                        qcRejectedCount++;
+                        break;
+                    case PackagingFailureReason.RawFallback:
+                        rawFallbackCount++;
+                        break;
+                    default:
+                        passedCount++;
+                        break;
+                }
             }
 
             await Task.CompletedTask;
@@ -145,22 +154,22 @@ public static class PrefabTextWorkflow
         var serializer = YamlHelper.CreateSerializer();
         await FileHelper.WriteAllTextWithRetryAsync($"{outputPath}/{textFile.Path}.yaml", serializer.Serialize(results));
 
-        return (passedCount, failedCount);
+        return (passedCount, qcRejectedCount, rawFallbackCount);
     }
 
     /// <summary>
-    /// Reconstructs a single line's packaged output. The returned <c>Failed</c> flag reflects
-    /// whether the line fell back to its original raw text because a fragment/split was
-    /// unsafe, flagged for retranslation, missing its translation, or (see
-    /// docs/plans/quality-review-pass.md) scored below <paramref name="minAcceptableScore"/> by
-    /// the quality review pass - this must be reported by the caller as an actual failure (see
-    /// <see cref="PackagePrefabTextAsync"/>) rather than silently folded into the same bucket as a
-    /// genuinely successful line, since both cases otherwise look identical in the packaged
-    /// raw/result YAML. The underlying <c>Translated</c>/<c>QcTranslated</c>/<c>QcQualityScore</c>
+    /// Reconstructs a single line's packaged output. The returned <see cref="PackagingFailureReason"/>
+    /// reflects whether/why the line fell back to its original raw text: <c>QcRejected</c> when (see
+    /// docs/plans/quality-review-pass.md) it scored below <paramref name="minAcceptableScore"/> by
+    /// the quality review pass, <c>RawFallback</c> when a fragment/split was unsafe, flagged for
+    /// retranslation, or missing its translation - this must be reported by the caller as an actual
+    /// failure (see <see cref="PackagePrefabTextAsync"/>) rather than silently folded into the same
+    /// bucket as a genuinely successful line, since all three cases otherwise look identical in the
+    /// packaged raw/result YAML. The underlying <c>Translated</c>/<c>QcTranslated</c>/<c>QcQualityScore</c>
     /// values are never modified here regardless of outcome - this only decides what gets written
     /// to <c>Files/Mod</c>, never what's kept in <c>Files/Converted</c>.
     /// </summary>
-    private static (string? Result, bool Failed) ReconstructLine(TranslationLine line, TextFileToSplit textFile, int minAcceptableScore)
+    private static (string? Result, PackagingFailureReason Reason) ReconstructLine(TranslationLine line, TextFileToSplit textFile, int minAcceptableScore)
     {
         var template = line.Templates.FirstOrDefault(t => t.Split == 0);
         if (template != null)
@@ -178,43 +187,43 @@ public static class PrefabTextWorkflow
             var qcFresh = anchor != null && QualityReviewHelpers.IsQcReviewFresh(anchor, template, fragments);
 
             if (qcFresh && anchor!.QcQualityScore is int score && score < minAcceptableScore)
-                return (line.Raw, true);
+                return (line.Raw, PackagingFailureReason.QcRejected);
 
             if (qcFresh && !string.IsNullOrEmpty(anchor!.QcTranslated))
-                return (anchor.QcTranslated, false);
+                return (anchor.QcTranslated, PackagingFailureReason.None);
 
             var translatedFragments = new List<string>();
 
             foreach (var fragment in fragments)
             {
                 if (!textFile.PackageOutput || fragment.FlaggedForRetranslation || !fragment.SafeToTranslate)
-                    return (line.Raw, true);
+                    return (line.Raw, PackagingFailureReason.RawFallback);
 
                 if (!string.IsNullOrEmpty(fragment.Translated))
                     translatedFragments.Add(fragment.Translated);
                 else if (!string.IsNullOrEmpty(fragment.Text))
-                    return (line.Raw, true);
+                    return (line.Raw, PackagingFailureReason.RawFallback);
                 else
                     translatedFragments.Add(fragment.Text);
             }
 
-            return (CompoundFieldSplitter.Reconstruct(template.Template, translatedFragments), false);
+            return (CompoundFieldSplitter.Reconstruct(template.Template, translatedFragments), PackagingFailureReason.None);
         }
 
         var split = line.Splits.FirstOrDefault(s => s.Split == 0);
         if (split == null)
-            return (null, false);
+            return (null, PackagingFailureReason.None);
 
         var plainQcFresh = QualityReviewHelpers.IsQcReviewFresh(split, null, [split]);
 
         if (plainQcFresh && split.QcQualityScore is int plainScore && plainScore < minAcceptableScore)
-            return (split.Text, true);
+            return (split.Text, PackagingFailureReason.QcRejected);
 
         var effectiveTranslated = plainQcFresh && !string.IsNullOrEmpty(split.QcTranslated) ? split.QcTranslated : split.Translated;
 
         if (!string.IsNullOrEmpty(effectiveTranslated) && !split.FlaggedForRetranslation && split.SafeToTranslate)
-            return (effectiveTranslated, false);
+            return (effectiveTranslated, PackagingFailureReason.None);
 
-        return (split.Text, true);
+        return (split.Text, PackagingFailureReason.RawFallback);
     }
 }

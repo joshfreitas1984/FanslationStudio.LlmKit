@@ -144,7 +144,7 @@ public static class JsonGameDataWorkflow
     /// not the whole object - since one JSON object commonly holds many independent translatable
     /// fields where one failing must not discard translations already accepted for the rest.
     /// </summary>
-    public static async Task<(int Passed, int Failed)> PackageAsync(string workingDirectory, TextFileToSplit textFile)
+    public static async Task<(int Passed, int QcRejected, int RawFallback)> PackageAsync(string workingDirectory, TextFileToSplit textFile)
     {
         var outputPath = $"{workingDirectory}/Mod";
         Directory.CreateDirectory(outputPath);
@@ -153,7 +153,7 @@ public static class JsonGameDataWorkflow
 
         var outputArray = new JsonArray();
         var passedCount = 0;
-        var failedCount = 0;
+        var rawFallbackCount = 0;
 
         await FileIteration.IterateTranslatedFilesAsync(workingDirectory, [textFile], async (_, _, fileLines) =>
         {
@@ -178,7 +178,7 @@ public static class JsonGameDataWorkflow
 
                     if (!ok)
                     {
-                        failedCount++;
+                        rawFallbackCount++;
                         continue; // leave the field at its original (already-parsed) raw value
                     }
 
@@ -199,7 +199,10 @@ public static class JsonGameDataWorkflow
         };
         FileHelper.WriteAllTextWithRetry($"{outputPath}/{textFile.Path}", outputArray.ToJsonString(jsonOptions));
 
-        return (passedCount, failedCount);
+        // A field never fails purely for a low QC score - see PackageField's useQcTranslated check,
+        // which just skips the QcTranslated correction and falls through to plain fragment
+        // translation instead - so every failure counted here is a RawFallback.
+        return (passedCount, 0, rawFallbackCount);
     }
 
     private static (bool Ok, string Text) PackageField(

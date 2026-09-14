@@ -784,48 +784,85 @@ public static class QualityReviewWorkflow
             LlmHelpers.GenerateUserPrompt(userPrompt.ToString()),
         };
 
-        string llmResponse;
-        try
+        // Inline self-heal budget: how many extra "that broke a rule, try again" turns to spend
+        // within THIS call/cache entry before giving up and handing back whatever the last attempt
+        // was, for the normal accept/reject gate (ReviewColumnAsync) and its cross-run
+        // QcRuleCheckFailureCount retry to handle exactly as before. See
+        // docs/quality-review-pass-architecture.md "Inline rule-check retries" for why this lives
+        // here (a cold start every run, but a live retry conversation within one run) rather than
+        // persisting failure history across runs - the latter would let a rejected correction from
+        // one column leak into another column's verdict for the same cached
+        // (source, translation, glossary) key, breaking ReviewLlmCache's purity guarantee.
+        var maxInlineRetries = Math.Max(0, config.QualityReview.InlineRuleCheckRetries);
+
+        for (var attempt = 0; ; attempt++)
         {
-            llmResponse = await TranslationService.TranslateMessagesAsync(client, config, modelConfig, messages);
+            string llmResponse;
+            try
+            {
+                llmResponse = await TranslationService.TranslateMessagesAsync(client, config, modelConfig, messages);
+            }
+            catch (Exception e) when (e is HttpRequestException or OperationCanceledException)
+            {
+                Console.WriteLine($"Quality review request error: {e.Message}");
+                return new LlmVerdict(false, 0, null);
+            }
+
+            var scoreMatch = ScoreLineRegex.Match(llmResponse);
+            if (!scoreMatch.Success)
+            {
+                Console.WriteLine($"Quality review: could not parse response for '{rawText}' - skipping. Raw response: {llmResponse}");
+                return new LlmVerdict(false, 0, null);
+            }
+
+            var score = Math.Clamp(int.Parse(scoreMatch.Groups[1].Value), 0, 100);
+
+            var correctedMatch = CorrectedLineRegex.Match(llmResponse);
+            var correctedRaw = correctedMatch.Success ? correctedMatch.Groups[1].Value.Trim() : string.Empty;
+
+            // Defense in depth for the correction-suffix-leak this project already hit (see
+            // CorrectedLineRegex's doc comment) - even with that regex anchored to a single line, a
+            // model that restates a protocol label or the "NONE" sentinel INSIDE its own corrected text
+            // (rather than on a trailing line the anchor already excludes) would still leak it into
+            // correctedRaw. Any stored QcTranslated containing leaked protocol text is definitely not a
+            // clean translation, so treat it exactly like an unparseable response - reviewed again next
+            // run - rather than risk storing/packaging it. See ContainsLeakedProtocolText's doc comment
+            // for the full set of markers this catches (not just "CORRECTED:").
+            if (ContainsLeakedProtocolText(correctedRaw))
+            {
+                Console.WriteLine($"Quality review: parsed correction for '{rawText}' contains leaked QC-protocol text - treating as unparseable. Raw response: {llmResponse}");
+                return new LlmVerdict(false, 0, null);
+            }
+
+            var hasCorrection = correctedMatch.Success
+                && !string.IsNullOrEmpty(correctedRaw)
+                && !correctedRaw.Equals("NONE", StringComparison.OrdinalIgnoreCase);
+
+            if (!hasCorrection)
+                return new LlmVerdict(true, score, null);
+
+            // Only the bad-words check is safe to run here: it's a pure function of the candidate
+            // text alone (TranslationWorkflow.MatchesBadWords), unlike the rest of EvaluateRules
+            // (glossary file-restrictions, CustomColumnValidator, structural checks), which needs
+            // the calling column's TextFileToSplit/column context this method deliberately doesn't
+            // have (see LlmVerdict's doc comment: "before any file/column-specific repair or
+            // validation is applied"). Masking never touches ordinary English prose, so checking the
+            // still-masked correctedRaw here is equivalent to checking it restored - no need to
+            // unmask just for this. Everything else still goes through the existing cross-run
+            // QcRuleCheckFailureCount retry in ReviewColumnAsync/ApplyRulesToCurrentQcTranslated,
+            // unchanged.
+            var badWordMatches = TranslationWorkflow.FindBadWordMatches(correctedRaw);
+            if (badWordMatches.Count == 0 || attempt >= maxInlineRetries)
+                return new LlmVerdict(true, score, correctedRaw);
+
+            Console.WriteLine($"Quality review: correction for '{rawText}' matched the bad-words list ({string.Join(", ", badWordMatches)}) - inline retry {attempt + 1}/{maxInlineRetries}.");
+            TranslationService.AddCorrectionMessages(
+                messages,
+                llmResponse,
+                $"That correction is not acceptable: it uses the banned word(s) \"{string.Join("\", \"", badWordMatches)}\". " +
+                "Propose a different corrected line that says the same thing without using any banned word, " +
+                "in the same SCORE:/CORRECTED: format.");
         }
-        catch (Exception e) when (e is HttpRequestException or OperationCanceledException)
-        {
-            Console.WriteLine($"Quality review request error: {e.Message}");
-            return new LlmVerdict(false, 0, null);
-        }
-
-        var scoreMatch = ScoreLineRegex.Match(llmResponse);
-        if (!scoreMatch.Success)
-        {
-            Console.WriteLine($"Quality review: could not parse response for '{rawText}' - skipping. Raw response: {llmResponse}");
-            return new LlmVerdict(false, 0, null);
-        }
-
-        var score = Math.Clamp(int.Parse(scoreMatch.Groups[1].Value), 0, 100);
-
-        var correctedMatch = CorrectedLineRegex.Match(llmResponse);
-        var correctedRaw = correctedMatch.Success ? correctedMatch.Groups[1].Value.Trim() : string.Empty;
-
-        // Defense in depth for the correction-suffix-leak this project already hit (see
-        // CorrectedLineRegex's doc comment) - even with that regex anchored to a single line, a
-        // model that restates a protocol label or the "NONE" sentinel INSIDE its own corrected text
-        // (rather than on a trailing line the anchor already excludes) would still leak it into
-        // correctedRaw. Any stored QcTranslated containing leaked protocol text is definitely not a
-        // clean translation, so treat it exactly like an unparseable response - reviewed again next
-        // run - rather than risk storing/packaging it. See ContainsLeakedProtocolText's doc comment
-        // for the full set of markers this catches (not just "CORRECTED:").
-        if (ContainsLeakedProtocolText(correctedRaw))
-        {
-            Console.WriteLine($"Quality review: parsed correction for '{rawText}' contains leaked QC-protocol text - treating as unparseable. Raw response: {llmResponse}");
-            return new LlmVerdict(false, 0, null);
-        }
-
-        var hasCorrection = correctedMatch.Success
-            && !string.IsNullOrEmpty(correctedRaw)
-            && !correctedRaw.Equals("NONE", StringComparison.OrdinalIgnoreCase);
-
-        return new LlmVerdict(true, score, hasCorrection ? correctedRaw : null);
     }
 
     /// <summary>
@@ -1295,7 +1332,7 @@ public static class QualityReviewWorkflow
     /// review would fail to match against a since-changed <c>Translated</c> (see
     /// <see cref="Utility.QualityReviewHelpers.IsQcReviewFresh"/>).
     /// </summary>
-    public record FlaggedQcReview(string FilePath, string Text, string QcReviewedText, string? RejectedCorrection, string? Reason, int? Score);
+    public record FlaggedQcReview(string FilePath, string Text, string QcReviewedText, string QcTranslated, char? Ok, string? RejectedCorrection, string? Reason, int? Score);
 
     public static async Task<List<FlaggedQcReview>> GetFlaggedQcReviews(string workingDirectory, TextFileToSplit[] textFiles)
     {
@@ -1329,6 +1366,8 @@ public static class QualityReviewWorkflow
                         textFile.Path,
                         rawText,
                         anchor.QcReviewedText,
+                        anchor.QcTranslated,
+                        null,
                         string.IsNullOrEmpty(anchor.QcRejectedCorrection) ? null : anchor.QcRejectedCorrection,
                         string.IsNullOrEmpty(anchor.QcFailureReason) ? null : anchor.QcFailureReason,
                         anchor.QcQualityScore));
@@ -1339,5 +1378,196 @@ public static class QualityReviewWorkflow
         });
 
         return flagged;
+    }
+
+    /// <summary>
+    /// One root-cause group within <see cref="QcTriageResult.ByReason"/> - every
+    /// <see cref="FlaggedQcReview"/> whose <see cref="FlaggedQcReview.Reason"/> (a rejected
+    /// correction - see <see cref="QcTriageResult"/>) is the same literal string, most-common
+    /// group first. <see cref="Count"/> is the group's TOTAL size, independent of how many
+    /// <see cref="Examples"/> were actually kept (capped by <c>examplesPerCluster</c> on
+    /// <see cref="GetQcTriageAsync"/>) - so a consumer always knows how big the cluster really is
+    /// even when only a handful of examples are shown.
+    /// </summary>
+    public sealed record QcTriageReasonCluster(string Reason, int Count, List<FlaggedQcReview> Examples);
+
+    /// <summary>
+    /// <see cref="GetFlaggedQcReviews"/>'s ~thousands-of-rows output split into the two populations
+    /// that need different treatment, so a human (or a chat with an LLM) can work a large flagged
+    /// set down over time instead of reading every row or hand-marking individual lines "ok" (the
+    /// data model deliberately has no such field - see <see cref="ReviewColumnAsync"/>'s "Auto-apply,
+    /// gated by validation, not report-only" design):
+    /// <list type="bullet">
+    /// <item><see cref="ByReason"/> - rows with <see cref="FlaggedQcReview.Reason"/> set, meaning QC
+    /// proposed a correction that failed structural validation or a glossary-drift check and was
+    /// never applied. These cluster hard around a handful of root causes (a bad-word false positive,
+    /// a missing glossary term, the QC prompt ignoring an instruction) - grouped by the exact reason
+    /// string so fixing one root cause (prompt wording, a glossary rule, a bad-word entry) clears a
+    /// whole cluster at once via <see cref="ResetQcRetryLimits"/>/<see cref="ResetLeakedQcCorrections"/>
+    /// + a re-run, not one row at a time.</item>
+    /// <item><see cref="LowScoreSample"/> - rows with no <see cref="FlaggedQcReview.Reason"/>, just
+    /// <see cref="FlaggedQcReview.Score"/> below <paramref name="minAcceptableScore"/>-equivalent
+    /// (<see cref="MinAcceptableScore"/>). The correction (if any) already passed validation and was
+    /// applied - this is purely QC's own self-rated confidence. A small, deterministic
+    /// (lowest-score-first, capped per file so one noisy file can't crowd out the rest) sample rather
+    /// than every such row, so a human can spot-check whether the score is trustworthy and tune
+    /// <c>qualityReview.minAcceptableScore</c> or the QC prompt's scoring rubric accordingly.</item>
+    /// </list>
+    /// Cheap and side-effect-free (no LLM calls, just re-reads what <see cref="GetFlaggedQcReviews"/>
+    /// already computes) - safe to re-run as often as useful, e.g. after every prompt/glossary/config
+    /// fix, to see clusters shrink and the low-score sample shift as real progress is made.
+    /// </summary>
+    public sealed record QcTriageResult(
+        int TotalFlagged,
+        int RejectedCount,
+        int LowScoreOnlyCount,
+        int MinAcceptableScore,
+        List<QcTriageReasonCluster> ByReason,
+        List<FlaggedQcReview> LowScoreSample);
+
+    /// <summary>
+    /// Builds <see cref="QcTriageResult"/> from <see cref="GetFlaggedQcReviews"/>'s output - see that
+    /// record's doc comment for what the two populations mean and why they need different treatment.
+    /// Pure data (no file I/O beyond the read <see cref="GetFlaggedQcReviews"/> itself does) - see
+    /// <see cref="WriteTriageReportAsync"/>/<see cref="WriteFixPromptsAsync"/> for turnkey
+    /// per-project reporting steps built on top of this.
+    /// </summary>
+    /// <param name="examplesPerCluster">How many example rows to keep per reason cluster - the
+    /// cluster's real <see cref="QcTriageReasonCluster.Count"/> is unaffected by this cap.</param>
+    /// <param name="lowScoreSampleSize">Total number of low-score-only rows to sample across all
+    /// files, lowest score first.</param>
+    /// <param name="maxLowScorePerFile">Caps how many of the sample can come from any one file, so a
+    /// single noisy file can't crowd out every other file's rows from the sample.</param>
+    public static async Task<QcTriageResult> GetQcTriageAsync(
+        string workingDirectory,
+        TextFileToSplit[] textFiles,
+        GameHooks? hooks = null,
+        int examplesPerCluster = 5,
+        int lowScoreSampleSize = 100,
+        int maxLowScorePerFile = 15)
+    {
+        var flagged = await GetFlaggedQcReviews(workingDirectory, textFiles);
+        var config = ConfigurationExtensions.GetConfiguration(workingDirectory, hooks);
+        var minAcceptableScore = config.QualityReview.MinAcceptableScore;
+
+        var rejected = flagged.Where(f => !string.IsNullOrWhiteSpace(f.Reason)).ToList();
+        var lowScoreOnly = flagged
+            .Where(f => string.IsNullOrWhiteSpace(f.Reason) && f.Score.HasValue && f.Score < minAcceptableScore)
+            .ToList();
+
+        var byReason = rejected
+            .GroupBy(f => f.Reason!.Trim())
+            .OrderByDescending(g => g.Count())
+            .Select(g => new QcTriageReasonCluster(g.Key, g.Count(), g.Take(examplesPerCluster).ToList()))
+            .ToList();
+
+        var lowScoreSample = lowScoreOnly
+            .OrderBy(f => f.Score)
+            .GroupBy(f => f.FilePath)
+            .SelectMany(g => g.Take(maxLowScorePerFile))
+            .OrderBy(f => f.Score)
+            .Take(lowScoreSampleSize)
+            .ToList();
+
+        return new QcTriageResult(flagged.Count, rejected.Count, lowScoreOnly.Count, minAcceptableScore, byReason, lowScoreSample);
+    }
+
+    /// <summary>
+    /// Turnkey per-project reporting step built on <see cref="GetQcTriageAsync"/>: writes
+    /// <c>TestResults/QcTriageSummary.yaml</c> (headline counts), <c>QcTriageByReason.yaml</c> (every
+    /// reason cluster with its examples), and <c>QcTriageLowScoreSample.yaml</c> (the low-score
+    /// spot-check sample). Intended to be wired into a consuming repo's own workflow test file as a
+    /// one-line wrapper run right after that repo's own "find flagged" step - see
+    /// docs/quality-review-pass-architecture.md's "Wiring this into a new project" section.
+    /// </summary>
+    public static async Task WriteTriageReportAsync(string workingDirectory, TextFileToSplit[] textFiles, GameHooks? hooks = null)
+    {
+        var triage = await GetQcTriageAsync(workingDirectory, textFiles, hooks);
+
+        var summary = new
+        {
+            triage.TotalFlagged,
+            triage.RejectedCount,
+            triage.LowScoreOnlyCount,
+            distinctReasonClusters = triage.ByReason.Count,
+            triage.MinAcceptableScore,
+        };
+
+        var serializer = YamlHelper.CreateSerializer();
+        FileHelper.WriteAllTextWithRetry($"{workingDirectory}/TestResults/QcTriageSummary.yaml", serializer.Serialize(summary));
+        FileHelper.WriteAllTextWithRetry($"{workingDirectory}/TestResults/QcTriageByReason.yaml", serializer.Serialize(triage.ByReason));
+        FileHelper.WriteAllTextWithRetry($"{workingDirectory}/TestResults/QcTriageLowScoreSample.yaml", serializer.Serialize(triage.LowScoreSample));
+
+        Console.WriteLine(serializer.Serialize(summary));
+    }
+
+    /// <summary>
+    /// Turnkey per-project reporting step built on <see cref="GetQcTriageAsync"/>: writes
+    /// <c>TestResults/QcTriagePrompts.md</c>, one markdown section per reason cluster (with a
+    /// templated root-cause diagnosis request and concrete examples) plus one section for the
+    /// low-score calibration sample. Deliberately generates a prompt to paste into a chat rather than
+    /// calling an LLM itself - the actual fixes (QC prompt wording, a glossary rule,
+    /// <c>qualityReview.minAcceptableScore</c>) are small and judgment-heavy enough that a human
+    /// should read the examples and apply the change themselves rather than have an LLM edit prompt
+    /// files unsupervised. See docs/quality-review-pass-architecture.md's "Wiring this into a new
+    /// project" section for how to call this from a consuming repo.
+    /// </summary>
+    public static async Task WriteFixPromptsAsync(string workingDirectory, TextFileToSplit[] textFiles, GameHooks? hooks = null, int examplesPerCluster = 8)
+    {
+        var triage = await GetQcTriageAsync(workingDirectory, textFiles, hooks, examplesPerCluster: examplesPerCluster);
+
+        var doc = new StringBuilder();
+        doc.AppendLine("# Quality Review Fix Prompts");
+        doc.AppendLine();
+        doc.AppendLine("Generated by QualityReviewWorkflow.WriteFixPromptsAsync. Paste one section below into a");
+        doc.AppendLine("Claude chat at a time, apply whatever fix it suggests by hand (the QC prompt's wording, a");
+        doc.AppendLine("glossary rule, minAcceptableScore), then re-run ResetQcRetryLimits /");
+        doc.AppendLine("ResetLeakedQcCorrections as appropriate, re-run the QC pass, and re-run this triage to");
+        doc.AppendLine("confirm the cluster shrank.");
+        doc.AppendLine();
+
+        foreach (var group in triage.ByReason)
+        {
+            doc.AppendLine($"## Cluster: \"{group.Reason}\" ({group.Count} occurrences)");
+            doc.AppendLine();
+            doc.AppendLine("This is a quality-review pass over a machine-translated game localization corpus. The QC");
+            doc.AppendLine($"model proposed a correction for each line below, but every one was rejected for the same");
+            doc.AppendLine($"reason: \"{group.Reason}\". Diagnose the likely root cause (a QC prompt instruction being");
+            doc.AppendLine("ignored, a missing/wrong glossary term, or an overly-broad bad-word/rule match) and suggest");
+            doc.AppendLine("a specific, minimal wording change (to the QC prompt or a glossary rule) that would fix");
+            doc.AppendLine("this cluster without introducing new false rejections elsewhere.");
+            doc.AppendLine();
+            foreach (var f in group.Examples)
+            {
+                doc.AppendLine($"- File: {f.FilePath}");
+                doc.AppendLine($"  Raw: {f.Text}");
+                doc.AppendLine($"  Kept translation: {f.QcTranslated}");
+                doc.AppendLine($"  Rejected correction: {f.RejectedCorrection}");
+            }
+            doc.AppendLine();
+        }
+
+        if (triage.LowScoreSample.Count > 0)
+        {
+            doc.AppendLine($"## Low-score calibration sample ({triage.LowScoreSample.Count} lines, minAcceptableScore={triage.MinAcceptableScore})");
+            doc.AppendLine();
+            doc.AppendLine("These lines were auto-corrected and already passed validation, but QC's self-rated");
+            doc.AppendLine($"confidence scored them below the configured threshold ({triage.MinAcceptableScore}). For each,");
+            doc.AppendLine("judge whether the low score reflects a genuine translation problem or overly harsh");
+            doc.AppendLine("self-rating on short/idiomatic phrases. If a pattern emerges across several, suggest a");
+            doc.AppendLine("tweak to the QC prompt's scoring rubric; if they look fine, that's a signal");
+            doc.AppendLine("minAcceptableScore itself could be lowered instead.");
+            doc.AppendLine();
+            foreach (var f in triage.LowScoreSample)
+            {
+                doc.AppendLine($"- File: {f.FilePath}");
+                doc.AppendLine($"  Raw: {f.Text}");
+                doc.AppendLine($"  Applied translation: {f.QcTranslated}");
+                doc.AppendLine($"  Score: {f.Score}");
+            }
+            doc.AppendLine();
+        }
+
+        FileHelper.WriteAllTextWithRetry($"{workingDirectory}/TestResults/QcTriagePrompts.md", doc.ToString());
     }
 }

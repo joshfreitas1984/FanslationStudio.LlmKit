@@ -105,7 +105,7 @@ public static class DynamicStringWorkflow
     /// </code>
     /// Same fallback-to-raw-on-failure semantics as <see cref="PrefabTextWorkflow.PackagePrefabTextAsync"/>.
     /// </summary>
-    public static async Task<(int Passed, int Failed)> PackageDynamicStringsAsync(string workingDirectory, TextFileToSplit textFile)
+    public static async Task<(int Passed, int QcRejected, int RawFallback)> PackageDynamicStringsAsync(string workingDirectory, TextFileToSplit textFile)
     {
         var outputPath = $"{workingDirectory}/Mod";
         Directory.CreateDirectory(outputPath);
@@ -115,13 +115,14 @@ public static class DynamicStringWorkflow
         var results = new List<DynamicStringResult>();
         var seenBareRaw = new HashSet<string>();
         var passedCount = 0;
-        var failedCount = 0;
+        var qcRejectedCount = 0;
+        var rawFallbackCount = 0;
 
         await FileIteration.IterateTranslatedFilesAsync(workingDirectory, [textFile], async (_, _, fileLines) =>
         {
             foreach (var line in fileLines)
             {
-                var (result, failed, bareFragment) = ReconstructLine(line, textFile, minAcceptableScore);
+                var (result, reason, bareFragment) = ReconstructLine(line, textFile, minAcceptableScore);
                 if (result == null)
                     continue;
 
@@ -150,11 +151,17 @@ public static class DynamicStringWorkflow
                     results.Add(new DynamicStringResult(fragment.Raw, fragment.Result));
                 }
 
-                if (failed)
-                    failedCount++;
-                else
+                switch (reason)
                 {
-                    passedCount++;
+                    case PackagingFailureReason.QcRejected:
+                        qcRejectedCount++;
+                        break;
+                    case PackagingFailureReason.RawFallback:
+                        rawFallbackCount++;
+                        break;
+                    default:
+                        passedCount++;
+                        break;
                 }
             }
 
@@ -164,7 +171,7 @@ public static class DynamicStringWorkflow
         var serializer = YamlHelper.CreateSerializer();
         await FileHelper.WriteAllTextWithRetryAsync($"{outputPath}/{textFile.Path}.yaml", serializer.Serialize(results));
 
-        return (passedCount, failedCount);
+        return (passedCount, qcRejectedCount, rawFallbackCount);
     }
 
     // Matches a real String.Format-style placeholder ("{0}", "{12}", ...) OR one of the game's own
@@ -190,12 +197,13 @@ public static class DynamicStringWorkflow
     private static bool IsFormatTemplate(string raw) => FormatPlaceholderRegex.IsMatch(raw);
 
     /// <summary>
-    /// Reconstructs a single line's packaged output. The returned <c>Failed</c> flag reflects
-    /// whether the line fell back to its original raw text because a fragment/split was
-    /// unsafe, flagged for retranslation, or missing its translation - this must be reported by
-    /// the caller as an actual failure (see <see cref="PackageDynamicStringsAsync"/>) rather than
-    /// silently folded into the same bucket as a genuinely successful line, since both cases
-    /// otherwise look identical in the packaged raw/result YAML.
+    /// Reconstructs a single line's packaged output. The returned <see cref="PackagingFailureReason"/>
+    /// reflects whether/why the line fell back to its original raw text: <c>QcRejected</c> when it
+    /// scored below <paramref name="minAcceptableScore"/> by the quality review pass, <c>RawFallback</c>
+    /// when a fragment/split was unsafe, flagged for retranslation, or missing its translation - this
+    /// must be reported by the caller as an actual failure (see <see cref="PackageDynamicStringsAsync"/>)
+    /// rather than silently folded into the same bucket as a genuinely successful line, since all
+    /// three cases otherwise look identical in the packaged raw/result YAML.
     ///
     /// <paramref name="BareFragment"/> is populated only when the line is a single-fragment
     /// template (exactly one translatable split, e.g. "打扰了;GovernPlotStart;1" -> label
@@ -203,7 +211,7 @@ public static class DynamicStringWorkflow
     /// <see cref="PackageDynamicStringsAsync"/> for why this extra bare label/translation pair
     /// needs to be packaged as its own dictionary entry alongside the full reconstructed line.
     /// </summary>
-    private static (string? Result, bool Failed, (string Raw, string Result)? BareFragment) ReconstructLine(TranslationLine line, TextFileToSplit textFile, int minAcceptableScore)
+    private static (string? Result, PackagingFailureReason Reason, (string Raw, string Result)? BareFragment) ReconstructLine(TranslationLine line, TextFileToSplit textFile, int minAcceptableScore)
     {
         var template = line.Templates.FirstOrDefault(t => t.Split == 0);
         if (template != null)
@@ -219,7 +227,7 @@ public static class DynamicStringWorkflow
             var qcFresh = anchor != null && QualityReviewHelpers.IsQcReviewFresh(anchor, template, fragments);
 
             if (qcFresh && anchor!.QcQualityScore is int score && score < minAcceptableScore)
-                return (line.Raw, true, null);
+                return (line.Raw, PackagingFailureReason.QcRejected, null);
 
             if (qcFresh && !string.IsNullOrEmpty(anchor!.QcTranslated))
                 // Known limitation: bypassing Reconstruct() here means the single-fragment "bare
@@ -228,19 +236,19 @@ public static class DynamicStringWorkflow
                 // from a whole-cell QC correction without the same ambiguous reverse-mapping this
                 // design deliberately avoids - so a corrected multi-part line loses its bare-label
                 // entry. The full reconstructed entry still packages correctly either way.
-                return (anchor.QcTranslated, false, null);
+                return (anchor.QcTranslated, PackagingFailureReason.None, null);
 
             var translatedFragments = new List<string>();
 
             foreach (var fragment in fragments)
             {
                 if (!textFile.PackageOutput || fragment.FlaggedForRetranslation || !fragment.SafeToTranslate)
-                    return (line.Raw, true, null);
+                    return (line.Raw, PackagingFailureReason.RawFallback, null);
 
                 if (!string.IsNullOrEmpty(fragment.Translated))
                     translatedFragments.Add(fragment.Translated);
                 else if (!string.IsNullOrEmpty(fragment.Text))
-                    return (line.Raw, true, null);
+                    return (line.Raw, PackagingFailureReason.RawFallback, null);
                 else
                     translatedFragments.Add(fragment.Text);
             }
@@ -250,23 +258,23 @@ public static class DynamicStringWorkflow
                 ? (fragments[0].Text, translatedFragments[0])
                 : ((string Raw, string Result)?)null;
 
-            return (reconstructed, false, bareFragment);
+            return (reconstructed, PackagingFailureReason.None, bareFragment);
         }
 
         var split = line.Splits.FirstOrDefault(s => s.Split == 0);
         if (split == null)
-            return (null, false, null);
+            return (null, PackagingFailureReason.None, null);
 
         var plainQcFresh = QualityReviewHelpers.IsQcReviewFresh(split, null, [split]);
 
         if (plainQcFresh && split.QcQualityScore is int plainScore && plainScore < minAcceptableScore)
-            return (split.Text, true, null);
+            return (split.Text, PackagingFailureReason.QcRejected, null);
 
         var effectiveTranslated = plainQcFresh && !string.IsNullOrEmpty(split.QcTranslated) ? split.QcTranslated : split.Translated;
 
         if (!string.IsNullOrEmpty(effectiveTranslated) && !split.FlaggedForRetranslation && split.SafeToTranslate)
-            return (effectiveTranslated, false, null);
+            return (effectiveTranslated, PackagingFailureReason.None, null);
 
-        return (split.Text, true, null);
+        return (split.Text, PackagingFailureReason.RawFallback, null);
     }
 }

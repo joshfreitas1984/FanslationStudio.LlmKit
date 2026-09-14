@@ -239,13 +239,13 @@ live there too) - no separate wiring needed.
 
 Three levels, narrowest to broadest:
 
-- **`ResetQcRetryLimits`** (`"3d"`) — clears every column's accumulated retry counters and gives any
+- **`ResetQcRetryLimits`** — clears every column's accumulated retry counters and gives any
   column currently parked at `FailedValidation` a fresh review. Routine: run after fixing whatever
   caused a persistent rule violation (a false-positive bad word, a loosened glossary rule).
-- **`ResetLeakedQcCorrections`** (`"3e"`) — resets only columns whose stored correction/rejected-
+- **`ResetLeakedQcCorrections`** — resets only columns whose stored correction/rejected-
   correction contains leaked QC-protocol text (see `ContainsLeakedProtocolText`). Routine, safe to
   run any time - a no-op once the corpus is clean.
-- **`ResetAllQcState`** (`"3h"`) — wipes **every** column's Qc* state back to `NotReviewed`
+- **`ResetAllQcState`** — wipes **every** column's Qc* state back to `NotReviewed`
   regardless of current status, so the next full pass reviews the entire corpus again from scratch.
   NOT routine - this is a deliberate full do-over, the same many-hours cost as an original full run.
   Use it when the QC model or prompt has changed enough that already-recorded `Passed`/`Corrected`
@@ -255,6 +255,73 @@ Three levels, narrowest to broadest:
   this - a `Passed` column reviewed before the omitted-subject prompt rule existed, or a `Corrected`
   column that may have been through the low-score-discard bug, both look identical (and equally
   "trustworthy") to a freshness check that only looks at whether the underlying translation changed.
+
+## Triage and fix-prompt generation (`GetQcTriageAsync`/`WriteTriageReportAsync`/`WriteFixPromptsAsync`)
+
+`GetFlaggedQcReviews`'s output can run into the thousands on a real corpus (DragonHierOverLlm's
+first full run flagged ~9,000 rows). Reading every row, or hand-marking individual lines as "ok",
+doesn't scale — and the data model deliberately has no manual-approval field for that (see "Auto-
+apply, gated by validation, not report-only" above). These three methods exist to turn that dump
+into something a human (or a chat with an LLM) can actually work down over time, without adding any
+per-line approval mechanism.
+
+`GetQcTriageAsync(workingDirectory, textFiles, hooks, examplesPerCluster: 5, lowScoreSampleSize:
+100, maxLowScorePerFile: 15)` splits `GetFlaggedQcReviews`'s output into the two populations that
+need different treatment, returned as a `QcTriageResult`:
+
+- **`ByReason`** — every row where `Reason` is set (a proposed correction the validation gate or
+  glossary-drift check rejected, so it was never applied), grouped by the exact reason string,
+  most-common cluster first. These cluster hard around a handful of root causes in practice (a
+  bad-word false positive, a missing glossary term, the QC prompt ignoring an instruction) — fixing
+  one root cause (prompt wording, a glossary rule, a bad-word entry) clears a whole cluster at once
+  via `ResetQcRetryLimits`/`ResetLeakedQcCorrections` + a re-run, not one row at a time.
+- **`LowScoreSample`** — rows with no `Reason`, just `Score` below `minAcceptableScore`. The
+  correction (if any) already passed validation and was applied — this is purely QC's own
+  self-rated confidence, which is frequently miscalibrated (see "Postmortems" #3 below). A small,
+  deterministic (lowest-score-first, capped per file so one noisy file can't crowd out the rest)
+  sample lets a human spot-check whether the score is trustworthy instead of reading every such row.
+
+`WriteTriageReportAsync(workingDirectory, textFiles, hooks)` writes `TestResults/QcTriageSummary
+.yaml` (headline counts), `QcTriageByReason.yaml`, and `QcTriageLowScoreSample.yaml`.
+
+`WriteFixPromptsAsync(workingDirectory, textFiles, hooks, examplesPerCluster: 8)` writes
+`TestResults/QcTriagePrompts.md` — one markdown section per reason cluster (a templated root-cause
+diagnosis request plus concrete raw/kept-translation/rejected-correction examples) and one section
+for the low-score sample (asking whether the low scores look like genuine problems or an overly
+harsh rubric on short/idiomatic phrases). This is deliberately a **prompt generator, not a fix
+generator** — it produces text meant to be pasted into a chat with an LLM one section at a time, not
+an automated pipeline that edits prompt files itself. The actual fixes (`BaseQualityReviewPrompt
+.txt` wording, a glossary rule, `qualityReview.minAcceptableScore`) are small and judgment-heavy
+enough that a human should read the examples and apply the change themselves.
+
+### Wiring this into a new project
+
+Both methods take exactly the same `(workingDirectory, textFiles, hooks)` signature every other
+`QualityReviewWorkflow` method already does, and produce the same `TestResults/*` output regardless
+of which game's corpus they're reading — no per-project glue needed beyond two thin `Fact` wrappers.
+Add them to your project's QC workflow test file right after your project's "find flagged" step
+(see DragonHierOverLlm's `Tests/QualityControlWorkflowTests.cs` for the reference wiring):
+
+```csharp
+[Fact(DisplayName = "Triage Flagged Quality Review Items")]
+public async Task TriageFlaggedQcReviews()
+{
+    await QualityReviewWorkflow.WriteTriageReportAsync(GameFileHandling.WorkingDirectory, TextFileConfiguration.TextFilesToSplit, GameFileHandling.Hooks);
+}
+
+[Fact(DisplayName = "Generate Quality Review Fix Prompts")]
+public async Task GenerateQcFixPrompts()
+{
+    await QualityReviewWorkflow.WriteFixPromptsAsync(GameFileHandling.WorkingDirectory, TextFileConfiguration.TextFilesToSplit, GameFileHandling.Hooks);
+}
+```
+
+The repeatable loop this supports: run the QC pass → find flagged → triage → generate fix prompts →
+paste one `QcTriagePrompts.md` section at a time into a chat → apply whatever fix comes back by hand
+→ `ResetQcRetryLimits`/`ResetLeakedQcCorrections` as appropriate → re-run the QC pass → re-run
+triage to confirm the cluster shrank (or the low-score sample improved). Both write steps are cheap
+and side-effect-free (no LLM calls, just re-reads of what `GetFlaggedQcReviews` already computes),
+so re-running them as often as useful costs nothing.
 
 ## Configuration (`Configuration/QualityReviewConfig.cs`)
 
@@ -268,6 +335,54 @@ Three levels, narrowest to broadest:
 - `minAcceptableScore` (int, default 70) — see packaging above. Safe to change at any time and
   re-run packaging only; no LLM calls needed to see the effect, since the score is already stored
   per column.
+- `maxRuleCheckRetries` (int, default 3) — see "The validation gate" above; bounds the cross-run
+  `QcRuleCheckFailureCount` retry.
+- `inlineRuleCheckRetries` (int, default 0) — see "Inline rule-check retries" below.
+
+## Inline rule-check retries (bad words only)
+
+Before this existed, a correction that failed the validation gate got a cold restart: `ReviewColumnAsync`
+set `QcStatus = NotReviewed`, and the next `RunAsync` pass called `GetLlmVerdictAsync` completely
+fresh — same `SOURCE`/`CURRENT TRANSLATION`/glossary prompt, zero memory of the rejected attempt or
+why it failed. For a rule violation the model would reliably repeat (e.g. reaching for "knight" to
+translate a 侠-family wuxia term, tripping `TranslationWorkflow.MatchesBadWords`), this meant
+burning a full extra QC pass per attempt, incrementing `QcRuleCheckFailureCount` toward
+`MaxRuleCheckRetries` with the model never actually being told what it did wrong.
+
+`QualityReviewConfig.InlineRuleCheckRetries` (default `0`, a no-op) lets `GetLlmVerdictAsync` retry
+*within the same call*, in the same conversation, instead: if a proposed correction matches the
+bad-words list, it appends the model's own rejected answer plus a correction turn (via
+`TranslationService.AddCorrectionMessages`, the same helper the main translation pipeline's
+`CorrectionPromptsEnabled` retry loop uses) naming the exact offending word(s)
+(`TranslationWorkflow.FindBadWordMatches`) and asks for a different answer, up to
+`InlineRuleCheckRetries` extra turns before falling back to returning the last attempt as-is.
+
+**Scope: bad words only, deliberately.** `MatchesBadWords`/`FindBadWordMatches` are pure functions
+of the candidate text alone, so they're safe to run here. Every other check in `EvaluateRules`
+(glossary file-restrictions via `OnlyOutputFiles`/`ExcludeOutputFiles`, `CustomColumnValidator`,
+structural validation) needs the calling column's `TextFileToSplit`/column context, which
+`GetLlmVerdictAsync` deliberately doesn't have — see `LlmVerdict`'s doc comment ("before any
+file/column-specific repair or validation is applied") and `ReviewCacheKey`. Those checks continue
+to go through the existing cold-restart `QcRuleCheckFailureCount` cross-run retry in
+`ReviewColumnAsync`/`ApplyRulesToCurrentQcTranslated`, unchanged.
+
+**Why not thread the rejection reason through `QcRejectedCorrection`/`QcFailureReason` across runs
+instead?** `GetLlmVerdictAsync`'s result is cached and shared per `ReviewCacheKey(RawText,
+EffectiveTranslated, GlossaryPrompt)` (`ReviewLlmCache`) across every column — possibly in
+different files — that reduces to the same triple; the caching is only correct because the call is
+pure with respect to that triple. Feeding a *previous run's* per-column rejection history back into
+the prompt would make the result depend on hidden state outside the cache key, so two columns
+sharing an identical triple could get different verdicts depending on which one happened to fail
+first. Retrying inside one `GetLlmVerdictAsync` invocation keeps every cold-start `RunAsync` pass
+exactly as stateless as before, while still giving the model real, in-context feedback about its own
+mistake instead of a blind restart.
+
+**Performance**: retries only fire for the minority of corrections that hit the bad-words list on
+the first attempt (rare in practice — most QC corrections pass the gate immediately), and are
+sequential within the one `Parallel.ForEachAsync` worker slot already assigned to that column, so
+they add latency to that one item rather than extra concurrent LLM load. Kept deliberately small and
+separate from `MaxRuleCheckRetries` so the worst-case cost for a persistently-stuck line
+(`InlineRuleCheckRetries` × `MaxRuleCheckRetries`) stays bounded.
 
 ## Prompts: per-model-family, not a shared/generic file
 
@@ -295,7 +410,7 @@ every other prompt already follows.
 `QualityReviewWorkflow.RunAsync`'s `sampleSize` parameter exists so a candidate model's real
 speed/score-distribution/correction-quality can be judged on a small, representative sample (e.g.
 ~300 columns, randomly drawn across every file) before committing an entire run to it. See the
-downstream repo's numbered `"3a. RunQualityReviewPassSample"` test fact and the plan doc's "Sample
+downstream repo's `RunQualityReviewPassSample`-style test fact and the plan doc's "Sample
 run before committing to a full-corpus pass" section for the full methodology and reasoning
 (expected corpus size, why a full run is a many-hour job regardless of model choice, what to look
 for in the sample's results).

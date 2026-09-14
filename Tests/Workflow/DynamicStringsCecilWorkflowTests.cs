@@ -77,10 +77,11 @@ public class DynamicStringsCecilWorkflowTests
         var serializer = YamlHelper.CreateSerializer();
         File.WriteAllText($"{dir.Path}/Converted/dynamicStrings.txt.yaml", serializer.Serialize(new List<TranslationLine> { line }));
 
-        var (passed, failed) = await DynamicStringsCecilWorkflow.PackageDynamicStringsCecilAsync(dir.Path, TestFile());
+        var (passed, qcRejected, rawFallback) = await DynamicStringsCecilWorkflow.PackageDynamicStringsCecilAsync(dir.Path, TestFile());
 
         Assert.Equal(1, passed);
-        Assert.Equal(0, failed);
+        Assert.Equal(0, qcRejected);
+        Assert.Equal(0, rawFallback);
 
         var modYaml = File.ReadAllText($"{dir.Path}/Mod/dynamicStrings.txt.yaml");
         var contracts = YamlHelper.CreateDeserializer().Deserialize<List<SharedAssembly.DynamicStrings.DynamicStringContract>>(modYaml);
@@ -109,10 +110,11 @@ public class DynamicStringsCecilWorkflowTests
         var serializer = YamlHelper.CreateSerializer();
         File.WriteAllText($"{dir.Path}/Converted/dynamicStrings.txt.yaml", serializer.Serialize(new List<TranslationLine> { line }));
 
-        var (passed, failed) = await DynamicStringsCecilWorkflow.PackageDynamicStringsCecilAsync(dir.Path, TestFile());
+        var (passed, qcRejected, rawFallback) = await DynamicStringsCecilWorkflow.PackageDynamicStringsCecilAsync(dir.Path, TestFile());
 
         Assert.Equal(0, passed);
-        Assert.Equal(1, failed);
+        Assert.Equal(0, qcRejected);
+        Assert.Equal(1, rawFallback);
     }
 
     [Fact(DisplayName = "Package excludes a contract whose Type is on the unsafe skip list, without counting it as failed")]
@@ -131,10 +133,11 @@ public class DynamicStringsCecilWorkflowTests
         var serializer = YamlHelper.CreateSerializer();
         File.WriteAllText($"{dir.Path}/Converted/dynamicStrings.txt.yaml", serializer.Serialize(new List<TranslationLine> { line }));
 
-        var (passed, failed) = await DynamicStringsCecilWorkflow.PackageDynamicStringsCecilAsync(dir.Path, TestFile());
+        var (passed, qcRejected, rawFallback) = await DynamicStringsCecilWorkflow.PackageDynamicStringsCecilAsync(dir.Path, TestFile());
 
         Assert.Equal(0, passed);
-        Assert.Equal(0, failed);
+        Assert.Equal(0, qcRejected);
+        Assert.Equal(0, rawFallback);
 
         var modYaml = File.ReadAllText($"{dir.Path}/Mod/dynamicStrings.txt.yaml");
         var contracts = YamlHelper.CreateDeserializer().Deserialize<List<SharedAssembly.DynamicStrings.DynamicStringContract>>(modYaml);

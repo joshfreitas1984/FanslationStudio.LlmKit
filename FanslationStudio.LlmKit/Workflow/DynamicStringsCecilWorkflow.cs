@@ -92,14 +92,14 @@ public static class DynamicStringsCecilWorkflow
     /// unsafe-to-translate, which is not a failure - matches the original per-repo behavior this
     /// generalizes).
     /// </summary>
-    public static async Task<(int Passed, int Failed)> PackageDynamicStringsCecilAsync(string workingDirectory, TextFileToSplit textFile)
+    public static async Task<(int Passed, int QcRejected, int RawFallback)> PackageDynamicStringsCecilAsync(string workingDirectory, TextFileToSplit textFile)
     {
         var outputPath = $"{workingDirectory}/Mod";
         Directory.CreateDirectory(outputPath);
 
         var contracts = new List<DynamicStringContract>();
         var passedCount = 0;
-        var failedCount = 0;
+        var rawFallbackCount = 0;
 
         await FileIteration.IterateTranslatedFilesAsync(workingDirectory, [textFile], async (_, _, fileLines) =>
         {
@@ -107,7 +107,7 @@ public static class DynamicStringsCecilWorkflow
             {
                 if (line.Splits.Count != 1)
                 {
-                    failedCount++;
+                    rawFallbackCount++;
                     continue;
                 }
 
@@ -122,7 +122,7 @@ public static class DynamicStringsCecilWorkflow
                     || string.IsNullOrEmpty(translated)
                     || line.Splits[0].FlaggedForRetranslation)
                 {
-                    failedCount++;
+                    rawFallbackCount++;
                     continue;
                 }
 
@@ -149,6 +149,8 @@ public static class DynamicStringsCecilWorkflow
         var serializer = YamlHelper.CreateSerializer();
         await FileHelper.WriteAllTextWithRetryAsync($"{outputPath}/{textFile.Path}.yaml", serializer.Serialize(contracts));
 
-        return (passedCount, failedCount);
+        // This legacy Mono/Cecil format has no quality-review integration - every failure counted
+        // here is a RawFallback (a QcRejected count is never produced by this workflow).
+        return (passedCount, 0, rawFallbackCount);
     }
 }

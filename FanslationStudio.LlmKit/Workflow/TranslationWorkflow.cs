@@ -596,7 +596,10 @@ public static class TranslationWorkflow
     {
         var mistranslatedGlossaryTerms = FindGlossaryMistranslations(config, preparedRaw, candidate, textFile).ToList();
         var hallucinationReason = FindGlossaryHallucination(preparedRaw, candidate, config, textFile);
-        var badWordsReason = MatchesBadWords(candidate) ? "Matches the bad-words list." : null;
+        var badWordMatches = FindBadWordMatches(candidate);
+        var badWordsReason = badWordMatches.Count > 0
+            ? $"Matches the bad-words list (found: {string.Join(", ", badWordMatches)})."
+            : null;
         var ellipsisReason = IsMissingRequiredEllipsis(preparedRaw, candidate) ? "Missing an ellipsis '...' required by the source." : null;
         var missingTokenReason = FindMissingRequiredToken(splitRaw, candidate, config.ExtraStringTokenReplacers) is string missingToken
             ? $"Missing required token '{missingToken}'."
@@ -754,22 +757,40 @@ public static class TranslationWorkflow
         return null;
     }
 
-    public static bool MatchesBadWords(string input)
-    {
-        HashSet<string> words =
-        [
-            //"hiu", "tut", "thut", "oi", "avo", "porqe", "obrigado",
-                "knight", "knight", "knights", "knight-at-arms", "knights-errant",
-                //"nom", "esto", "tem", "mais", "com", "ver", "nos", "sobre", "vermos",
-                //"dar", "nam", "J'ai", "je", "veux", "pas", "ele", "una", "keqi", "shiwu",
-                //"ich", "ein", "der", "ganzes", "Leben", "dort", //"de", NAmes can have de
-                //"thay", "tien", "div", "html", "tiantu", "ngoc", "truong", "Phong"
-        ];
+    /// <summary>
+    /// Active bad-words list - deliberately just "knight" and its inflections today: this is a
+    /// wuxia setting, and "knight" is a jarring Western chivalric term that has no place in it
+    /// (unlike the other, now-commented-out entries below, which were transient false positives
+    /// from unrelated languages, not an intentional ban). Every other entry stays commented out as
+    /// a record of past false positives rather than removed - see git history for how each one got
+    /// there. Whole-word (not substring) and case-insensitive, see <see cref="FindBadWordMatches"/>.
+    /// </summary>
+    private static readonly string[] BadWords =
+    [
+        //"hiu", "tut", "thut", "oi", "avo", "porqe", "obrigado",
+            "knight", "knights", "knight-at-arms", "knights-errant",
+            //"nom", "esto", "tem", "mais", "com", "ver", "nos", "sobre", "vermos",
+            //"dar", "nam", "J'ai", "je", "veux", "pas", "ele", "una", "keqi", "shiwu",
+            //"ich", "ein", "der", "ganzes", "Leben", "dort", //"de", NAmes can have de
+            //"thay", "tien", "div", "html", "tiantu", "ngoc", "truong", "Phong"
+    ];
 
-        string pattern = $@"\b({string.Join("|", words)})\b";
+    private static readonly Regex BadWordsPattern = new($@"\b({string.Join("|", BadWords)})\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-        return Regex.IsMatch(input, pattern, RegexOptions.IgnoreCase);
-    }
+    public static bool MatchesBadWords(string input) => BadWordsPattern.IsMatch(input);
+
+    /// <summary>
+    /// Every distinct bad-words-list term found in <paramref name="input"/> (empty if none) - used
+    /// both to build a specific, actionable <see cref="RuleCheckResult.BadWordsReason"/> (rather
+    /// than a bare "matches the list" with no indication of which word) and by
+    /// <see cref="Workflow.QualityReviewWorkflow.GetLlmVerdictAsync"/>'s inline retry loop to tell
+    /// the model exactly what to avoid on its next attempt.
+    /// </summary>
+    internal static IReadOnlyList<string> FindBadWordMatches(string input) =>
+        BadWordsPattern.Matches(input)
+            .Select(m => m.Value)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
 
     public static async Task ResetAllFlags(string workingDirectory, TextFileToSplit[] textFiles)

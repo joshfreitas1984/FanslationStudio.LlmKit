@@ -452,7 +452,11 @@ public static partial class LineValidation
             correctionPrompts.AddPromptWithValues(config, "CorrectAlternativesPrompt", "/");
         }
 
-        if (result.Contains('\\') && !raw.Contains('\\'))
+        // Exclude the literal "\n" escape - this pipeline's own convention for an embedded line
+        // break (which BaseQualityReviewPrompt.txt explicitly requires the QC model to use when
+        // joining a multi-sentence correction) - so a correctly-formed correction doesn't get
+        // mistaken for a stray backslash/alternative.
+        if (result.Replace("\\n", "").Contains('\\') && !raw.Contains('\\'))
         {
             response = false;
             correctionPrompts.AddPromptWithValues(config, "CorrectAlternativesPrompt", "\\");

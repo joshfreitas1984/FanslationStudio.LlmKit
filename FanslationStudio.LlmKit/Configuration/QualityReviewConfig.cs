@@ -56,4 +56,20 @@ public class QualityReviewConfig
     /// <see cref="Support.TranslationSplit.Translated"/>, never a rule-breaking QcTranslated.
     /// </summary>
     public int MaxRuleCheckRetries { get; set; } = 3;
+
+    /// <summary>
+    /// How many extra "that broke the bad-words list, try again" turns
+    /// <see cref="Workflow.QualityReviewWorkflow.GetLlmVerdictAsync"/> will spend in-line, within
+    /// the same LLM call/cache entry, when a freshly proposed correction matches
+    /// <see cref="Workflow.TranslationWorkflow.MatchesBadWords"/>, before giving up and handing the
+    /// candidate back as-is for the normal accept/reject gate and <see cref="MaxRuleCheckRetries"/>-
+    /// bounded cross-run retry to handle exactly as before. 0 (default) preserves the old
+    /// single-shot behavior. Kept deliberately small and separate from
+    /// <see cref="MaxRuleCheckRetries"/>, which bounds a much rarer cross-run "still stuck even
+    /// after being told exactly what's wrong" case - this budget is spent inside one LLM round-trip
+    /// session (a live conversation, not a fresh cold-started run), so it converges a stuck
+    /// bad-words rejection in seconds instead of over several separate QC passes. See
+    /// docs/quality-review-pass-architecture.md "Inline rule-check retries".
+    /// </summary>
+    public int InlineRuleCheckRetries { get; set; } = 0;
 }

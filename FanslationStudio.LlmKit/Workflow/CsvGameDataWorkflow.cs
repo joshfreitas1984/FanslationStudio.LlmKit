@@ -102,7 +102,7 @@ public static class CsvGameDataWorkflow
     /// one game's own naive CSV loader misreading a trailing comma before a closing quote. Neither
     /// hook runs for a row that fell back to its original raw text.
     /// </summary>
-    public static async Task<(int Passed, int Failed)> PackageAsync(
+    public static async Task<(int Passed, int QcRejected, int RawFallback)> PackageAsync(
         string workingDirectory, TextFileToSplit textFile,
         Action<int, string, string>? onColumnPackaged = null,
         Func<string[], string[]>? rowPostProcess = null)
@@ -114,7 +114,7 @@ public static class CsvGameDataWorkflow
 
         var outputLines = new List<string>();
         var passedCount = 0;
-        var failedCount = 0;
+        var rawFallbackCount = 0;
 
         await FileIteration.IterateTranslatedFilesAsync(workingDirectory, [textFile], async (_, _, fileLines) =>
         {
@@ -221,7 +221,7 @@ public static class CsvGameDataWorkflow
                 if (failed)
                 {
                     outputLines.Add(line.Raw);
-                    failedCount++;
+                    rawFallbackCount++;
                 }
                 else
                 {
@@ -239,6 +239,10 @@ public static class CsvGameDataWorkflow
 
         FileHelper.WriteAllLinesWithRetry($"{outputPath}/{textFile.Path}", outputLines);
 
-        return (passedCount, failedCount);
+        // CSV rows never fail purely for a low QC score - a template column below MinAcceptableScore
+        // just skips its QcTranslated correction and falls through to the row's plain, pre-QC
+        // fragment translation instead (see the useQcTranslated/usePlainQcTranslated checks above),
+        // so every failure counted here is a RawFallback.
+        return (passedCount, 0, rawFallbackCount);
     }
 }

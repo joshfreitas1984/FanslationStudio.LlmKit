@@ -146,10 +146,11 @@ public class JsonGameDataWorkflowTests
 
             File.WriteAllText($"{dir}/Converted/Hero.json.yaml", YamlHelper.CreateSerializer().Serialize(lines));
 
-            var (passed, failed) = await JsonGameDataWorkflow.PackageAsync(dir, textFile);
+            var (passed, qcRejected, rawFallback) = await JsonGameDataWorkflow.PackageAsync(dir, textFile);
 
             Assert.Equal(3, passed); // Name, Desc, ChatList[0]
-            Assert.Equal(0, failed);
+            Assert.Equal(0, qcRejected);
+            Assert.Equal(0, rawFallback);
 
             var output = System.Text.Json.JsonDocument.Parse(File.ReadAllText($"{dir}/Mod/Hero.json"));
             var obj = output.RootElement[0];
@@ -198,10 +199,11 @@ public class JsonGameDataWorkflowTests
 
             File.WriteAllText($"{dir}/Converted/Test.json.yaml", YamlHelper.CreateSerializer().Serialize(lines));
 
-            var (passed, failed) = await JsonGameDataWorkflow.PackageAsync(dir, textFile);
+            var (passed, qcRejected, rawFallback) = await JsonGameDataWorkflow.PackageAsync(dir, textFile);
 
             Assert.Equal(1, passed);
-            Assert.Equal(1, failed);
+            Assert.Equal(0, qcRejected);
+            Assert.Equal(1, rawFallback);
 
             var output = System.Text.Json.JsonDocument.Parse(File.ReadAllText($"{dir}/Mod/Test.json"));
             var obj = output.RootElement[0];
