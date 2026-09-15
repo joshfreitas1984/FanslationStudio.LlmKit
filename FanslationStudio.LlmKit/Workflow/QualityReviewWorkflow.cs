@@ -719,6 +719,25 @@ public static class QualityReviewWorkflow
         // translation path.
         correctedResult = LineValidation.PrepareResult(rawText, correctedResult, config.Hooks, item.File.TextFile, anchor.Split);
 
+        // A confirmed/claimed DEFECT whose "fix" comes back byte-identical to the already-accepted
+        // translation isn't a real correction - nothing to validate, nothing to flag a human with.
+        // Observed in practice after two-stage verification confirms a category but the model's own
+        // rewrite happens to reproduce the original text verbatim (e.g. "霓裳仙子" -> "Fairy Nishang"
+        // unchanged) - see the QcTriageByDefectCategory.yaml sample analysis in
+        // qc-qualityscore-noise-investigation.md (DragonHierOverLlm) this was found from. Treated
+        // exactly like the model finding nothing to correct in the first place (verdict.CorrectedRawMasked
+        // == null, above) rather than as a low-confidence match that still needs human review - the
+        // CONSISTENCY convention (DEFECT: NONE requires SCORE 80+) is restored here explicitly since
+        // the model's own SCORE/DEFECT lines were computed against a claim that didn't actually pan out.
+        if (correctedResult == effectiveTranslated)
+        {
+            anchor.QcDefectCategory = QcDefectCategory.None;
+            anchor.QcQualityScore = 100;
+            anchor.QcStatus = QcStatus.Passed;
+            anchor.FlaggedForQcReview = false;
+            return QcOutcome.Passed;
+        }
+
         // Validation gate: TranslationWorkflow.EvaluateRules is the single shared rule list a
         // candidate translation must pass - the same one ApplyTranslationRules runs against
         // Translated and ApplyRulesToCurrentQcTranslated re-runs against an already-accepted
