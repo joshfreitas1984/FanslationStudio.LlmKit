@@ -46,6 +46,13 @@ TRANSLATION RULES:
     "Don't panic, let me take a look... / Thank goodness, thank goodness. She only passed out from
     exhaustion." - not "...I just fainted from exhaustion.", which wrongly inherits the speaker as
     the subject of the second line.
+11. Chinese marks a stammer/stutter by repeating the leading syllable(s) of a word right before the
+    full word, separated by 、, or ,, e.g. "思、思阁主" (stammering on 思 before 思阁主) or
+    "你、你、你……" (stammering on 你 three times before the sentence continues). Render this as
+    English stammering: repeat the leading sound(s) of the corresponding English word/name with a
+    hyphen, e.g. "思、思阁主" → "Pa-Pavilion Master" and "你、你、你敢……" → "Y-y-you dare...". Never
+    drop the repetition (translating straight through as if unstammered) and never expand it into a
+    full separately-spoken word instead of a hyphenated partial repeat.
 
 SPECIAL RULES:
 - Text inside single quotes '...' must remain unchanged.

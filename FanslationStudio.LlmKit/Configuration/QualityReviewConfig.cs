@@ -1,3 +1,5 @@
+using FanslationStudio.LlmKit.Support;
+
 namespace FanslationStudio.LlmKit.Configuration;
 
 /// <summary>
@@ -72,4 +74,27 @@ public class QualityReviewConfig
     /// docs/quality-review-pass-architecture.md "Inline rule-check retries".
     /// </summary>
     public int InlineRuleCheckRetries { get; set; } = 0;
+
+    /// <summary>
+    /// DEFECT categories (see <see cref="QcDefectCategory"/>) a human has determined - by
+    /// hand-validating a per-category sample from
+    /// <see cref="Workflow.QualityReviewWorkflow.GetQcTriageAsync"/>'s <c>ByDefectCategory</c>
+    /// output (written to <c>TestResults/QcTriageByDefectCategory.yaml</c> by
+    /// <see cref="Workflow.QualityReviewWorkflow.WriteTriageReportAsync"/>) and computing that
+    /// category's precision (genuine defects / sample size) - are low-precision enough (at or near
+    /// 0%) that every flagged line in that category should be trusted/packaged wholesale despite
+    /// its low <see cref="Support.TranslationSplit.QcQualityScore"/>, instead of held back for full
+    /// human review like every other flagged line. See docs/qc-qualityscore-noise-investigation.md's
+    /// "stratify by DEFECT category" policy step for the reasoning.
+    ///
+    /// Empty by default - no category is auto-accepted, so every flagged line keeps the old
+    /// score-gated behavior (held back, <see cref="Support.TranslationSplit.FlaggedForQcReview"/>)
+    /// until a category is explicitly added here. A category NOT listed here is unaffected
+    /// regardless of what its eventual measured precision turns out to be - this is a deliberate
+    /// per-category opt-in, not a default that could silently change behavior for a category nobody
+    /// has actually hand-validated yet. Checked by
+    /// <see cref="Utility.QualityReviewHelpers.PassesQcScoreGate"/>, the single choke point every
+    /// packaging path uses for this decision - see its doc comment.
+    /// </summary>
+    public HashSet<QcDefectCategory> AutoAcceptDefectCategories { get; set; } = new();
 }

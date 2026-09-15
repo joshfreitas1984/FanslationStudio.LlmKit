@@ -110,7 +110,7 @@ public static class DynamicStringWorkflow
         var outputPath = $"{workingDirectory}/Mod";
         Directory.CreateDirectory(outputPath);
 
-        var minAcceptableScore = Configuration.ConfigurationExtensions.GetConfiguration(workingDirectory).QualityReview.MinAcceptableScore;
+        var qualityReview = Configuration.ConfigurationExtensions.GetConfiguration(workingDirectory).QualityReview;
 
         var results = new List<DynamicStringResult>();
         var seenBareRaw = new HashSet<string>();
@@ -122,7 +122,7 @@ public static class DynamicStringWorkflow
         {
             foreach (var line in fileLines)
             {
-                var (result, reason, bareFragment) = ReconstructLine(line, textFile, minAcceptableScore);
+                var (result, reason, bareFragment) = ReconstructLine(line, textFile, qualityReview);
                 if (result == null)
                     continue;
 
@@ -199,7 +199,8 @@ public static class DynamicStringWorkflow
     /// <summary>
     /// Reconstructs a single line's packaged output. The returned <see cref="PackagingFailureReason"/>
     /// reflects whether/why the line fell back to its original raw text: <c>QcRejected</c> when it
-    /// scored below <paramref name="minAcceptableScore"/> by the quality review pass, <c>RawFallback</c>
+    /// fails <see cref="Utility.QualityReviewHelpers.PassesQcScoreGate"/> (a low score not covered by
+    /// an auto-accepted DEFECT category), <c>RawFallback</c>
     /// when a fragment/split was unsafe, flagged for retranslation, or missing its translation - this
     /// must be reported by the caller as an actual failure (see <see cref="PackageDynamicStringsAsync"/>)
     /// rather than silently folded into the same bucket as a genuinely successful line, since all
@@ -211,7 +212,7 @@ public static class DynamicStringWorkflow
     /// <see cref="PackageDynamicStringsAsync"/> for why this extra bare label/translation pair
     /// needs to be packaged as its own dictionary entry alongside the full reconstructed line.
     /// </summary>
-    private static (string? Result, PackagingFailureReason Reason, (string Raw, string Result)? BareFragment) ReconstructLine(TranslationLine line, TextFileToSplit textFile, int minAcceptableScore)
+    private static (string? Result, PackagingFailureReason Reason, (string Raw, string Result)? BareFragment) ReconstructLine(TranslationLine line, TextFileToSplit textFile, Configuration.QualityReviewConfig qualityReview)
     {
         var template = line.Templates.FirstOrDefault(t => t.Split == 0);
         if (template != null)
@@ -226,7 +227,7 @@ public static class DynamicStringWorkflow
             var anchor = fragments.FirstOrDefault(f => f.SubIndex == 0);
             var qcFresh = anchor != null && QualityReviewHelpers.IsQcReviewFresh(anchor, template, fragments);
 
-            if (qcFresh && anchor!.QcQualityScore is int score && score < minAcceptableScore)
+            if (qcFresh && !QualityReviewHelpers.PassesQcScoreGate(anchor!.QcQualityScore, anchor.QcDefectCategory, qualityReview))
                 return (line.Raw, PackagingFailureReason.QcRejected, null);
 
             if (qcFresh && !string.IsNullOrEmpty(anchor!.QcTranslated))
@@ -267,7 +268,7 @@ public static class DynamicStringWorkflow
 
         var plainQcFresh = QualityReviewHelpers.IsQcReviewFresh(split, null, [split]);
 
-        if (plainQcFresh && split.QcQualityScore is int plainScore && plainScore < minAcceptableScore)
+        if (plainQcFresh && !QualityReviewHelpers.PassesQcScoreGate(split.QcQualityScore, split.QcDefectCategory, qualityReview))
             return (split.Text, PackagingFailureReason.QcRejected, null);
 
         var effectiveTranslated = plainQcFresh && !string.IsNullOrEmpty(split.QcTranslated) ? split.QcTranslated : split.Translated;

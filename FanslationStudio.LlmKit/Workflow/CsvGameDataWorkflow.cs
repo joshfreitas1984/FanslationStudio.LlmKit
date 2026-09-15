@@ -110,7 +110,7 @@ public static class CsvGameDataWorkflow
         var outputPath = $"{workingDirectory}/Mod";
         Directory.CreateDirectory(outputPath);
 
-        var minAcceptableScore = ConfigurationExtensions.GetConfiguration(workingDirectory).QualityReview.MinAcceptableScore;
+        var qualityReview = ConfigurationExtensions.GetConfiguration(workingDirectory).QualityReview;
 
         var outputLines = new List<string>();
         var passedCount = 0;
@@ -143,7 +143,7 @@ public static class CsvGameDataWorkflow
                     var qcFresh = anchor != null && QualityReviewHelpers.IsQcReviewFresh(anchor, template, fragments);
                     var useQcTranslated = qcFresh
                         && !string.IsNullOrEmpty(anchor!.QcTranslated)
-                        && !(anchor.QcQualityScore is int templateScore && templateScore < minAcceptableScore);
+                        && QualityReviewHelpers.PassesQcScoreGate(anchor.QcQualityScore, anchor.QcDefectCategory, qualityReview);
 
                     if (useQcTranslated)
                     {
@@ -201,7 +201,7 @@ public static class CsvGameDataWorkflow
                         var plainQcFresh = QualityReviewHelpers.IsQcReviewFresh(split, null, [split]);
                         var usePlainQcTranslated = plainQcFresh
                             && !string.IsNullOrEmpty(split.QcTranslated)
-                            && !(split.QcQualityScore is int plainScore && plainScore < minAcceptableScore);
+                            && QualityReviewHelpers.PassesQcScoreGate(split.QcQualityScore, split.QcDefectCategory, qualityReview);
 
                         var effectiveTranslated = usePlainQcTranslated ? split.QcTranslated : split.Translated;
 

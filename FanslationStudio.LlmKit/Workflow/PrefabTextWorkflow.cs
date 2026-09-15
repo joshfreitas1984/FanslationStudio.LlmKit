@@ -114,7 +114,7 @@ public static class PrefabTextWorkflow
         var outputPath = $"{workingDirectory}/Mod";
         Directory.CreateDirectory(outputPath);
 
-        var minAcceptableScore = Configuration.ConfigurationExtensions.GetConfiguration(workingDirectory).QualityReview.MinAcceptableScore;
+        var qualityReview = Configuration.ConfigurationExtensions.GetConfiguration(workingDirectory).QualityReview;
 
         var results = new List<PrefabTextResult>();
         var passedCount = 0;
@@ -125,7 +125,7 @@ public static class PrefabTextWorkflow
         {
             foreach (var line in fileLines)
             {
-                var (result, reason) = ReconstructLine(line, textFile, minAcceptableScore);
+                var (result, reason) = ReconstructLine(line, textFile, qualityReview);
                 if (result == null)
                     continue;
 
@@ -160,8 +160,8 @@ public static class PrefabTextWorkflow
     /// <summary>
     /// Reconstructs a single line's packaged output. The returned <see cref="PackagingFailureReason"/>
     /// reflects whether/why the line fell back to its original raw text: <c>QcRejected</c> when (see
-    /// docs/plans/quality-review-pass.md) it scored below <paramref name="minAcceptableScore"/> by
-    /// the quality review pass, <c>RawFallback</c> when a fragment/split was unsafe, flagged for
+    /// docs/plans/quality-review-pass.md) it fails <see cref="Utility.QualityReviewHelpers.PassesQcScoreGate"/>
+    /// (a low score not covered by an auto-accepted DEFECT category), <c>RawFallback</c> when a fragment/split was unsafe, flagged for
     /// retranslation, or missing its translation - this must be reported by the caller as an actual
     /// failure (see <see cref="PackagePrefabTextAsync"/>) rather than silently folded into the same
     /// bucket as a genuinely successful line, since all three cases otherwise look identical in the
@@ -169,7 +169,7 @@ public static class PrefabTextWorkflow
     /// values are never modified here regardless of outcome - this only decides what gets written
     /// to <c>Files/Mod</c>, never what's kept in <c>Files/Converted</c>.
     /// </summary>
-    private static (string? Result, PackagingFailureReason Reason) ReconstructLine(TranslationLine line, TextFileToSplit textFile, int minAcceptableScore)
+    private static (string? Result, PackagingFailureReason Reason) ReconstructLine(TranslationLine line, TextFileToSplit textFile, Configuration.QualityReviewConfig qualityReview)
     {
         var template = line.Templates.FirstOrDefault(t => t.Split == 0);
         if (template != null)
@@ -186,7 +186,7 @@ public static class PrefabTextWorkflow
             var anchor = fragments.FirstOrDefault(f => f.SubIndex == 0);
             var qcFresh = anchor != null && QualityReviewHelpers.IsQcReviewFresh(anchor, template, fragments);
 
-            if (qcFresh && anchor!.QcQualityScore is int score && score < minAcceptableScore)
+            if (qcFresh && !QualityReviewHelpers.PassesQcScoreGate(anchor!.QcQualityScore, anchor.QcDefectCategory, qualityReview))
                 return (line.Raw, PackagingFailureReason.QcRejected);
 
             if (qcFresh && !string.IsNullOrEmpty(anchor!.QcTranslated))
@@ -216,7 +216,7 @@ public static class PrefabTextWorkflow
 
         var plainQcFresh = QualityReviewHelpers.IsQcReviewFresh(split, null, [split]);
 
-        if (plainQcFresh && split.QcQualityScore is int plainScore && plainScore < minAcceptableScore)
+        if (plainQcFresh && !QualityReviewHelpers.PassesQcScoreGate(split.QcQualityScore, split.QcDefectCategory, qualityReview))
             return (split.Text, PackagingFailureReason.QcRejected);
 
         var effectiveTranslated = plainQcFresh && !string.IsNullOrEmpty(split.QcTranslated) ? split.QcTranslated : split.Translated;

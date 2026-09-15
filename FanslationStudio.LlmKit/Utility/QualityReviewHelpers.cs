@@ -1,3 +1,4 @@
+using FanslationStudio.LlmKit.Configuration;
 using FanslationStudio.LlmKit.Support;
 
 namespace FanslationStudio.LlmKit.Utility;
@@ -69,4 +70,26 @@ public static class QualityReviewHelpers
     /// </summary>
     public static bool IsCorrectedLabelLeak(string? qcTranslated) =>
         !string.IsNullOrEmpty(qcTranslated) && qcTranslated.Contains("CORRECTED:", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// True if a column's recorded QC score should be trusted for packaging - either it cleared
+    /// <see cref="QualityReviewConfig.MinAcceptableScore"/>, or it didn't but its
+    /// <see cref="TranslationSplit.QcDefectCategory"/> is one a human has hand-validated and
+    /// designated low-precision enough to auto-accept wholesale via
+    /// <see cref="QualityReviewConfig.AutoAcceptDefectCategories"/> (see that property's doc
+    /// comment and docs/qc-qualityscore-noise-investigation.md's "stratify by DEFECT category"
+    /// policy step). The single choke point every packaging path (CsvGameDataWorkflow,
+    /// JsonGameDataWorkflow, DynamicStringWorkflow, PrefabTextWorkflow) uses for this decision, so
+    /// the policy only needs to be taught here once. A null <paramref name="score"/> (never
+    /// reviewed, or a rejected correction with the score already cleared) always passes - callers
+    /// already gate those cases separately via <see cref="IsQcReviewFresh"/> and a
+    /// non-empty-<see cref="TranslationSplit.QcTranslated"/> check.
+    /// </summary>
+    public static bool PassesQcScoreGate(int? score, QcDefectCategory category, QualityReviewConfig qualityReview)
+    {
+        if (score is not int s || s >= qualityReview.MinAcceptableScore)
+            return true;
+
+        return qualityReview.AutoAcceptDefectCategories.Contains(category);
+    }
 }

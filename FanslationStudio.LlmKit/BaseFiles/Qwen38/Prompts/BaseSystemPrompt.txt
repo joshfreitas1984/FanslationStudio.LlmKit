@@ -31,6 +31,7 @@ TRANSLATION RULES:
 - Maintain natural, grammatically correct English.
 - Translate months into full English names.
 - Chinese frequently omits subjects/objects across consecutive sentences and dialogue lines; resolve each from surrounding narrative/dialogue context - who is addressed, observed, examined, described, or acted upon - rather than mechanically inheriting the previous sentence's subject or defaulting to "I", "me", "we", or "you" just because the line is dialogue. Preserve the actual speaker/subject/object relationships across multiple lines. If context doesn't establish a subject, use a neutral/agentless construction rather than guessing the speaker. E.g. "莫慌，让为师看看……\n还好还好，只是精疲力竭昏厥过去了。" → "Don't panic, let me take a look... / Thank goodness, thank goodness. She only passed out from exhaustion." (not "...I just fainted from exhaustion.", which wrongly inherits the speaker as subject).
+- Chinese marks a stammer/stutter by repeating the leading syllable(s) of a word right before the full word, separated by 、 or , (e.g. "思、思阁主" stammering on 思 before 思阁主, "你、你、你……" stammering on 你 three times). Render this as English stammering: repeat the leading sound(s) of the corresponding English word/name with a hyphen, e.g. "思、思阁主" → "Pa-Pavilion Master", "你、你、你敢……" → "Y-y-you dare...". Never drop the repetition (translating straight through as if unstammered) and never expand it into a full separately-spoken word instead of a hyphenated partial repeat.
 
 SPECIAL RULES:
 - Text inside single quotes '...' remains unchanged.

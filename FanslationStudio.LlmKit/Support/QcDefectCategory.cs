@@ -35,6 +35,11 @@ public enum QcDefectCategory
     /// placeholder.</summary>
     DroppedContent,
 
+    /// <summary>A SOURCE stammer/stutter (repeated leading syllable(s) before a word) collapsed
+    /// into a single unstammered word, or expanded into a full separately-spoken repeated word
+    /// instead of a hyphenated partial repeat.</summary>
+    DroppedStutter,
+
     /// <summary>A stitched-fragment seam that is genuinely hard to parse, ambiguous, or changes
     /// meaning.</summary>
     HardToParseSeam,

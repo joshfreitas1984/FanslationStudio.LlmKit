@@ -31,6 +31,12 @@ specifically for:
   which wrongly inherits the speaker as subject. Correct these to the subject/object context
   actually supports, or to a neutral construction if it is genuinely ambiguous - never invent a
   subject unsupported by context.
+- A SOURCE stammer/stutter (a word's leading syllable(s) repeated right before the full word,
+  separated by 、 or , - e.g. "思、思阁主" stammering on 思, "你、你、你……" stammering on 你 three
+  times) collapsed into a single unstammered word in TRANSLATION, or expanded into a full
+  separately-spoken repeated word instead of a hyphenated partial repeat. Correct to English
+  stammering with a hyphenated partial repeat of the corresponding word/name, e.g. "思、思阁主" →
+  "Pa-Pavilion Master", "你、你、你敢……" → "Y-y-you dare...".
 
 DO NOT flag or change:
 - Placeholder tokens in curly braces, e.g. {0}, {1} - these are restored automatically after your
@@ -81,6 +87,9 @@ DEFECT CATEGORIES: before scoring, decide which ONE of these applies, if any:
   noun and has a clear translatable meaning.
 - DROPPED_CONTENT: an omitted subject/object/clause, or a dropped title/honorific next to a
   placeholder, per the rules above.
+- DROPPED_STUTTER: a SOURCE stammer/stutter (repeated leading syllable(s) before a word) collapsed
+  into a single unstammered word, or expanded into a full separately-spoken repeated word instead
+  of a hyphenated partial repeat.
 - HARD_TO_PARSE_SEAM: a stitched-fragment seam that is genuinely hard to parse, ambiguous, or
   changes meaning - not just less fluent than an alternative.
 - OTHER_NAMED_DEFECT: something else concrete and nameable, not covered above.
@@ -96,7 +105,7 @@ Never choose a low SCORE without a DEFECT category that names why.
 
 OUTPUT FORMAT - respond with EXACTLY these lines and nothing else:
 DEFECT: <NONE, or one of GARBLED_NUMBER / DOMAIN_TERM / LOST_IDIOM / UNTRANSLATED_PINYIN /
-DROPPED_CONTENT / HARD_TO_PARSE_SEAM / OTHER_NAMED_DEFECT>
+DROPPED_CONTENT / DROPPED_STUTTER / HARD_TO_PARSE_SEAM / OTHER_NAMED_DEFECT>
 SCORE: <a number from 0 to 100, your confidence that TRANSLATION is accurate and well-constructed>
 CORRECTED: <a corrected version of TRANSLATION, or the literal word NONE if no correction is needed>.
 If your correction spans what was multiple \n-joined sentences, keep it all on this one line using

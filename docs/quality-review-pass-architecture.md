@@ -41,6 +41,13 @@ already-serialized YAML:
 - `QcQualityScore` (`int?`, 0-100) — self-rated confidence from the QC model, set on every reviewed
   column regardless of whether a correction was proposed. Treat as a relative sort key for triage,
   not a calibrated absolute metric — a small/local model's self-rating is inherently noisy.
+- `QcDefectCategory` (`Support/QcDefectCategory.cs` enum: `Unknown` / `None` / `GarbledNumber` /
+  `DomainTerm` / `LostIdiom` / `UntranslatedPinyin` / `DroppedContent` / `HardToParseSeam` /
+  `OtherNamedDefect`) — the `DEFECT:` category the model names alongside `SCORE:`, parsed from the
+  same response (see step 6 below). `Unknown` (the default) means either "never reviewed" or a
+  response that predates the DEFECT-first prompt — same "not yet reviewed" convention as
+  `QcQualityScore` being `null`. Exists specifically so a large flagged set can be triaged/policed
+  *by category* instead of only by score — see "DEFECT categories and per-category policy" below.
 - `ResetQcState()` — clears all of the above back to `NotReviewed`. Only ever called from inside
   `QualityReviewWorkflow.ReviewColumnAsync`, right before recording a fresh outcome.
   **`TranslationSplit.ResetFlags()` deliberately does NOT call this** — Qc state tracks an
@@ -112,7 +119,10 @@ authority for the whole column.
    single user message against the `BaseQualityReviewPrompt` system prompt. One LLM call
    (`TranslationService.TranslateMessagesAsync`, reused directly — no new HTTP-calling code) —
    producing both the score and the verdict in the same round trip.
-6. Parses the response: `SCORE: <0-100>` (required — `ScoreLineRegex`) and `CORRECTED: <text|NONE>`
+6. Parses the response: `SCORE: <0-100>` (required — `ScoreLineRegex`), `DEFECT: <category|NONE>`
+   (`DefectLineRegex`/`ParseDefectCategory` — optional; a response that predates the DEFECT-first
+   prompt or otherwise omits/mis-formats this line just leaves `QcDefectCategory` at `Unknown`,
+   it never blocks parsing the rest of the response), and `CORRECTED: <text|NONE>`
    (`CorrectedLineRegex`). A response that fails to parse the score is treated as unreviewed and
    left completely untouched (not recorded as a guess) — picked up again next run.
 7. `anchor.ResetQcState()` then records the fresh outcome:

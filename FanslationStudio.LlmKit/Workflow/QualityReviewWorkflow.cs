@@ -61,6 +61,7 @@ public static class QualityReviewWorkflow
             "LOST_IDIOM" => QcDefectCategory.LostIdiom,
             "UNTRANSLATED_PINYIN" => QcDefectCategory.UntranslatedPinyin,
             "DROPPED_CONTENT" => QcDefectCategory.DroppedContent,
+            "DROPPED_STUTTER" => QcDefectCategory.DroppedStutter,
             "HARD_TO_PARSE_SEAM" => QcDefectCategory.HardToParseSeam,
             _ => QcDefectCategory.OtherNamedDefect,
         };
@@ -1409,6 +1410,54 @@ public static class QualityReviewWorkflow
                         continue;
 
                     Console.WriteLine($"Quality review cleanup: '{textFile.Path}' split {anchor.Split} scored {score} (below {threshold}) under the old scoring - resetting for re-review.");
+                    anchor.ResetQcState();
+                    resetCount++;
+                }
+            }
+
+            if (resetCount > 0)
+                await FileHelper.WriteAllTextWithRetryAsync(outputFile, serializer.Serialize(fileLines));
+        });
+    }
+
+    /// <summary>
+    /// Resets every currently-flagged column (<see cref="TranslationSplit.FlaggedForQcReview"/>)
+    /// whose <see cref="TranslationSplit.QcDefectCategory"/> is NOT in the configured
+    /// <see cref="Configuration.QualityReviewConfig.AutoAcceptDefectCategories"/> back to
+    /// <see cref="QcStatus.NotReviewed"/> for a fresh review - the DEFECT-category counterpart to
+    /// <see cref="ResetLowScoreQcState"/> (which resets by score threshold instead of category). See
+    /// docs/qc-qualityscore-noise-investigation.md's "stratify by DEFECT category" policy step.
+    ///
+    /// Two things land in this bucket every time it's run: <see cref="QcDefectCategory.Unknown"/>
+    /// (a line whose response predates the DEFECT-first prompt, or otherwise failed to parse a
+    /// DEFECT: line) and any category deliberately left off the auto-accept list because a human
+    /// hasn't hand-validated it as low-precision yet - both need another look, not a permanent home
+    /// in "flagged but never revisited". Safe to re-run as often as useful: once to sweep up
+    /// <c>Unknown</c> rows left over from before DEFECT was parsed, and again any time
+    /// <c>AutoAcceptDefectCategories</c> changes (widened after hand-validating another category, or
+    /// a category's precision verdict is revised) to pull the newly-decided set back out of
+    /// "flagged" one way or the other on the next QC run.
+    /// </summary>
+    public static async Task ResetNonAutoAcceptedQcState(string workingDirectory, TextFileToSplit[] textFiles, GameHooks? hooks = null)
+    {
+        var config = ConfigurationExtensions.GetConfiguration(workingDirectory, hooks);
+        var autoAccepted = config.QualityReview.AutoAcceptDefectCategories;
+        var serializer = YamlHelper.CreateSerializer();
+
+        await FileIteration.IterateTranslatedFilesInParallelAsync(workingDirectory, textFiles, async (outputFile, textFile, fileLines) =>
+        {
+            var resetCount = 0;
+
+            foreach (var line in fileLines)
+            {
+                foreach (var columnGroup in line.Splits.GroupBy(s => s.Split))
+                {
+                    var anchor = columnGroup.OrderBy(s => s.SubIndex).FirstOrDefault(f => f.SubIndex == 0) ?? columnGroup.First();
+
+                    if (!anchor.FlaggedForQcReview || autoAccepted.Contains(anchor.QcDefectCategory))
+                        continue;
+
+                    Console.WriteLine($"Quality review cleanup: '{textFile.Path}' split {anchor.Split} defect {anchor.QcDefectCategory} not auto-accepted - resetting for re-review.");
                     anchor.ResetQcState();
                     resetCount++;
                 }

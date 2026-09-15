@@ -149,7 +149,7 @@ public static class JsonGameDataWorkflow
         var outputPath = $"{workingDirectory}/Mod";
         Directory.CreateDirectory(outputPath);
 
-        var minAcceptableScore = ConfigurationExtensions.GetConfiguration(workingDirectory).QualityReview.MinAcceptableScore;
+        var qualityReview = ConfigurationExtensions.GetConfiguration(workingDirectory).QualityReview;
 
         var outputArray = new JsonArray();
         var passedCount = 0;
@@ -174,7 +174,7 @@ public static class JsonGameDataWorkflow
                     var fragments = group.OrderBy(s => s.SubIndex).ToList();
                     var template = templatesByPath.GetValueOrDefault(splitPath);
 
-                    var (ok, packagedText) = PackageField(fragments, template, textFile, minAcceptableScore);
+                    var (ok, packagedText) = PackageField(fragments, template, textFile, qualityReview);
 
                     if (!ok)
                     {
@@ -206,7 +206,7 @@ public static class JsonGameDataWorkflow
     }
 
     private static (bool Ok, string Text) PackageField(
-        List<TranslationSplit> fragments, FieldTemplate? template, TextFileToSplit textFile, int minAcceptableScore)
+        List<TranslationSplit> fragments, FieldTemplate? template, TextFileToSplit textFile, QualityReviewConfig qualityReview)
     {
         var anchor = fragments.FirstOrDefault(f => f.SubIndex == 0) ?? fragments.FirstOrDefault();
         if (anchor == null)
@@ -215,7 +215,7 @@ public static class JsonGameDataWorkflow
         var qcFresh = QualityReviewHelpers.IsQcReviewFresh(anchor, template, fragments);
         var useQcTranslated = qcFresh
             && !string.IsNullOrEmpty(anchor.QcTranslated)
-            && !(anchor.QcQualityScore is int score && score < minAcceptableScore);
+            && QualityReviewHelpers.PassesQcScoreGate(anchor.QcQualityScore, anchor.QcDefectCategory, qualityReview);
 
         if (useQcTranslated)
             return (true, anchor.QcTranslated);
