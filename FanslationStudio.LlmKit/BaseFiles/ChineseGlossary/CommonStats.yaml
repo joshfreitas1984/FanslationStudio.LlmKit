@@ -97,6 +97,7 @@
   result: True Qi
   literal: Zhenqi
   context: True Qi / True Energy
+  badtrans: false
   allowalt:
    - grand 
 - raw: 根骨
