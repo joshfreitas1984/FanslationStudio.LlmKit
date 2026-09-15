@@ -31,6 +31,42 @@ public static class QualityReviewWorkflow
     private static readonly Regex ScoreLineRegex = new(@"^\s*SCORE:\s*(\d+)", RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Compiled);
 
     /// <summary>
+    /// Captures the <c>DEFECT:</c> category line the DEFECT-first prompt restructuring added ahead
+    /// of <c>SCORE:</c> - see docs/qc-qualityscore-noise-investigation.md (Tests project,
+    /// DragonHierOverLlm repo). Single-line like <see cref="ScoreLineRegex"/> (not
+    /// <see cref="RegexOptions.Singleline"/>) since the category is always one bare token, never
+    /// free text that could wrap. Missing/unparseable is not treated as a parse failure the way a
+    /// missing SCORE is - a response predating this prompt change, or one that just omits the line,
+    /// still has a usable score/correction, so <see cref="ParseDefectCategory"/> just falls back to
+    /// <see cref="QcDefectCategory.Unknown"/> rather than discarding the whole verdict.
+    /// </summary>
+    private static readonly Regex DefectLineRegex = new(@"^\s*DEFECT:\s*(\S+)", RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Compiled);
+
+    /// <summary>Maps the DEFECT prompt's upper-snake-case token (e.g. "GARBLED_NUMBER") to
+    /// <see cref="QcDefectCategory"/>. Anything present but unrecognized (a model typo/variant) is
+    /// still worth surfacing as a named defect rather than silently dropped, so it falls back to
+    /// <see cref="QcDefectCategory.OtherNamedDefect"/> instead of <see cref="QcDefectCategory.Unknown"/> -
+    /// only a genuinely absent line means Unknown.</summary>
+    private static QcDefectCategory ParseDefectCategory(string llmResponse)
+    {
+        var match = DefectLineRegex.Match(llmResponse);
+        if (!match.Success)
+            return QcDefectCategory.Unknown;
+
+        return match.Groups[1].Value.Trim().ToUpperInvariant() switch
+        {
+            "NONE" => QcDefectCategory.None,
+            "GARBLED_NUMBER" => QcDefectCategory.GarbledNumber,
+            "DOMAIN_TERM" => QcDefectCategory.DomainTerm,
+            "LOST_IDIOM" => QcDefectCategory.LostIdiom,
+            "UNTRANSLATED_PINYIN" => QcDefectCategory.UntranslatedPinyin,
+            "DROPPED_CONTENT" => QcDefectCategory.DroppedContent,
+            "HARD_TO_PARSE_SEAM" => QcDefectCategory.HardToParseSeam,
+            _ => QcDefectCategory.OtherNamedDefect,
+        };
+    }
+
+    /// <summary>
     /// Captures from "CORRECTED:" to the end of the response (Singleline - dot matches newline),
     /// not just its first physical line - a multi-sentence correction is frequently joined with a
     /// real line break rather than SOURCE/TRANSLATION's literal "\n", and an earlier single-line-
@@ -172,7 +208,7 @@ public static class QualityReviewWorkflow
     /// a known SOURCE/TRANSLATION pair without needing a corpus row (see DragonHierOverLlm's
     /// `"3g. QcOmittedSubjectRegression"` test).
     /// </summary>
-    internal sealed record LlmVerdict(bool Success, int Score, string? CorrectedRawMasked);
+    internal sealed record LlmVerdict(bool Success, int Score, string? CorrectedRawMasked, QcDefectCategory Defect = QcDefectCategory.Unknown);
 
     /// <summary>
     /// SOURCE + CURRENT TRANSLATION + the glossary prompt built for them (see
@@ -593,6 +629,7 @@ public static class QualityReviewWorkflow
         anchor.ResetQcState();
         anchor.QcReviewedText = effectiveTranslated;
         anchor.QcQualityScore = verdict.Score;
+        anchor.QcDefectCategory = verdict.Defect;
 
         if (verdict.CorrectedRawMasked == null)
         {
@@ -674,6 +711,7 @@ public static class QualityReviewWorkflow
                 // intended clean fallback to the last known-good Translated.
                 anchor.QcStatus = QcStatus.FailedValidation;
                 anchor.QcQualityScore = null;
+                anchor.QcDefectCategory = QcDefectCategory.Unknown;
                 anchor.FlaggedForQcReview = true;
                 return QcOutcome.RejectedByGate;
             }
@@ -816,6 +854,7 @@ public static class QualityReviewWorkflow
             }
 
             var score = Math.Clamp(int.Parse(scoreMatch.Groups[1].Value), 0, 100);
+            var defect = ParseDefectCategory(llmResponse);
 
             var correctedMatch = CorrectedLineRegex.Match(llmResponse);
             var correctedRaw = correctedMatch.Success ? correctedMatch.Groups[1].Value.Trim() : string.Empty;
@@ -839,7 +878,7 @@ public static class QualityReviewWorkflow
                 && !correctedRaw.Equals("NONE", StringComparison.OrdinalIgnoreCase);
 
             if (!hasCorrection)
-                return new LlmVerdict(true, score, null);
+                return new LlmVerdict(true, score, null, defect);
 
             // Only the bad-words check is safe to run here: it's a pure function of the candidate
             // text alone (TranslationWorkflow.MatchesBadWords), unlike the rest of EvaluateRules
@@ -853,7 +892,7 @@ public static class QualityReviewWorkflow
             // unchanged.
             var badWordMatches = TranslationWorkflow.FindBadWordMatches(correctedRaw);
             if (badWordMatches.Count == 0 || attempt >= maxInlineRetries)
-                return new LlmVerdict(true, score, correctedRaw);
+                return new LlmVerdict(true, score, correctedRaw, defect);
 
             Console.WriteLine($"Quality review: correction for '{rawText}' matched the bad-words list ({string.Join(", ", badWordMatches)}) - inline retry {attempt + 1}/{maxInlineRetries}.");
             TranslationService.AddCorrectionMessages(
@@ -1142,6 +1181,7 @@ public static class QualityReviewWorkflow
             anchor.QcRejectedCorrection = current;
             anchor.QcFailureReason = $"Gave up after {anchor.QcRuleCheckFailureCount} rule-check retries: {failureReason}";
             anchor.QcQualityScore = null;
+            anchor.QcDefectCategory = QcDefectCategory.Unknown;
             anchor.FlaggedForQcReview = true;
             // Not counted as "needsRetry" - a given-up column lands on FailedValidation, which
             // RunAsync won't touch again, so another RunBruteForce iteration would find no further
@@ -1389,7 +1429,7 @@ public static class QualityReviewWorkflow
     /// review would fail to match against a since-changed <c>Translated</c> (see
     /// <see cref="Utility.QualityReviewHelpers.IsQcReviewFresh"/>).
     /// </summary>
-    public record FlaggedQcReview(string FilePath, string Text, string QcReviewedText, string QcTranslated, string? RejectedCorrection, string? Reason, int? Score);
+    public record FlaggedQcReview(string FilePath, string Text, string QcReviewedText, string QcTranslated, string? RejectedCorrection, string? Reason, int? Score, QcDefectCategory Defect = QcDefectCategory.Unknown);
 
     public static async Task<List<FlaggedQcReview>> GetFlaggedQcReviews(string workingDirectory, TextFileToSplit[] textFiles)
     {
@@ -1426,7 +1466,8 @@ public static class QualityReviewWorkflow
                         anchor.QcTranslated,
                         string.IsNullOrEmpty(anchor.QcRejectedCorrection) ? null : anchor.QcRejectedCorrection,
                         string.IsNullOrEmpty(anchor.QcFailureReason) ? null : anchor.QcFailureReason,
-                        anchor.QcQualityScore));
+                        anchor.QcQualityScore,
+                        anchor.QcDefectCategory));
                 }
             }
 
@@ -1446,6 +1487,17 @@ public static class QualityReviewWorkflow
     /// even when only a handful of examples are shown.
     /// </summary>
     public sealed record QcTriageReasonCluster(string Reason, int Count, List<FlaggedQcReview> Examples);
+
+    /// <summary>
+    /// Every flagged row sharing the same <see cref="FlaggedQcReview.Defect"/> category (see
+    /// <see cref="QcDefectCategory"/>), for the "stratify by DEFECT category, not score"
+    /// triage plan - see docs/qc-qualityscore-noise-investigation.md (Tests project,
+    /// DragonHierOverLlm repo). <see cref="Count"/> is the category's TOTAL size across every
+    /// flagged row, independent of <see cref="Sample"/>'s cap - a human hand-validates just the
+    /// sample to estimate that category's precision, then decides a blanket accept/review policy
+    /// for the whole category based on it (see <see cref="QcTriageResult.ByDefectCategory"/>).
+    /// </summary>
+    public sealed record QcDefectCategoryCluster(QcDefectCategory Defect, int Count, List<FlaggedQcReview> Sample);
 
     /// <summary>
     /// <see cref="GetFlaggedQcReviews"/>'s ~thousands-of-rows output split into the two populations
@@ -1479,7 +1531,8 @@ public static class QualityReviewWorkflow
         int LowScoreOnlyCount,
         int MinAcceptableScore,
         List<QcTriageReasonCluster> ByReason,
-        List<FlaggedQcReview> LowScoreSample);
+        List<FlaggedQcReview> LowScoreSample,
+        List<QcDefectCategoryCluster> ByDefectCategory);
 
     /// <summary>
     /// Builds <see cref="QcTriageResult"/> from <see cref="GetFlaggedQcReviews"/>'s output - see that
@@ -1494,13 +1547,18 @@ public static class QualityReviewWorkflow
     /// files, lowest score first.</param>
     /// <param name="maxLowScorePerFile">Caps how many of the sample can come from any one file, so a
     /// single noisy file can't crowd out every other file's rows from the sample.</param>
+    /// <param name="defectCategorySampleSize">How many rows to sample per <see cref="QcDefectCategory"/>
+    /// for <see cref="QcTriageResult.ByDefectCategory"/> - large enough to estimate that category's
+    /// precision with a usable margin, small enough to hand-validate in one sitting. See
+    /// docs/qc-qualityscore-noise-investigation.md's "stratify by DEFECT category" plan.</param>
     public static async Task<QcTriageResult> GetQcTriageAsync(
         string workingDirectory,
         TextFileToSplit[] textFiles,
         GameHooks? hooks = null,
         int examplesPerCluster = 5,
         int lowScoreSampleSize = 100,
-        int maxLowScorePerFile = 15)
+        int maxLowScorePerFile = 15,
+        int defectCategorySampleSize = 40)
     {
         var flagged = await GetFlaggedQcReviews(workingDirectory, textFiles);
         var config = ConfigurationExtensions.GetConfiguration(workingDirectory, hooks);
@@ -1525,15 +1583,35 @@ public static class QualityReviewWorkflow
             .Take(lowScoreSampleSize)
             .ToList();
 
-        return new QcTriageResult(flagged.Count, rejected.Count, lowScoreOnly.Count, minAcceptableScore, byReason, lowScoreSample);
+        // Fixed seed, not a fresh Random per call: makes the sample reproducible across repeated
+        // triage runs against the same flagged set (e.g. re-running WriteTriageReportAsync after a
+        // prompt tweak with no new QC pass in between) instead of a different sample every time,
+        // which would make "did precision improve" impossible to tell apart from "different rows got
+        // sampled". Order-shuffle rather than a per-item random skip - simplest way to get an
+        // unbiased sample per category out of LINQ without a manual reservoir-sampling loop.
+        var shuffleRandom = new Random(12345);
+        var byDefectCategory = flagged
+            .GroupBy(f => f.Defect)
+            .OrderByDescending(g => g.Count())
+            .Select(g => new QcDefectCategoryCluster(
+                g.Key,
+                g.Count(),
+                g.OrderBy(_ => shuffleRandom.Next()).Take(defectCategorySampleSize).ToList()))
+            .ToList();
+
+        return new QcTriageResult(flagged.Count, rejected.Count, lowScoreOnly.Count, minAcceptableScore, byReason, lowScoreSample, byDefectCategory);
     }
 
     /// <summary>
     /// Turnkey per-project reporting step built on <see cref="GetQcTriageAsync"/>: writes
-    /// <c>TestResults/QcTriageSummary.yaml</c> (headline counts), <c>QcTriageByReason.yaml</c> (every
-    /// reason cluster with its examples), and <c>QcTriageLowScoreSample.yaml</c> (the low-score
-    /// spot-check sample). Intended to be wired into a consuming repo's own workflow test file as a
-    /// one-line wrapper run right after that repo's own "find flagged" step - see
+    /// <c>TestResults/QcTriageSummary.yaml</c> (headline counts, including a per-category count
+    /// breakdown), <c>QcTriageByReason.yaml</c> (every reason cluster with its examples),
+    /// <c>QcTriageLowScoreSample.yaml</c> (the low-score spot-check sample), and
+    /// <c>QcTriageByDefectCategory.yaml</c> (every <see cref="QcDefectCategory"/> with its total
+    /// count and a hand-validation sample - see docs/qc-qualityscore-noise-investigation.md, Tests
+    /// project, DragonHierOverLlm repo, for the "stratify by DEFECT category" triage plan this
+    /// feeds). Intended to be wired into a consuming repo's own workflow test file as a one-line
+    /// wrapper run right after that repo's own "find flagged" step - see
     /// docs/quality-review-pass-architecture.md's "Wiring this into a new project" section.
     /// </summary>
     public static async Task WriteTriageReportAsync(string workingDirectory, TextFileToSplit[] textFiles, GameHooks? hooks = null)
@@ -1547,12 +1625,17 @@ public static class QualityReviewWorkflow
             triage.LowScoreOnlyCount,
             distinctReasonClusters = triage.ByReason.Count,
             triage.MinAcceptableScore,
+            // Just the counts per category, not the samples - the full breakdown (with samples) is
+            // in QcTriageByDefectCategory.yaml; this is only here so the counts show up in the
+            // one-glance summary/console output alongside the rest of the headline numbers.
+            defectCategoryCounts = triage.ByDefectCategory.ToDictionary(c => c.Defect.ToString(), c => c.Count),
         };
 
         var serializer = YamlHelper.CreateSerializer();
         FileHelper.WriteAllTextWithRetry($"{workingDirectory}/TestResults/QcTriageSummary.yaml", serializer.Serialize(summary));
         FileHelper.WriteAllTextWithRetry($"{workingDirectory}/TestResults/QcTriageByReason.yaml", serializer.Serialize(triage.ByReason));
         FileHelper.WriteAllTextWithRetry($"{workingDirectory}/TestResults/QcTriageLowScoreSample.yaml", serializer.Serialize(triage.LowScoreSample));
+        FileHelper.WriteAllTextWithRetry($"{workingDirectory}/TestResults/QcTriageByDefectCategory.yaml", serializer.Serialize(triage.ByDefectCategory));
 
         Console.WriteLine(serializer.Serialize(summary));
     }

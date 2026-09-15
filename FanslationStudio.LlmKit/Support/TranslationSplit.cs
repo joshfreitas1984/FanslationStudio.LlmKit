@@ -104,6 +104,14 @@ public class TranslationSplit
     public int? QcQualityScore { get; set; }
 
     /// <summary>
+    /// The <c>DEFECT:</c> category the QC model named alongside <see cref="QcQualityScore"/> - see
+    /// <see cref="Support.QcDefectCategory"/>. <see cref="Support.QcDefectCategory.Unknown"/> (the
+    /// default) means either "never reviewed" or a response that predates the DEFECT-first prompt,
+    /// same "not yet reviewed" convention as <see cref="QcQualityScore"/> being null.
+    /// </summary>
+    public QcDefectCategory QcDefectCategory { get; set; } = QcDefectCategory.Unknown;
+
+    /// <summary>
     /// How many consecutive times <see cref="Workflow.QualityReviewWorkflow.ApplyRulesToCurrentQcTranslated"/>
     /// has reset this column's <see cref="QcTranslated"/> for breaking a rule, against the SAME
     /// underlying <see cref="Translated"/> baseline (see <see cref="QcRuleCheckFailureBaseline"/>).
@@ -174,6 +182,7 @@ public class TranslationSplit
         QcRejectedCorrection = string.Empty;
         QcFailureReason = string.Empty;
         QcQualityScore = null;
+        QcDefectCategory = QcDefectCategory.Unknown;
     }
 
     //public void ResetGlossaryFlags()

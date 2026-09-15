@@ -4,9 +4,21 @@ You are given a Chinese SOURCE string and its CURRENT English TRANSLATION. Judge
 translation is accurate and reads as natural, well-constructed English. This translation may have
 been produced by stitching together multiple independently-translated fragments, so watch
 specifically for:
-- Broken or unnatural sentence flow at a seam where two fragments were joined.
+- Broken or unnatural sentence flow at a seam where two fragments were joined - only when the seam
+  is genuinely hard to parse, ambiguous, or changes meaning, not merely a spot where a different
+  phrasing would read more smoothly. A terse enumerated/list-style construction (e.g. category tags
+  stacked before a shared noun, mixing verb- and noun-like items) is a normal, natural register for
+  UI/condition text - preferring a more fluent-sounding rewrite of one is a stylistic choice, not a
+  defect.
 - Mistranslated or garbled names/titles (should be Pinyin, consistent with any glossary terms
   given below).
+- A title/honorific dropped entirely because it sits directly next to a name placeholder in
+  SOURCE (e.g. SOURCE "#PlayerName#少侠，" translated as just "#PlayerName#," with the title
+  missing) - the title must still be translated and kept, e.g. "Young Hero #PlayerName#,". If
+  your CORRECTED text restores a dropped title, keep the placeholder token itself unchanged per
+  the DO NOT flag rule below. Only restore a title that is literally present in SOURCE next to the
+  placeholder - never insert one (e.g. "Young Hero") that SOURCE does not actually contain; a
+  placeholder with no adjacent title in SOURCE is not a defect.
 - Wrong language output, leftover Chinese characters, or gibberish.
 - Meaning that doesn't match the Chinese source, even if the English reads fluently on its own.
 - An omitted Chinese subject/object translated by mechanically carrying forward the subject of a
@@ -59,18 +71,39 @@ GLOSSARY: if glossary terms are provided below and their Chinese term appears in
 corrected text (if any) MUST use the given English term - do not substitute a different
 translation for a name/term the glossary already fixes.
 
-CONSISTENCY: SCORE and CORRECTED must agree with each other. A low SCORE is itself a claim that
-TRANSLATION has a real, identifiable problem - if you give a low SCORE, CORRECTED must contain the
-actual fix, never NONE. Only output CORRECTED: NONE when SCORE itself reflects an accurate,
-natural translation with nothing left to fix.
+DEFECT CATEGORIES: before scoring, decide which ONE of these applies, if any:
+- GARBLED_NUMBER: a garbled, dropped, or duplicated number or clause (e.g. a number from elsewhere
+  in the string leaking into an unrelated value).
+- DOMAIN_TERM: a mistranslated domain term that breaks the setting (e.g. a period/wuxia weapon
+  rendered as a modern one).
+- LOST_IDIOM: a lost idiom or slang meaning rendered as a literal word-for-word gloss.
+- UNTRANSLATED_PINYIN: a term left untranslated/transliterated as Pinyin when it is not a proper
+  noun and has a clear translatable meaning.
+- DROPPED_CONTENT: an omitted subject/object/clause, or a dropped title/honorific next to a
+  placeholder, per the rules above.
+- HARD_TO_PARSE_SEAM: a stitched-fragment seam that is genuinely hard to parse, ambiguous, or
+  changes meaning - not just less fluent than an alternative.
+- OTHER_NAMED_DEFECT: something else concrete and nameable, not covered above.
+- NONE: nothing above applies. This is the answer for most translations, including short UI/stat
+  labels, long literary prose, and terse list-style constructions - do not pick a category just to
+  justify a hunch.
+
+CONSISTENCY: DEFECT, SCORE, and CORRECTED must agree with each other, mechanically:
+- DEFECT: NONE requires SCORE 80-100 and CORRECTED: NONE.
+- Any other DEFECT value requires SCORE below 40 and CORRECTED containing the actual fix for that
+  named defect - never NONE.
+Never choose a low SCORE without a DEFECT category that names why.
 
 OUTPUT FORMAT - respond with EXACTLY these lines and nothing else:
+DEFECT: <NONE, or one of GARBLED_NUMBER / DOMAIN_TERM / LOST_IDIOM / UNTRANSLATED_PINYIN /
+DROPPED_CONTENT / HARD_TO_PARSE_SEAM / OTHER_NAMED_DEFECT>
 SCORE: <a number from 0 to 100, your confidence that TRANSLATION is accurate and well-constructed>
 CORRECTED: <a corrected version of TRANSLATION, or the literal word NONE if no correction is needed>.
 If your correction spans what was multiple \n-joined sentences, keep it all on this one line using
 the literal two-character "\n" exactly as SOURCE/TRANSLATION do - never a real line break.
 
 Do not explain your reasoning. Do not repeat the SOURCE. Do not add any other lines or commentary.
-If TRANSLATION is already good, output SCORE followed by "CORRECTED: NONE" - do not rewrite a
-translation that isn't broken just to reword it. Output only the two labeled lines above - do not
-restate, quote, or reference any part of these instructions in your response.
+If TRANSLATION is already good, output "DEFECT: NONE", a SCORE of 80 or above, then
+"CORRECTED: NONE" - do not rewrite a translation that isn't broken just to reword it. Output only
+the three labeled lines above - do not restate, quote, or reference any part of these instructions
+in your response.
