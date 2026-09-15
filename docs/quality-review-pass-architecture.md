@@ -408,6 +408,56 @@ rather than merely waste a reviewer's time on a non-issue. That's a project-spec
 made when deciding what goes into `autoAcceptDefectCategories` - this library only provides the
 mechanism, not the policy.
 
+## Two-stage DEFECT verification (opt-in, `twoStageVerificationEnabled`)
+
+A single QC call asks one model to simultaneously detect a defect, name its category, judge
+severity, AND freehand-rewrite a fix - a lot to ask in one shot, and it shows: DragonHierOverLlm's
+full hand-validation of a `DroppedStutter`-flagged set (`qc-qualityscore-noise-investigation.md`)
+found the model routinely "fixing" a claimed stammer defect while silently breaking something
+unrelated in the same freehand rewrite (a correct name replaced with a wrong one, a translated
+idiom turned into raw pinyin, a meaning inverted) - and separately, flagging a line for that
+category just because SOURCE happens to contain a stammer, even when TRANSLATION already conveys it
+validly and the real defect (if any) is something else entirely.
+
+When `qualityReview.twoStageVerificationEnabled` is true, any column call 1
+(`GetLlmVerdictAsync`) flags with a named DEFECT (anything but `NONE`/`Unknown`) gets a second,
+narrower LLM call (`GetVerificationVerdictAsync`) before its verdict is finalized
+(`FinalizeVerdictAsync` is the single choke point both of call 1's return paths funnel through).
+Call 2 is shown SOURCE, the *original* TRANSLATION (never call 1's proposed correction), and the
+single claimed DEFECT token as `CLAIMED DEFECT` - not asked to rediscover a defect from scratch,
+only to judge one specific claim - and responds:
+
+```
+DEFECT: <NONE if CLAIMED DEFECT doesn't hold up, the same token if it does, or a different DEFECT token if call 1 miscategorized it>
+SCORE: <0-100>
+CORRECTED: <a fix touching ONLY the confirmed/recategorized defect, or NONE if DEFECT is NONE>
+```
+
+Deliberately reuses the exact `DEFECT:`/`SCORE:`/`CORRECTED:` vocabulary call 1 already produces
+reliably, rather than a distinct label like `VERDICT:` - an earlier version of this prompt invented
+one, and a real production response came back `VERDICAT:` (a one-off model typo of a label it had
+never been asked to produce before), silently falling back to call 1's own verdict every time it
+happened. Asking for the same familiar token the model already handles well doesn't give it a new
+way to drift.
+
+- `DEFECT: NONE` → final `QcDefectCategory.None`, no correction - this is what "ups the score" back
+  to a passing range for a line call 1 flagged wrongly, without a human needing to hand-review every
+  category to catch it (this is the automated version of the manual per-category hand-validation the
+  DEFECT-categories section above describes).
+- `DEFECT: <same token as CLAIMED DEFECT>` → confirmed - keeps call 1's category, uses call 2's
+  SCORE/CORRECTED instead of call 1's.
+- `DEFECT: <a different token>` → recategorizes to that token instead, still using call 2's
+  SCORE/CORRECTED.
+- An unparseable/failed verification response returns `null` from `GetVerificationVerdictAsync`,
+  and `FinalizeVerdictAsync` falls back to call 1's own verdict unchanged - verification failing
+  once is "didn't help this time," never "discard call 1's answer."
+
+Cost: one extra LLM call, but only for columns call 1 already flagged (~10-15% of a corpus in
+practice), not every column. Prompt file: `BaseQualityReviewVerificationPrompt.txt`, one per model
+family (`BaseFiles/<preset>/Prompts/`), loaded/merged exactly like `BaseQualityReviewPrompt.txt` -
+see "Prompts: per-model-family, not a shared/generic file" below. Off by default (`false`) - a
+project that hasn't opted in sees no change in behavior or LLM call volume.
+
 ## Configuration (`Configuration/QualityReviewConfig.cs`)
 
 `LlmConfig.QualityReview` (`qualityReview:` in `Config.yaml`):
@@ -427,6 +477,10 @@ mechanism, not the policy.
   hand-validated as low-precision enough that packaging should trust `QcTranslated` wholesale
   despite a low score, instead of holding the column back for human review. See "DEFECT categories
   and per-category policy" below.
+- `twoStageVerificationEnabled` (bool, default false) — adds a second, narrower LLM call for any
+  column call 1 flags with a named DEFECT, to confirm/reject/recategorize the claim and produce a
+  correction scoped to just that defect instead of trusting call 1's own freehand rewrite. See
+  "Two-stage DEFECT verification" above.
 
 ## Inline rule-check retries (bad words only)
 

@@ -53,19 +53,51 @@ public static class QualityReviewWorkflow
         if (!match.Success)
             return QcDefectCategory.Unknown;
 
-        return match.Groups[1].Value.Trim().ToUpperInvariant() switch
-        {
-            "NONE" => QcDefectCategory.None,
-            "GARBLED_NUMBER" => QcDefectCategory.GarbledNumber,
-            "DOMAIN_TERM" => QcDefectCategory.DomainTerm,
-            "LOST_IDIOM" => QcDefectCategory.LostIdiom,
-            "UNTRANSLATED_PINYIN" => QcDefectCategory.UntranslatedPinyin,
-            "DROPPED_CONTENT" => QcDefectCategory.DroppedContent,
-            "DROPPED_STUTTER" => QcDefectCategory.DroppedStutter,
-            "HARD_TO_PARSE_SEAM" => QcDefectCategory.HardToParseSeam,
-            _ => QcDefectCategory.OtherNamedDefect,
-        };
+        return DefectTokenToCategory(match.Groups[1].Value.Trim().ToUpperInvariant());
     }
+
+    /// <summary>
+    /// Maps a DEFECT prompt's upper-snake-case token (e.g. "GARBLED_NUMBER") to
+    /// <see cref="QcDefectCategory"/> - shared by <see cref="ParseDefectCategory"/> (call 1's
+    /// DEFECT: line) and <see cref="GetVerificationVerdictAsync"/>, which parses its own DEFECT:
+    /// line the same way (NONE = the claimed defect doesn't hold up, the same token as claimed =
+    /// confirmed, a different token = recategorized - see "Two-stage DEFECT verification" in
+    /// docs/quality-review-pass-architecture.md for why call 2 deliberately reuses this exact
+    /// vocabulary instead of a distinct one). Anything present but unrecognized (a model
+    /// typo/variant) still counts as a named defect rather than being silently dropped, so it falls
+    /// back to <see cref="QcDefectCategory.OtherNamedDefect"/>.
+    /// </summary>
+    private static QcDefectCategory DefectTokenToCategory(string token) => token switch
+    {
+        "NONE" => QcDefectCategory.None,
+        "GARBLED_NUMBER" => QcDefectCategory.GarbledNumber,
+        "DOMAIN_TERM" => QcDefectCategory.DomainTerm,
+        "LOST_IDIOM" => QcDefectCategory.LostIdiom,
+        "UNTRANSLATED_PINYIN" => QcDefectCategory.UntranslatedPinyin,
+        "DROPPED_CONTENT" => QcDefectCategory.DroppedContent,
+        "DROPPED_STUTTER" => QcDefectCategory.DroppedStutter,
+        "HARD_TO_PARSE_SEAM" => QcDefectCategory.HardToParseSeam,
+        _ => QcDefectCategory.OtherNamedDefect,
+    };
+
+    /// <summary>Reverse of <see cref="DefectTokenToCategory"/> - the token <see cref="GetVerificationVerdictAsync"/>
+    /// puts in its user prompt's CLAIMED DEFECT line so the verification model is told exactly which
+    /// single category call 1 claimed, in the same vocabulary its own prompt already defines. Returns
+    /// null for <see cref="QcDefectCategory.Unknown"/> (never a valid claim - see
+    /// <see cref="FinalizeVerdictAsync"/>, which never calls verification for it) and
+    /// <see cref="QcDefectCategory.None"/> (nothing to verify).</summary>
+    private static string? DefectCategoryToToken(QcDefectCategory category) => category switch
+    {
+        QcDefectCategory.GarbledNumber => "GARBLED_NUMBER",
+        QcDefectCategory.DomainTerm => "DOMAIN_TERM",
+        QcDefectCategory.LostIdiom => "LOST_IDIOM",
+        QcDefectCategory.UntranslatedPinyin => "UNTRANSLATED_PINYIN",
+        QcDefectCategory.DroppedContent => "DROPPED_CONTENT",
+        QcDefectCategory.DroppedStutter => "DROPPED_STUTTER",
+        QcDefectCategory.HardToParseSeam => "HARD_TO_PARSE_SEAM",
+        QcDefectCategory.OtherNamedDefect => "OTHER_NAMED_DEFECT",
+        _ => null,
+    };
 
     /// <summary>
     /// Captures from "CORRECTED:" to the end of the response (Singleline - dot matches newline),
@@ -135,7 +167,14 @@ public static class QualityReviewWorkflow
         if (correctedText.Equals("NONE", StringComparison.OrdinalIgnoreCase))
             return false;
 
-        return ProtocolLeakMarkers.Any(marker => correctedText.Contains(marker, StringComparison.OrdinalIgnoreCase))
+        // Case-SENSITIVE (Ordinal, not OrdinalIgnoreCase) for the same reason StandaloneNoneRegex/
+        // TrailingNoneRegex already are: a genuine leak is always the literal uppercase label copied
+        // verbatim from the prompt's own format ("SCORE:", "CORRECTED:"), whereas a real correction
+        // is normal-cased English prose that can legitimately contain the same word - e.g. a UI
+        // string like "New practice high score: {1} points" was misidentified as a leak and silently
+        // discarded (treated as unparseable) when this was OrdinalIgnoreCase, purely because "score:"
+        // happened to appear as an ordinary lowercase word in a real, correct translation.
+        return ProtocolLeakMarkers.Any(marker => correctedText.Contains(marker, StringComparison.Ordinal))
             || StandaloneNoneRegex.IsMatch(correctedText)
             || TrailingNoneRegex.IsMatch(correctedText);
     }
@@ -193,7 +232,7 @@ public static class QualityReviewWorkflow
     /// All fields updated via <see cref="Interlocked"/> - this instance is shared/mutated
     /// concurrently across every <c>Parallel.ForEachAsync</c> worker.
     /// </summary>
-    private sealed class QcTimingStats
+    internal sealed class QcTimingStats
     {
         public long LlmMs;
         public int LlmCalls;
@@ -235,6 +274,24 @@ public static class QualityReviewWorkflow
     /// only one of them actually runs it, and the other just awaits the same in-flight Task.
     /// </summary>
     private sealed class ReviewLlmCache : ConcurrentDictionary<ReviewCacheKey, Lazy<Task<LlmVerdict>>>;
+
+    /// <summary>
+    /// Records one real HTTP round trip against <paramref name="timing"/> - shared by every actual
+    /// call site inside <see cref="GetLlmVerdictAsync"/>'s retry loop and
+    /// <see cref="GetVerificationVerdictAsync"/>'s single call, so <see cref="QcTimingStats.LlmCalls"/>
+    /// counts real round trips (needed now that one column's review can genuinely make two - a main
+    /// call and a verification call - rather than the one call it always used to be). No-op when
+    /// <paramref name="timing"/> is null (the optional parameter's default, used by callers - like
+    /// DragonHierOverLlm's direct-call regression tests - that don't care about run-level stats).
+    /// </summary>
+    private static void RecordLlmCall(QcTimingStats? timing, Stopwatch stopwatch)
+    {
+        if (timing == null)
+            return;
+
+        Interlocked.Add(ref timing.LlmMs, stopwatch.ElapsedMilliseconds);
+        Interlocked.Increment(ref timing.LlmCalls);
+    }
 
     /// <summary>
     /// Runs the quality review pass. See docs/plans/quality-review-pass.md.
@@ -610,14 +667,13 @@ public static class QualityReviewWorkflow
         // thread that actually runs a fresh HTTP round trip (a cache miss) records time against
         // timing.LlmMs; every other thread racing the same key just awaits the same in-flight Task
         // and correctly contributes nothing (see ReviewLlmCache's doc comment for the Lazy dedup).
-        var verdict = await reviewCache.GetOrAdd(cacheKey, _ => new Lazy<Task<LlmVerdict>>(async () =>
-        {
-            var llmStopwatch = Stopwatch.StartNew();
-            var result = await GetLlmVerdictAsync(config, modelConfig, client, rawText, maskedRaw, maskedTranslated, glossaryPrompt);
-            Interlocked.Add(ref timing.LlmMs, llmStopwatch.ElapsedMilliseconds);
-            Interlocked.Increment(ref timing.LlmCalls);
-            return result;
-        })).Value;
+        // Timing/call-count instrumentation now happens per real HTTP round trip INSIDE
+        // GetLlmVerdictAsync/GetVerificationVerdictAsync (see RecordLlmCall) rather than once here
+        // around the whole (possibly two-call) verdict - a column that also triggers a verification
+        // call genuinely makes two round trips, and timing.LlmCalls needs to reflect that instead of
+        // silently bundling both into "1 call" the way a single outer stopwatch/increment would.
+        var verdict = await reviewCache.GetOrAdd(cacheKey, _ => new Lazy<Task<LlmVerdict>>(
+            () => GetLlmVerdictAsync(config, modelConfig, client, rawText, maskedRaw, maskedTranslated, glossaryPrompt, timing))).Value;
 
         if (!verdict.Success)
             // Either the request errored, or the response didn't parse - leave the column's Qc
@@ -806,7 +862,8 @@ public static class QualityReviewWorkflow
         string rawText,
         string maskedRaw,
         string maskedTranslated,
-        string glossaryPrompt)
+        string glossaryPrompt,
+        QcTimingStats? timing = null)
     {
         var userPrompt = new StringBuilder();
         userPrompt.AppendLine($"SOURCE (Chinese): {maskedRaw}");
@@ -837,15 +894,18 @@ public static class QualityReviewWorkflow
         for (var attempt = 0; ; attempt++)
         {
             string llmResponse;
+            var llmStopwatch = Stopwatch.StartNew();
             try
             {
                 llmResponse = await TranslationService.TranslateMessagesAsync(client, config, modelConfig, messages);
             }
             catch (Exception e) when (e is HttpRequestException or OperationCanceledException)
             {
+                RecordLlmCall(timing, llmStopwatch);
                 Console.WriteLine($"Quality review request error: {e.Message}");
                 return new LlmVerdict(false, 0, null);
             }
+            RecordLlmCall(timing, llmStopwatch);
 
             var scoreMatch = ScoreLineRegex.Match(llmResponse);
             if (!scoreMatch.Success)
@@ -879,7 +939,7 @@ public static class QualityReviewWorkflow
                 && !correctedRaw.Equals("NONE", StringComparison.OrdinalIgnoreCase);
 
             if (!hasCorrection)
-                return new LlmVerdict(true, score, null, defect);
+                return await FinalizeVerdictAsync(config, modelConfig, client, rawText, maskedRaw, maskedTranslated, glossaryPrompt, score, defect, null, timing);
 
             // Only the bad-words check is safe to run here: it's a pure function of the candidate
             // text alone (TranslationWorkflow.MatchesBadWords), unlike the rest of EvaluateRules
@@ -893,7 +953,7 @@ public static class QualityReviewWorkflow
             // unchanged.
             var badWordMatches = TranslationWorkflow.FindBadWordMatches(correctedRaw);
             if (badWordMatches.Count == 0 || attempt >= maxInlineRetries)
-                return new LlmVerdict(true, score, correctedRaw, defect);
+                return await FinalizeVerdictAsync(config, modelConfig, client, rawText, maskedRaw, maskedTranslated, glossaryPrompt, score, defect, correctedRaw, timing);
 
             Console.WriteLine($"Quality review: correction for '{rawText}' matched the bad-words list ({string.Join(", ", badWordMatches)}) - inline retry {attempt + 1}/{maxInlineRetries}.");
             TranslationService.AddCorrectionMessages(
@@ -903,6 +963,144 @@ public static class QualityReviewWorkflow
                 "Propose a different corrected line that says the same thing without using any banned word, " +
                 "in the same SCORE:/CORRECTED: format.");
         }
+    }
+
+    /// <summary>
+    /// Single choke point every <see cref="GetLlmVerdictAsync"/> return path (a non-correction verdict
+    /// and an accepted-after-retries correction) funnels a raw call-1 verdict through before it
+    /// becomes the method's actual return value. When <see cref="QualityReviewConfig.TwoStageVerificationEnabled"/>
+    /// is off, or <paramref name="defect"/> isn't a real named claim (<see cref="QcDefectCategory.None"/>/
+    /// <see cref="QcDefectCategory.Unknown"/> - nothing to verify), this is a no-op passthrough - call
+    /// 1's own verdict stands exactly as before this feature existed. Otherwise it hands the claim to
+    /// <see cref="GetVerificationVerdictAsync"/> and returns ITS verdict instead, falling back to call
+    /// 1's own verdict only if verification itself fails to produce a usable one (never discards call
+    /// 1's answer just because verification didn't happen). See docs/quality-review-pass-architecture.md
+    /// "Two-stage DEFECT verification".
+    /// </summary>
+    private static async Task<LlmVerdict> FinalizeVerdictAsync(
+        LlmConfig config,
+        ModelExecutionConfig modelConfig,
+        HttpClient client,
+        string rawText,
+        string maskedRaw,
+        string maskedTranslated,
+        string glossaryPrompt,
+        int score,
+        QcDefectCategory defect,
+        string? correctedRaw,
+        QcTimingStats? timing = null)
+    {
+        if (!config.QualityReview.TwoStageVerificationEnabled
+            || defect is QcDefectCategory.None or QcDefectCategory.Unknown
+            || !modelConfig.Prompts.ContainsKey("BaseQualityReviewVerificationPrompt"))
+            return new LlmVerdict(true, score, correctedRaw, defect);
+
+        var verification = await GetVerificationVerdictAsync(config, modelConfig, client, rawText, maskedRaw, maskedTranslated, glossaryPrompt, defect, timing);
+        return verification ?? new LlmVerdict(true, score, correctedRaw, defect);
+    }
+
+    /// <summary>
+    /// Second-stage check for a column call 1 (<see cref="GetLlmVerdictAsync"/>) flagged with a named
+    /// DEFECT - only ever invoked via <see cref="FinalizeVerdictAsync"/>, never for
+    /// <see cref="QcDefectCategory.None"/>/<see cref="QcDefectCategory.Unknown"/>. Deliberately a
+    /// separate, narrower LLM call rather than trusting call 1's own freehand CORRECTED: shown ONLY
+    /// the claimed DEFECT (not asked to rediscover one from scratch), it confirms, rejects as a false
+    /// positive, or recategorizes the claim, and - only if confirmed/recategorized - proposes a
+    /// correction scoped to just that one defect. Motivation: hand-validating the DroppedStutter
+    /// category (see DragonHierOverLlm's docs/qc-qualityscore-noise-investigation.md) found call 1
+    /// routinely flagging a stammer just because SOURCE happened to contain one (even though
+    /// TRANSLATION already conveyed it validly), and - worse - "fixing" a claimed stammer defect while
+    /// introducing an unrelated one (a wrong name, an inverted meaning, an untranslated term) in the
+    /// same freehand rewrite.
+    ///
+    /// Returns null (not a failed/unsuccessful <see cref="LlmVerdict"/>) when the request errors or the
+    /// response doesn't parse - <see cref="FinalizeVerdictAsync"/> falls back to call 1's own verdict
+    /// rather than discarding it, since a failure here means "verification didn't work this time," not
+    /// "call 1 was wrong."
+    /// </summary>
+    internal static async Task<LlmVerdict?> GetVerificationVerdictAsync(
+        LlmConfig config,
+        ModelExecutionConfig modelConfig,
+        HttpClient client,
+        string rawText,
+        string maskedRaw,
+        string maskedTranslated,
+        string glossaryPrompt,
+        QcDefectCategory claimedDefect,
+        QcTimingStats? timing = null)
+    {
+        var claimedToken = DefectCategoryToToken(claimedDefect);
+        if (claimedToken == null)
+            return null;
+
+        var userPrompt = new StringBuilder();
+        userPrompt.AppendLine($"SOURCE (Chinese): {maskedRaw}");
+        userPrompt.AppendLine($"CURRENT TRANSLATION (English): {maskedTranslated}");
+        userPrompt.AppendLine($"CLAIMED DEFECT: {claimedToken}");
+        if (!string.IsNullOrEmpty(glossaryPrompt))
+        {
+            userPrompt.AppendLine("Relevant glossary terms (must be preserved if they appear in SOURCE):");
+            userPrompt.AppendLine(glossaryPrompt);
+        }
+
+        var messages = new List<object>
+        {
+            LlmHelpers.GenerateSystemPrompt(modelConfig.Prompts["BaseQualityReviewVerificationPrompt"]),
+            LlmHelpers.GenerateUserPrompt(userPrompt.ToString()),
+        };
+
+        string llmResponse;
+        var llmStopwatch = Stopwatch.StartNew();
+        try
+        {
+            llmResponse = await TranslationService.TranslateMessagesAsync(client, config, modelConfig, messages);
+        }
+        catch (Exception e) when (e is HttpRequestException or OperationCanceledException)
+        {
+            RecordLlmCall(timing, llmStopwatch);
+            Console.WriteLine($"Quality review verification request error for '{rawText}': {e.Message}");
+            return null;
+        }
+        RecordLlmCall(timing, llmStopwatch);
+
+        // Reuses DefectLineRegex/ParseDefectCategory - the SAME "DEFECT:" label call 1 already
+        // produces reliably - rather than a distinct "VERDICT:" token, after a real production
+        // response came back with "VERDICAT:" (a one-off model typo of a label it had never been
+        // asked to produce before) and silently fell back to call 1's own verdict. Introducing new
+        // output vocabulary for call 2 just gave the model one more way to drift; asking for the
+        // same familiar token it already handles well does not. DEFECT: NONE here means "the claim
+        // doesn't hold up" (this call's schema has no separate NONE-was-never-flagged case to
+        // confuse it with, since FinalizeVerdictAsync never invokes this for a column that was
+        // already NONE/Unknown).
+        var scoreMatch = ScoreLineRegex.Match(llmResponse);
+        var verificationDefect = ParseDefectCategory(llmResponse);
+        if (!scoreMatch.Success || verificationDefect == QcDefectCategory.Unknown)
+        {
+            Console.WriteLine($"Quality review: could not parse verification response for '{rawText}' - keeping call 1's verdict. Raw response: {llmResponse}");
+            return null;
+        }
+
+        var score = Math.Clamp(int.Parse(scoreMatch.Groups[1].Value), 0, 100);
+
+        var correctedMatch = CorrectedLineRegex.Match(llmResponse);
+        var correctedRaw = correctedMatch.Success ? correctedMatch.Groups[1].Value.Trim() : string.Empty;
+        if (ContainsLeakedProtocolText(correctedRaw))
+        {
+            Console.WriteLine($"Quality review: verification correction for '{rawText}' contains leaked QC-protocol text - keeping call 1's verdict. Raw response: {llmResponse}");
+            return null;
+        }
+
+        var hasCorrection = correctedMatch.Success
+            && !string.IsNullOrEmpty(correctedRaw)
+            && !correctedRaw.Equals("NONE", StringComparison.OrdinalIgnoreCase);
+
+        // DEFECT: NONE - the claimed defect doesn't hold up. This is what "ups the score" for a
+        // line call 1 flagged wrongly, without a human needing to hand-validate every category to
+        // catch it (the automated version of the manual per-category triage this pass's
+        // autoAcceptDefectCategories mechanism otherwise requires). Any other value either repeats
+        // claimedDefect (confirmed) or names a different category (recategorized) - either way, only
+        // call 2's own narrowly-scoped correction is ever used, never call 1's freehand one.
+        return new LlmVerdict(true, score, verificationDefect == QcDefectCategory.None ? null : (hasCorrection ? correctedRaw : null), verificationDefect);
     }
 
     /// <summary>

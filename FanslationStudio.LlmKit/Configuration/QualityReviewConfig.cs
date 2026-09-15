@@ -97,4 +97,23 @@ public class QualityReviewConfig
     /// packaging path uses for this decision - see its doc comment.
     /// </summary>
     public HashSet<QcDefectCategory> AutoAcceptDefectCategories { get; set; } = new();
+
+    /// <summary>
+    /// When true, any column the main QC call (<see cref="Workflow.QualityReviewWorkflow.GetLlmVerdictAsync"/>)
+    /// flags with a named DEFECT (anything but <see cref="QcDefectCategory.None"/>/
+    /// <see cref="QcDefectCategory.Unknown"/>) gets a second, narrower LLM call
+    /// (<see cref="Workflow.QualityReviewWorkflow.GetVerificationVerdictAsync"/>) before its verdict
+    /// is finalized. That call is shown ONLY the claimed DEFECT (not asked to rediscover a defect
+    /// from scratch) and confirms it, rejects it as a false positive (raising the score back to a
+    /// passing range instead of trusting call 1's single-shot judgment), or recategorizes it - and
+    /// only its own narrowly-scoped correction is ever accepted, never call 1's freehand rewrite.
+    /// See docs/qc-qualityscore-noise-investigation.md's "Two-stage DEFECT verification" section
+    /// (DragonHierOverLlm repo) for why: hand-validating a flagged category found call 1 routinely
+    /// "fixing" a claimed defect while breaking something unrelated in the same freehand rewrite.
+    ///
+    /// False by default (additive - no behavior/call-volume change for a project that hasn't opted
+    /// in). Adds exactly one extra LLM call per column already flagged by call 1, never for a
+    /// column call 1 already passed - typically 10-15% of a corpus, not every column.
+    /// </summary>
+    public bool TwoStageVerificationEnabled { get; set; } = false;
 }
