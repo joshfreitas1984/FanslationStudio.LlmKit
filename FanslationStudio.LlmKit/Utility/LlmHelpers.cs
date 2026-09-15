@@ -42,13 +42,22 @@ public static class LlmHelpers
             requestBody.think = false;
             requestBody.messages = messages;
 
-            // Add each key-value pair from Params to the dynamic object
-            var requestBodyDict = (IDictionary<string, object>)requestBody;
+            // Ollama's native /api/chat (as opposed to an OpenAI-compatible /v1/chat/completions
+            // endpoint, the other branch below) requires every generation parameter - num_ctx,
+            // temperature, top_p, top_k, repeat_penalty, num_predict, frequency_penalty,
+            // presence_penalty - nested under a single "options" object, NOT flattened onto the
+            // request root. A top-level "num_ctx" is silently ignored by Ollama's server (unknown
+            // field), so the request always ran on Ollama's own built-in default context size
+            // regardless of what Config.yaml's modelParams.num_ctx said - the exact cause of a
+            // "request (N tokens) exceeds the available context size (2048 tokens)" error even
+            // after num_ctx was raised in config.
+            var options = new Dictionary<string, object>();
             foreach (var param in modelConfig.ModelParams)
                 if (decimal.TryParse(param.Value.ToString(), out var param2))
-                    requestBodyDict[param.Key] = param2;
+                    options[param.Key] = param2;
                 else
-                    requestBodyDict[param.Key] = param.Value;
+                    options[param.Key] = param.Value;
+            requestBody.options = options;
 
             return JsonSerializer.Serialize(requestBody, new JsonSerializerOptions { WriteIndented = true });
         }
