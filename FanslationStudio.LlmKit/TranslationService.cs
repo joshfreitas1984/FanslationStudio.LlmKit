@@ -1351,7 +1351,13 @@ public static class TranslationService
                     Console.WriteLine($"429 backoff finished after {retries} attempt(s), {backoffStopwatch.ElapsedMilliseconds}ms blocked, final status {(int)response.StatusCode}.");
             }
 
-            response.EnsureSuccessStatusCode();
+            // EnsureSuccessStatusCode()'s own message is just "... 400 (Bad Request)" with no body -
+            // the server's actual reason (e.g. a context-length/validation error) lives in
+            // responseBody, which would otherwise be read and immediately discarded. Every caller
+            // catches HttpRequestException and logs e.Message, so folding the body in here is the
+            // difference between a diagnosable error and a guessing game.
+            if (!response.IsSuccessStatusCode)
+                throw new HttpRequestException($"Response status code does not indicate success: {(int)response.StatusCode} ({response.ReasonPhrase}). Body: {responseBody}");
 
             using var jsonDoc = JsonDocument.Parse(responseBody);
 

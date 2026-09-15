@@ -180,15 +180,18 @@ this copy.
 
 ## Packaging (score-gating + freshness)
 
-Every packaging path — `PrefabTextWorkflow.PackagePrefabTextAsync`, `DynamicStringWorkflow
-.PackageDynamicStringsAsync` (both in this repo), and the downstream CSV path
-(`DragonHierOverLlm/Tests/TranslationPackaging.cs`'s `PackageFinalTranslationAsync`) — applies the
-same two checks per column, both gated on `IsQcReviewFresh`:
+Every packaging path — `CsvGameDataWorkflow.PackageAsync`, `JsonGameDataWorkflow.PackageAsync`,
+`PrefabTextWorkflow.PackagePrefabTextAsync`, `DynamicStringWorkflow.PackageDynamicStringsAsync`
+(all four in this repo) — applies the same two checks per column, both gated on `IsQcReviewFresh`:
 
-1. If fresh and `QcQualityScore < qualityReview.minAcceptableScore` → treat the column as
-   not-ready-to-package (same bucket a `FlaggedForRetranslation`/unsafe/missing-translation column
-   already falls into) — held back from `Files/Mod`, but `Files/Converted` is untouched, so no
-   translation work is ever lost.
+1. If fresh and `Utility.QualityReviewHelpers.PassesQcScoreGate(QcQualityScore, QcDefectCategory,
+   qualityReview)` returns `false` → treat the column as not-ready-to-package (same bucket a
+   `FlaggedForRetranslation`/unsafe/missing-translation column already falls into) — held back from
+   `Files/Mod`, but `Files/Converted` is untouched, so no translation work is ever lost.
+   `PassesQcScoreGate` is the single choke point every packaging path shares for this decision: it
+   passes outright if the score cleared `qualityReview.minAcceptableScore`, and otherwise still
+   passes if `QcDefectCategory` is in `qualityReview.AutoAcceptDefectCategories` — see "DEFECT
+   categories and per-category policy" below for what that second clause is for.
 2. Else if fresh and `QcTranslated` is non-empty → use it in place of `Translated` (for a templated
    column, this bypasses `Reconstruct()` for that column entirely, using the anchor's `QcTranslated`
    as the literal cell value).
@@ -247,7 +250,7 @@ live there too) - no separate wiring needed.
 
 ## Resetting Qc state
 
-Four levels, narrowest to broadest:
+Five levels, narrowest to broadest:
 
 - **`ResetQcRetryLimits`** — clears every column's accumulated retry counters and gives any
   column currently parked at `FailedValidation` a fresh review. Routine: run after fixing whatever
@@ -266,6 +269,16 @@ Four levels, narrowest to broadest:
   `null` (see the `RejectedByGate` branch in `ReviewColumnAsync`), so it falls outside the score
   comparison entirely; use `ResetQcRetryLimits` for those. Pass a wider `scoreThreshold` (e.g. 101)
   if the change is broad enough that even comfortably-passing scores are suspect.
+- **`ResetNonAutoAcceptedQcState(workingDirectory, textFiles, hooks)`** — the DEFECT-category
+  counterpart to `ResetLowScoreQcState`: resets every currently-flagged column whose
+  `QcDefectCategory` is NOT in `qualityReview.AutoAcceptDefectCategories` back to `NotReviewed`,
+  leaving auto-accepted-category columns and everything not flagged in the first place untouched.
+  `QcDefectCategory.Unknown` always lands in this bucket (a line whose response predates the
+  DEFECT-first prompt, or otherwise failed to parse a `DEFECT:` line), so this doubles as the way to
+  backfill DEFECT for old flagged rows - run it once, then re-run the QC pass. Also safe to re-run
+  any time `AutoAcceptDefectCategories` changes (a category's hand-validated precision verdict is
+  added or revised), to pull the newly-decided set back out of "flagged" one way or the other on the
+  next pass. See "DEFECT categories and per-category policy" below.
 - **`ResetAllQcState`** — wipes **every** column's Qc* state back to `NotReviewed`
   regardless of current status, so the next full pass reviews the entire corpus again from scratch.
   NOT routine - this is a deliberate full do-over, the same many-hours cost as an original full run.
@@ -276,6 +289,14 @@ Four levels, narrowest to broadest:
   this - a `Passed` column reviewed before the omitted-subject prompt rule existed, or a `Corrected`
   column that may have been through the low-score-discard bug, both look identical (and equally
   "trustworthy") to a freshness check that only looks at whether the underlying translation changed.
+- **`ResetStutterAffectedQcState`** — narrower, cheaper alternative to `ResetAllQcState` for a
+  change that only affects a small, mechanically-detectable subset of the corpus: resets every
+  column whose SOURCE contains a Chinese stammer/stutter pattern (e.g. `思、思阁主`, `你、你、你……`)
+  back to `NotReviewed`, regardless of its current score/status. Added alongside the `DROPPED_STUTTER`
+  defect category - before that existed, a dropped stutter had no named defect to score against and
+  almost always passed QC silently at a high score, so this targets exactly those columns for a
+  fresh look instead of paying for a full-corpus re-review to catch a narrow pattern. Finds
+  candidates via a plain regex scan (no LLM call), so it's cheap to run even on a large corpus.
 
 ## Triage and fix-prompt generation (`GetQcTriageAsync`/`WriteTriageReportAsync`/`WriteFixPromptsAsync`)
 
@@ -287,8 +308,8 @@ into something a human (or a chat with an LLM) can actually work down over time,
 per-line approval mechanism.
 
 `GetQcTriageAsync(workingDirectory, textFiles, hooks, examplesPerCluster: 5, lowScoreSampleSize:
-100, maxLowScorePerFile: 15)` splits `GetFlaggedQcReviews`'s output into the two populations that
-need different treatment, returned as a `QcTriageResult`:
+100, maxLowScorePerFile: 15, defectCategorySampleSize: 40)` splits `GetFlaggedQcReviews`'s output
+into the populations that need different treatment, returned as a `QcTriageResult`:
 
 - **`ByReason`** — every row where `Reason` is set (a proposed correction the validation gate or
   glossary-drift check rejected, so it was never applied), grouped by the exact reason string,
@@ -301,9 +322,15 @@ need different treatment, returned as a `QcTriageResult`:
   self-rated confidence, which is frequently miscalibrated (see "Postmortems" #3 below). A small,
   deterministic (lowest-score-first, capped per file so one noisy file can't crowd out the rest)
   sample lets a human spot-check whether the score is trustworthy instead of reading every such row.
+- **`ByDefectCategory`** — every flagged row grouped by `QcDefectCategory`, most-common category
+  first, each with the category's total `Count` plus a `defectCategorySampleSize`-capped random
+  sample (fixed seed, so repeated triage runs against the same flagged set draw the same sample -
+  otherwise "did precision improve" would be impossible to tell apart from "different rows got
+  sampled"). See "DEFECT categories and per-category policy" below for what this feeds.
 
 `WriteTriageReportAsync(workingDirectory, textFiles, hooks)` writes `TestResults/QcTriageSummary
-.yaml` (headline counts), `QcTriageByReason.yaml`, and `QcTriageLowScoreSample.yaml`.
+.yaml` (headline counts, including a per-category count breakdown), `QcTriageByReason.yaml`,
+`QcTriageLowScoreSample.yaml`, and `QcTriageByDefectCategory.yaml`.
 
 `WriteFixPromptsAsync(workingDirectory, textFiles, hooks, examplesPerCluster: 8)` writes
 `TestResults/QcTriagePrompts.md` — one markdown section per reason cluster (a templated root-cause
@@ -344,6 +371,43 @@ triage to confirm the cluster shrank (or the low-score sample improved). Both wr
 and side-effect-free (no LLM calls, just re-reads of what `GetFlaggedQcReviews` already computes),
 so re-running them as often as useful costs nothing.
 
+## DEFECT categories and per-category policy
+
+`QcQualityScore` alone doesn't scale as a gating signal once a corpus's flagged set gets into the
+thousands - a downstream project's real investigation (DragonHierOverLlm's
+`Tests/docs/qc-qualityscore-noise-investigation.md`) found a 75-91% false-positive rate among
+flagged lines, with no single prompt/config lever able to move that aggregate number. The DEFECT
+category (`QcDefectCategory`, parsed per "Data model" above) exists so the flagged set can be
+stratified and policed *by category* instead of treating every flagged line identically:
+
+1. **Triage** (`GetQcTriageAsync`/`WriteTriageReportAsync`, above) groups every flagged row by
+   `QcDefectCategory` and writes a capped random sample per category to
+   `TestResults/QcTriageByDefectCategory.yaml`, plus per-category counts to
+   `QcTriageSummary.yaml`.
+2. **Hand-validate a sample per category** (outside this library - a human, or an LLM chat, reading
+   each sampled row's `text`/`qcReviewedText`/`qcTranslated`, comparing `qcReviewedText` - the
+   *original* pre-QC translation, see `TranslationSplit.QcReviewedText`'s doc comment - against
+   `qcTranslated` - QC's *proposed correction* - to judge whether a genuine defect was caught and
+   fixed) and compute a rough precision (genuine defects / sample size) for each category.
+3. **Set `qualityReview.autoAcceptDefectCategories`** in `Config.yaml` to the categories that came
+   back at or near 0% precision - packaging then trusts `QcTranslated` for those wholesale
+   (`PassesQcScoreGate`, "Packaging" above) instead of holding every such line back for human
+   review. Categories with meaningfully higher precision are left off the list and stay in the
+   human-review queue (`GetFlaggedQcReviews`) - often a much smaller set than the original flagged
+   total, if the noise turns out concentrated in a few categories.
+4. **`ResetNonAutoAcceptedQcState`** ("Resetting Qc state" above) is the repeatable maintenance step
+   for this loop: it resets every flagged column whose category isn't (yet) auto-accepted back to
+   `NotReviewed`, so a fresh QC run backfills `QcDefectCategory.Unknown` rows (lines reviewed before
+   the DEFECT-first prompt existed) and picks up anything newly reclassified after
+   `autoAcceptDefectCategories` changes.
+
+Not every category needs identical treatment even among the "not auto-accepted" set - a category
+can have low precision (mostly false positives) yet still be judged too risky to blanket-accept, if
+the rare true positive that does show up is a correction that would make a fine translation *worse*
+rather than merely waste a reviewer's time on a non-issue. That's a project-specific risk judgment
+made when deciding what goes into `autoAcceptDefectCategories` - this library only provides the
+mechanism, not the policy.
+
 ## Configuration (`Configuration/QualityReviewConfig.cs`)
 
 `LlmConfig.QualityReview` (`qualityReview:` in `Config.yaml`):
@@ -359,6 +423,10 @@ so re-running them as often as useful costs nothing.
 - `maxRuleCheckRetries` (int, default 3) — see "The validation gate" above; bounds the cross-run
   `QcRuleCheckFailureCount` retry.
 - `inlineRuleCheckRetries` (int, default 0) — see "Inline rule-check retries" below.
+- `autoAcceptDefectCategories` (`HashSet<QcDefectCategory>`, default empty) — DEFECT categories
+  hand-validated as low-precision enough that packaging should trust `QcTranslated` wholesale
+  despite a low score, instead of holding the column back for human review. See "DEFECT categories
+  and per-category policy" below.
 
 ## Inline rule-check retries (bad words only)
 

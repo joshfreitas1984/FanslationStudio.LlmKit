@@ -1469,6 +1469,60 @@ public static class QualityReviewWorkflow
     }
 
     /// <summary>
+    /// Matches a Chinese stammer/stutter: a word's leading character repeated right before the full
+    /// word, separated by 、, ，, or , - e.g. "思、思阁主" (stammering on 思), "你、你、你……"
+    /// (stammering on 你 twice over, matched here as the first 你、你 pair). See
+    /// <see cref="ResetStutterAffectedQcState"/>.
+    /// </summary>
+    private static readonly Regex StutterPatternRegex = new(@"(?<c>[一-鿿])[、，,]\k<c>", RegexOptions.Compiled);
+
+    /// <summary>
+    /// Resets only columns whose SOURCE contains a Chinese stammer/stutter pattern (see
+    /// <see cref="StutterPatternRegex"/>) back to <see cref="QcStatus.NotReviewed"/> for a fresh
+    /// review - added when <c>DROPPED_STUTTER</c> became a real DEFECT category in
+    /// <c>BaseQualityReviewPrompt.txt</c> (previously stutters had no named defect to be scored
+    /// against, so a dropped stutter almost always passed QC silently at a high score/DEFECT: NONE -
+    /// see docs/qc-qualityscore-noise-investigation.md). Deliberately resets EVERY matching column
+    /// regardless of its current status/score, unlike <see cref="ResetLowScoreQcState"/>/
+    /// <see cref="ResetNonAutoAcceptedQcState"/> - a column that scored well under the old prompt is
+    /// exactly the case worth re-checking here, since the old prompt had no way to score a dropped
+    /// stutter low in the first place. Much cheaper than <see cref="ResetAllQcState"/>: only pays for
+    /// an LLM call on columns whose SOURCE actually contains the pattern, found by a plain regex scan
+    /// with no LLM call of its own, instead of re-reviewing the entire corpus to catch a narrow
+    /// subset of it.
+    /// </summary>
+    public static async Task ResetStutterAffectedQcState(string workingDirectory, TextFileToSplit[] textFiles)
+    {
+        var serializer = YamlHelper.CreateSerializer();
+
+        await FileIteration.IterateTranslatedFilesInParallelAsync(workingDirectory, textFiles, async (outputFile, textFile, fileLines) =>
+        {
+            var resetCount = 0;
+
+            foreach (var line in fileLines)
+            {
+                foreach (var columnGroup in line.Splits.GroupBy(s => s.Split))
+                {
+                    if (!columnGroup.Any(f => StutterPatternRegex.IsMatch(f.Text)))
+                        continue;
+
+                    var anchor = columnGroup.OrderBy(s => s.SubIndex).FirstOrDefault(f => f.SubIndex == 0) ?? columnGroup.First();
+
+                    if (anchor.QcStatus == QcStatus.NotReviewed)
+                        continue;
+
+                    Console.WriteLine($"Quality review cleanup: '{textFile.Path}' split {anchor.Split} SOURCE contains a stutter pattern - resetting for re-review.");
+                    anchor.ResetQcState();
+                    resetCount++;
+                }
+            }
+
+            if (resetCount > 0)
+                await FileHelper.WriteAllTextWithRetryAsync(outputFile, serializer.Serialize(fileLines));
+        });
+    }
+
+    /// <summary>
     /// Mirrors <see cref="GameFileHandlingBase.GetFailedTranslations"/>'s reporting shape, scoped to
     /// QC rejections/flags instead of translation failures - lets a human reviewer pull every column
     /// currently flagged for a look (either a rejected correction, or a low quality score) in one
