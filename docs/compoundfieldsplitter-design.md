@@ -53,7 +53,13 @@
   fixed literal `……`, and a second fragment starting mid-sentence, so the LLM only ever saw the
   stutter and the rest of the sentence as two disconnected halves — see
   `EllipsisAndEmDashStayGluedIntoSurroundingSentence`/`EmDashInterruptionStaysGluedIntoSurroundingSentence`
-  in `Tests/CompoundFieldSplitterTests.cs`. An LLM is free to reposition, merge, or drop punctuation
+  in `Tests/CompoundFieldSplitterTests.cs`. **Comparison operators `≤`/`≥` (U+2264/U+2265, "Mathematical
+  Operators" block) are absorbed for the same reason**, fixed Sep 2026 after a WanXiangOverLlm QC
+  report: `赌术高手（≥120）解锁，...` was decomposing with `≥` stranded as a literal between the `（`
+  glued onto the preceding fragment and the number+`）`+rest-of-sentence forming a second fragment —
+  splitting one inequality condition into two independently-translated halves — see
+  `ComparisonOperatorsStayGluedIntoSurroundingCondition` in `Tests/CompoundFieldSplitterTests.cs`. An
+  LLM is free to reposition, merge, or drop punctuation
   during translation (move a clause, reorder a parenthetical, change a comma to a full stop), so
   splitting a sentence into separate fragments around its own internal punctuation and reassembling
   with a fixed literal mark in between risks an ungrammatical or nonsensical result. **Plain ASCII

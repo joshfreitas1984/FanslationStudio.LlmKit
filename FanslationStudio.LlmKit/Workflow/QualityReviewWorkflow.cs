@@ -99,6 +99,7 @@ public static class QualityReviewWorkflow
         "DROPPED_CONTENT" => QcDefectCategory.DroppedContent,
         "DROPPED_STUTTER" => QcDefectCategory.DroppedStutter,
         "HARD_TO_PARSE_SEAM" => QcDefectCategory.HardToParseSeam,
+        "UNCERTAIN" => QcDefectCategory.Uncertain,
         _ => QcDefectCategory.OtherNamedDefect,
     };
 
@@ -119,6 +120,7 @@ public static class QualityReviewWorkflow
         QcDefectCategory.DroppedStutter => "DROPPED_STUTTER",
         QcDefectCategory.HardToParseSeam => "HARD_TO_PARSE_SEAM",
         QcDefectCategory.OtherNamedDefect => "OTHER_NAMED_DEFECT",
+        QcDefectCategory.Uncertain => "UNCERTAIN",
         _ => null,
     };
 
@@ -722,6 +724,19 @@ public static class QualityReviewWorkflow
 
         if (verdict.CorrectedRawMasked == null)
         {
+            // DEFECT: UNCERTAIN - a genuine "ask a human" signal, not a confidence score to weigh
+            // against MinAcceptableScore (verdict.Score is always null for it - see
+            // QcDefectCategory.Uncertain). Always flag, never retry (there's no candidate fix to
+            // retry toward) and never let AutoAcceptDefectCategories silence it - PassesQcScoreGate
+            // never even gets asked, since QcTranslated stays empty here just like an ordinary
+            // Passed column, so packaging always falls through to the untouched Translated text.
+            if (verdict.Defect == QcDefectCategory.Uncertain)
+            {
+                anchor.QcStatus = QcStatus.Passed;
+                anchor.FlaggedForQcReview = true;
+                return QcOutcome.Passed;
+            }
+
             // Decided here, at the point the score is actually known, rather than deferred to a
             // separate step (ApplyRulesToCurrentQcTranslated) that only runs as part of
             // RunBruteForce - a plain RunAsync call must leave QcStatus just as accurate as a
@@ -987,7 +1002,13 @@ public static class QualityReviewWorkflow
                 return new LlmVerdict(false, null, null);
             }
 
-            var hasCorrection = correctedMatch.Success
+            // DEFECT: UNCERTAIN never carries a real correction, regardless of what the model put on
+            // the CORRECTED line - see QcDefectCategory.Uncertain's doc comment. Discarding any
+            // drafted text here (rather than trusting the model to always follow the "CORRECTED must
+            // be NONE" prompt rule) is what actually makes it safe to skip two-stage verification for
+            // this category below: there is never a real candidate that could slip through ungraded.
+            var hasCorrection = defect != QcDefectCategory.Uncertain
+                && correctedMatch.Success
                 && !string.IsNullOrEmpty(correctedRaw)
                 && !correctedRaw.Equals("NONE", StringComparison.OrdinalIgnoreCase);
 
@@ -1050,7 +1071,16 @@ public static class QualityReviewWorkflow
         QcTimingStats? timing = null)
     {
         if (correctedRaw == null)
+        {
+            // DEFECT: UNCERTAIN is not "nothing's wrong" - preserve it (and leave Score null, the
+            // same "no fallback self-score, always flag" treatment two-stage-off gives an accepted
+            // correction below) rather than collapsing it into the fixed-100 QcDefectCategory.None
+            // verdict every other no-correction case gets. See QcDefectCategory.Uncertain.
+            if (defect == QcDefectCategory.Uncertain)
+                return new LlmVerdict(true, null, null, QcDefectCategory.Uncertain);
+
             return new LlmVerdict(true, 100, null, QcDefectCategory.None);
+        }
 
         if (!config.QualityReview.TwoStageVerificationEnabled
             || !modelConfig.Prompts.ContainsKey("BaseQualityReviewVerificationPrompt")
@@ -1171,6 +1201,108 @@ public static class QualityReviewWorkflow
         // always substitutes a fixed 100 for this case) - clamp anyway purely for defense in depth.
         var score = verificationDefect == QcDefectCategory.None ? 100 : Math.Clamp(int.Parse(scoreMatch.Groups[1].Value), 0, 100);
         return new ScoreVerdict(true, verificationDefect, score);
+    }
+
+    /// <summary>
+    /// A hand-picked SOURCE/TRANSLATION pair for <see cref="ProbeReviewReasoningAsync"/>, not a real
+    /// <see cref="QcWorkItem"/> - no masking/templating, just the plain text a human wants the QC
+    /// model's actual reasoning on.
+    /// </summary>
+    public sealed record QcProbeSample(string Source, string Translation, string? GlossaryPrompt = null);
+
+    /// <summary>
+    /// Raw (unstripped, thinking included) responses for one <see cref="QcProbeSample"/> - call 1
+    /// (review) always runs; call 2 (verification/scoring) only runs when call 1 proposed a
+    /// correction, exactly like production's <see cref="FinalizeVerdictAsync"/> would decide.
+    /// </summary>
+    public sealed record QcProbeResult(QcProbeSample Sample, string ReviewRawResponse, string? VerificationRawResponse);
+
+    /// <summary>
+    /// Diagnostic-only - never called by <see cref="RunAsync"/>/<see cref="RunBruteForce"/>. Re-runs
+    /// the same call-1 (<see cref="GetLlmVerdictAsync"/>) and call-2
+    /// (<see cref="GetVerificationVerdictAsync"/>) QC prompts against hand-picked
+    /// <paramref name="samples"/> with thinking mode turned back on (production leaves it off - see
+    /// <see cref="LlmHelpers.GenerateLlmRequestData"/> - because both prompts explicitly forbid a
+    /// reasoning preamble in their OUTPUT FORMAT). Returns the full raw response for each call,
+    /// reasoning trace included, so a human can compare what the model actually reasoned against
+    /// what BaseQualityReviewPrompt.txt/BaseQualityReviewVerificationPrompt.txt intended, to guide
+    /// prompt/rubric wording changes rather than guessing from the terse DEFECT/CORRECTED/SCORE
+    /// output alone.
+    ///
+    /// Deliberately bypasses <see cref="GetLlmVerdictAsync"/>/<see cref="GetVerificationVerdictAsync"/>
+    /// themselves (inline-retry loop, cache, rule-check gating) - this only wants one review/one
+    /// verification per sample, not production's full accept/reject pipeline.
+    /// </summary>
+    public static async Task<List<QcProbeResult>> ProbeReviewReasoningAsync(
+        string workingDirectory,
+        IReadOnlyList<QcProbeSample> samples,
+        GameHooks? hooks = null)
+    {
+        var config = ConfigurationExtensions.GetConfiguration(workingDirectory, hooks);
+
+        if (string.IsNullOrEmpty(config.QualityReview.ModelName)
+            || !config.Runtime.Models.TryGetValue(config.QualityReview.ModelName, out var modelConfig))
+        {
+            throw new InvalidOperationException(
+                $"QualityReview.ModelName '{config.QualityReview.ModelName}' does not match any configured model. " +
+                $"Configured model names: {string.Join(", ", config.Runtime.Models.Keys)}");
+        }
+
+        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(300) };
+        var results = new List<QcProbeResult>();
+
+        foreach (var sample in samples)
+        {
+            var reviewPrompt = new StringBuilder();
+            reviewPrompt.AppendLine($"SOURCE (Chinese): {sample.Source}");
+            reviewPrompt.AppendLine($"CURRENT TRANSLATION (English): {sample.Translation}");
+            if (!string.IsNullOrEmpty(sample.GlossaryPrompt))
+            {
+                reviewPrompt.AppendLine("Relevant glossary terms (must be preserved if they appear in SOURCE):");
+                reviewPrompt.AppendLine(sample.GlossaryPrompt);
+            }
+
+            var reviewMessages = new List<object>
+            {
+                LlmHelpers.GenerateSystemPrompt(modelConfig.Prompts["BaseQualityReviewPrompt"]),
+                LlmHelpers.GenerateUserPrompt(reviewPrompt.ToString()),
+            };
+            var reviewRaw = await TranslationService.TranslateMessagesAsync(client, config, modelConfig, reviewMessages, enableThinking: true);
+
+            string? verificationRaw = null;
+            var defect = ParseDefectCategory(reviewRaw);
+            var correctedMatch = CorrectedLineRegex.Match(reviewRaw);
+            var claimedToken = DefectCategoryToToken(defect);
+
+            if (defect != QcDefectCategory.Uncertain
+                && claimedToken != null
+                && correctedMatch.Success
+                && !correctedMatch.Groups[1].Value.Trim().Equals("NONE", StringComparison.OrdinalIgnoreCase)
+                && modelConfig.Prompts.ContainsKey("BaseQualityReviewVerificationPrompt"))
+            {
+                var verificationPrompt = new StringBuilder();
+                verificationPrompt.AppendLine($"SOURCE (Chinese): {sample.Source}");
+                verificationPrompt.AppendLine($"CURRENT TRANSLATION (English): {sample.Translation}");
+                verificationPrompt.AppendLine($"CLAIMED DEFECT: {claimedToken}");
+                verificationPrompt.AppendLine($"PROPOSED CORRECTION: {correctedMatch.Groups[1].Value.Trim()}");
+                if (!string.IsNullOrEmpty(sample.GlossaryPrompt))
+                {
+                    verificationPrompt.AppendLine("Relevant glossary terms (must be preserved if they appear in SOURCE):");
+                    verificationPrompt.AppendLine(sample.GlossaryPrompt);
+                }
+
+                var verificationMessages = new List<object>
+                {
+                    LlmHelpers.GenerateSystemPrompt(modelConfig.Prompts["BaseQualityReviewVerificationPrompt"]),
+                    LlmHelpers.GenerateUserPrompt(verificationPrompt.ToString()),
+                };
+                verificationRaw = await TranslationService.TranslateMessagesAsync(client, config, modelConfig, verificationMessages, enableThinking: true);
+            }
+
+            results.Add(new QcProbeResult(sample, reviewRaw, verificationRaw));
+        }
+
+        return results;
     }
 
     /// <summary>

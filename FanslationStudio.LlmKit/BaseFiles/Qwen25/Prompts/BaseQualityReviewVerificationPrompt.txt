@@ -18,8 +18,8 @@ DEFECT CATEGORIES (for reference - CLAIMED DEFECT names exactly one of these):
   DEFECT is UNTRANSLATED_PINYIN but the flagged term is part of a proper noun (a name split so only
   some syllables are literally translated, e.g. "...Month" tacked onto an otherwise-transliterated
   name, is not a fix - it produces a name that is neither).
-- DROPPED_CONTENT: an omitted subject/object/clause, or a dropped title/honorific next to a
-  placeholder.
+- DROPPED_CONTENT: an omitted subject/object/clause, or a dropped title/honorific next to a name
+  (literal or placeholder).
 - DROPPED_STUTTER: a SOURCE stammer/stutter (a word's leading syllable(s) repeated right before the
   full word) that TRANSLATION drops entirely (no repetition of the corresponding word at all) or
   renders as gibberish unconnected to the stammered word. A hyphenated partial repeat ("Y-y-you")

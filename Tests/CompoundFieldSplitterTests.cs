@@ -201,6 +201,17 @@ public class CompoundFieldSplitterTests
         Assert.Equal(original, CompoundFieldSplitter.Reconstruct(template, fragments));
     }
 
+    [Fact(DisplayName = "Comparison operators stay glued into the surrounding condition instead of stranding the operator between two fragments")]
+    public void ComparisonOperatorsStayGluedIntoSurroundingCondition()
+    {
+        var original = "赌术高手（≥120）解锁，当你选择“孤注一掷”时，本轮得点翻倍";
+
+        var (template, fragments) = CompoundFieldSplitter.Decompose(original);
+
+        Assert.True(CompoundFieldSplitter.IsTrivialTemplate(template, fragments.Count));
+        Assert.Equal(original, CompoundFieldSplitter.Reconstruct(template, fragments));
+    }
+
     [Fact(DisplayName = "Em dash used as a natural interruption also stays glued into the surrounding sentence")]
     public void EmDashInterruptionStaysGluedIntoSurroundingSentence()
     {

@@ -855,8 +855,12 @@ call 3 to keep a confirmed-defect name as a faithful literal rendering rather th
 vivid one.
 
 Every `Corrected` column with `QcDefectCategory == LostIdiom` reviewed under the pre-fix prompts
-needs a fresh review - `ResetCorrectedQcState` (added for postmortem #4) already covers this by
-category.
+needs a fresh review. Unlike postmortems #4/#6 (where the whole `Corrected` population was suspect),
+this defect is narrow enough that blanket `ResetCorrectedQcState` (which resets every `Corrected`
+column regardless of category) is overkill - it has no category filter, so use it only if a targeted
+per-category sweep isn't worth writing; otherwise filter by `QcDefectCategory == LostIdiom` directly
+when resetting (`anchor.ResetQcState()` on just that subset) to avoid re-reviewing unrelated,
+already-correct `Corrected` columns for no reason.
 
 ### 8. `OTHER_NAMED_DEFECT` (and other categories) rubber-stamping a translated name reverted to Pinyin
 

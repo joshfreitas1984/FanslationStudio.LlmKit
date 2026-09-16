@@ -12,13 +12,15 @@ specifically for:
   defect.
 - Mistranslated or garbled names/titles (should be Pinyin, consistent with any glossary terms
   given below).
-- A title/honorific dropped entirely because it sits directly next to a name placeholder in
-  SOURCE (e.g. SOURCE "#PlayerName#少侠，" translated as just "#PlayerName#," with the title
-  missing) - the title must still be translated and kept, e.g. "Young Hero #PlayerName#,". If
-  your CORRECTED text restores a dropped title, keep the placeholder token itself unchanged per
-  the DO NOT flag rule below. Only restore a title that is literally present in SOURCE next to the
-  placeholder - never insert one (e.g. "Young Hero") that SOURCE does not actually contain; a
-  placeholder with no adjacent title in SOURCE is not a defect.
+- A title/honorific dropped entirely because it sits directly next to a name in SOURCE - whether a
+  literal name (e.g. SOURCE "万大侠，" translated as just "Wan," with the title missing) or a name
+  placeholder (e.g. SOURCE "#PlayerName#少侠，" translated as just "#PlayerName#," with the title
+  missing) - the title must still be translated and kept, e.g. "Great Hero Wan," or "Young Hero
+  #PlayerName#,". If your CORRECTED text restores a dropped title next to a placeholder, keep the
+  placeholder token itself unchanged per the DO NOT flag rule below. Only restore a title that is
+  literally present in SOURCE next to the name/placeholder - never insert one (e.g. "Young Hero")
+  that SOURCE does not actually contain; a name or placeholder with no adjacent title in SOURCE is
+  not a defect.
 - Wrong language output, leftover Chinese characters, or gibberish.
 - Meaning that doesn't match the Chinese source, even if the English reads fluently on its own.
 - An omitted Chinese subject/object translated by mechanically carrying forward the subject of a
@@ -91,8 +93,8 @@ DEFECT CATEGORIES: before scoring, decide which ONE of these applies, if any:
   turn a name ending in 月 into "...Month" while the rest of the same name stays transliterated -
   that produces a name that is neither, not a fix). If uncertain whether a term is part of a name
   versus a standalone common noun, treat it as part of the name and do not flag it.
-- DROPPED_CONTENT: an omitted subject/object/clause, or a dropped title/honorific next to a
-  placeholder, per the rules above.
+- DROPPED_CONTENT: an omitted subject/object/clause, or a dropped title/honorific next to a name
+  (literal or placeholder), per the rules above.
 - DROPPED_STUTTER: a SOURCE stammer/stutter (repeated leading syllable(s) before a word) that
   TRANSLATION drops entirely or renders as gibberish unconnected to the stammered word. Do NOT use
   this just because SOURCE contains a stammer - a stammer TRANSLATION already conveys (hyphenated
@@ -103,21 +105,27 @@ DEFECT CATEGORIES: before scoring, decide which ONE of these applies, if any:
 - OTHER_NAMED_DEFECT: something else concrete and nameable, not covered above. Never covers
   replacing an already-translated proper noun/title with a Pinyin transliteration - see the DO NOT
   flag/change rule above; that is a regression, not a fix.
+- UNCERTAIN: something about TRANSLATION feels potentially wrong, but you cannot confidently pin it
+  to one of the named defects above, or you cannot draft a fix you actually trust. Never guess a
+  named category (especially OTHER_NAMED_DEFECT) just to have something concrete to write - use
+  UNCERTAIN instead so a human looks at it. CORRECTED must be NONE for this category - never draft a
+  fix you're not confident in just to satisfy the CONSISTENCY rule below.
 - NONE: nothing above applies. This is the answer for most translations, including short UI/stat
   labels, long literary prose, and terse list-style constructions - do not pick a category just to
   justify a hunch.
 
 CONSISTENCY: DEFECT and CORRECTED must agree with each other, mechanically:
-- DEFECT: NONE requires CORRECTED: NONE.
+- DEFECT: NONE or DEFECT: UNCERTAIN both require CORRECTED: NONE.
 - Any other DEFECT value requires CORRECTED containing the actual fix for that named defect - never
   NONE.
 
 OUTPUT FORMAT - respond with EXACTLY these lines and nothing else:
-DEFECT: <NONE, or one of GARBLED_NUMBER / DOMAIN_TERM / LOST_IDIOM / UNTRANSLATED_PINYIN /
+DEFECT: <NONE, UNCERTAIN, or one of GARBLED_NUMBER / DOMAIN_TERM / LOST_IDIOM / UNTRANSLATED_PINYIN /
 DROPPED_CONTENT / DROPPED_STUTTER / HARD_TO_PARSE_SEAM / OTHER_NAMED_DEFECT>
-CORRECTED: <a corrected version of TRANSLATION, or the literal word NONE if no correction is needed>.
-If your correction spans what was multiple \n-joined sentences, keep it all on this one line using
-the literal two-character "\n" exactly as SOURCE/TRANSLATION do - never a real line break.
+CORRECTED: <a corrected version of TRANSLATION, or the literal word NONE if no correction is needed -
+always NONE when DEFECT is NONE or UNCERTAIN>. If your correction spans what was multiple \n-joined
+sentences, keep it all on this one line using the literal two-character "\n" exactly as
+SOURCE/TRANSLATION do - never a real line break.
 
 Do not explain your reasoning. Do not repeat the SOURCE. Do not add any other lines or commentary.
 No SCORE line - a separate review step handles confidence, not this one. If TRANSLATION is already

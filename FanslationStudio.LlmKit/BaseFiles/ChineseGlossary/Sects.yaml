@@ -136,6 +136,9 @@
   result: Beggar Sect
   direct: Beggar Gang
   literal: Gaibang
+  allowalt:
+    - Beggars' Sect
+    - Beggars Sect
 - raw: 恶人谷
   rawSimplified: 恶人谷
   rawTraditional: 惡人谷

@@ -22,7 +22,8 @@ How to fix each confirmed defect category:
   ATTEMPT did this, that is exactly the kind of new problem to fix - restore the name to fully
   transliterated instead.
 - DROPPED_CONTENT: restore the omitted subject/object/clause, or the dropped title/honorific next
-  to a placeholder, from what SOURCE/context actually supports - never invent unsupported content.
+  to a name (literal or placeholder), from what SOURCE/context actually supports - never invent
+  unsupported content.
 - DROPPED_STUTTER: render as a hyphenated partial repeat (e.g. "Y-y-you") or a full separately-spoken
   repeat (e.g. "You, you, you") of the correct word - touch ONLY the stammering word/name, nothing
   else in the line.

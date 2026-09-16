@@ -31,7 +31,16 @@ public static class LlmHelpers
         return config.Runtime.Models.First().Value;
     }
 
-    public static string GenerateLlmRequestData(ModelExecutionConfig modelConfig, List<object> messages)
+    /// <summary>
+    /// <paramref name="enableThinking"/> defaults to false - production translation/QC calls never
+    /// want reasoning tokens (cost, and both QC prompts explicitly forbid a reasoning preamble in
+    /// their output format). Pass true only for a diagnostic probe call that wants to see the
+    /// model's actual reasoning trace (e.g. to compare against BaseQualityReviewPrompt.txt/
+    /// BaseQualityReviewVerificationPrompt.txt wording) - see
+    /// <see cref="TranslationService.TranslateMessagesAsync"/>, which also skips stripping
+    /// &lt;think&gt; tags from the response when this is true.
+    /// </summary>
+    public static string GenerateLlmRequestData(ModelExecutionConfig modelConfig, List<object> messages, bool enableThinking = false)
     {
         if (modelConfig.ModelParams != null)
         {
@@ -39,7 +48,7 @@ public static class LlmHelpers
             dynamic requestBody = new ExpandoObject();
             requestBody.model = modelConfig.Model;
             requestBody.stream = false;
-            requestBody.think = false;
+            requestBody.think = enableThinking;
             requestBody.messages = messages;
 
             // Ollama's native /api/chat (as opposed to an OpenAI-compatible /v1/chat/completions
@@ -74,7 +83,7 @@ public static class LlmHelpers
                 frequency_penalty = 0,
                 presence_penalty = 0,
                 stream = false,
-                think = false,
+                think = enableThinking,
                 messages
             };
 

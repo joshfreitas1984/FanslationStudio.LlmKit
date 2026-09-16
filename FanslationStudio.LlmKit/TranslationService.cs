@@ -1458,10 +1458,17 @@ public static class TranslationService
         builder.Append(prompt);
     }
 
-    public static async Task<string> TranslateMessagesAsync(HttpClient client, LlmConfig config, ModelExecutionConfig modelToUse, List<object> messages)
+    /// <summary>
+    /// <paramref name="enableThinking"/> defaults to false, matching every production call site -
+    /// see <see cref="LlmHelpers.GenerateLlmRequestData"/>. Pass true only from a diagnostic probe;
+    /// doing so both asks the model for reasoning (think: true) AND leaves &lt;think&gt;...&lt;/think&gt;
+    /// content in the returned string instead of stripping it, so the reasoning is actually visible
+    /// to the caller.
+    /// </summary>
+    public static async Task<string> TranslateMessagesAsync(HttpClient client, LlmConfig config, ModelExecutionConfig modelToUse, List<object> messages, bool enableThinking = false)
     {
         // Generate based on what would have been created
-        var requestData = LlmHelpers.GenerateLlmRequestData(modelToUse, messages);
+        var requestData = LlmHelpers.GenerateLlmRequestData(modelToUse, messages, enableThinking);
 
         // Send correction & Get result
         HttpContent content = new StringContent(requestData, Encoding.UTF8, "application/json");
@@ -1530,8 +1537,10 @@ public static class TranslationService
                     ?.Trim() ?? string.Empty;
             }
 
-            // Remove any <think> tags and their content
-            result = RemoveThinkTags(result);
+            // Remove any <think> tags and their content - skipped when the caller explicitly asked
+            // for thinking, since a diagnostic probe wants that reasoning kept, not discarded.
+            if (!enableThinking)
+                result = RemoveThinkTags(result);
 
             return result;
         }

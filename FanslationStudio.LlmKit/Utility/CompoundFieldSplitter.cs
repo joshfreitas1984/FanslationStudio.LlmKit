@@ -79,6 +79,14 @@ public static partial class CompoundFieldSplitter
     // sentence produced much worse translations than sending the whole stuttered sentence as one
     // fragment and letting it translate/re-punctuate the pause naturally (see
     // CompoundFieldSplitterTests.cs's EllipsisAndEmDashStayGluedIntoSurroundingSentence).
+    // '\u2264'/'\u2265' (U+2264/U+2265, "Mathematical Operators" block) are absorbed for the same reason as
+    // the punctuation above: this game's data uses them inline as a natural part of a condition
+    // description (e.g. "\u8D4C\u672F\u9AD8\u624B\uFF08\u2265120\uFF09\u89E3\u9501\uFF0C..." - "unlocked once Gambling Skill is \u2265120"), not
+    // as a game-syntax separator. Left unabsorbed, the fullwidth "\uFF08" before it glues into the
+    // preceding fragment while the number+"\uFF09"+trailing sentence after it forms a second fragment,
+    // with the bare "\u2265" stranded as a literal in between - splitting one inequality condition into
+    // two independently-translated halves that lose track of what the comparison is even about
+    // (see CompoundFieldSplitterTests.cs's ComparisonOperatorsStayGluedIntoSurroundingCondition).
     // Character class subtraction ('-[\uFF1A]') carves the fullwidth colon back out of
     // \p{IsHalfwidthandFullwidthForms} so it acts as a fragment boundary instead of being absorbed -
     // see the comment above. Split into a base set (everything absorbed by default, game-agnostic
@@ -87,7 +95,7 @@ public static partial class CompoundFieldSplitter
     // string in BETWEEN the two - the '-[...]' subtraction only works as the LAST element of a .NET
     // character class, so anything added on top of the default set must be inserted before it, not
     // appended after.
-    private const string CjkTextCharsBase = @"\p{IsCJKUnifiedIdeographs}0-9.\p{IsCJKSymbolsandPunctuation}\p{IsHalfwidthandFullwidthForms}\u2018\u2019\u201C\u201D\u2026\u2014";
+    private const string CjkTextCharsBase = @"\p{IsCJKUnifiedIdeographs}0-9.\p{IsCJKSymbolsandPunctuation}\p{IsHalfwidthandFullwidthForms}\u2018\u2019\u201C\u201D\u2026\u2014\u2264\u2265";
     private const string CjkTextCharsSubtraction = @"-[\uFF1A]";
     private const string CjkTextChars = CjkTextCharsBase + CjkTextCharsSubtraction;
 

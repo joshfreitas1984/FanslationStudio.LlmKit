@@ -174,12 +174,15 @@
   result: Brother
   allowalt:
   - fellow
+  - young men
   literal: Xiong Di
   context: A term that can refer to literal brothers by birth or metaphorically to close friends or comrades who share a bond similar to familial ties.
 - raw: 小兄弟
   result: Little Brother
   literal: Xiao Xiong Di
   context: Used to address a younger male peer in a friendly, respectful manner.
+  allowalt:
+    - young men
 - raw: 師弟
   rawSimplified: 师弟
   rawTraditional: 師弟
@@ -348,6 +351,7 @@
   - Wives
   literal: Fu Ren
   context: Used as a respectful address for married women of noble status or the wife of a high-ranking official.
+  badtrans: false
 - raw: 大人
   result: Lord
   allowalt:
@@ -399,6 +403,7 @@
   - Darling
   literal: Niang Zi
   context: A respectful address for one's own wife
+  badtrans: false
 - raw: 幫主
   rawSimplified: 帮主
   rawTraditional: 幫主
