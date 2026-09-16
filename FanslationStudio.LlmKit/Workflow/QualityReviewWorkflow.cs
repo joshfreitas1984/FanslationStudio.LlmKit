@@ -1638,6 +1638,49 @@ public static class QualityReviewWorkflow
     }
 
     /// <summary>
+    /// Resets every column currently at <see cref="QcStatus.Corrected"/> back to
+    /// <see cref="QcStatus.NotReviewed"/> for a fresh review, regardless of its stored
+    /// <see cref="TranslationSplit.QcQualityScore"/> - status-based counterpart to
+    /// <see cref="ResetLowScoreQcState"/> (which resets by score threshold instead), for the case
+    /// where the *scoring itself* changed enough that every existing <c>Corrected</c> verdict's
+    /// score is suspect regardless of which side of any particular threshold it happens to land
+    /// on. A widened <c>scoreThreshold</c> on <see cref="ResetLowScoreQcState"/> can't express this
+    /// cleanly when previously-depressed scores get overcorrected upward by a rubric fix (they'd
+    /// all sit above even a generous threshold despite being just as suspect as before) - this
+    /// targets the <c>Corrected</c> population directly instead of inferring it from score. Leaves
+    /// <see cref="QcStatus.Passed"/> (score was never gated the same way) and
+    /// <see cref="QcStatus.FailedValidation"/>/rejected columns (use
+    /// <see cref="ResetQcRetryLimits"/> for those) untouched.
+    /// </summary>
+    public static async Task ResetCorrectedQcState(string workingDirectory, TextFileToSplit[] textFiles)
+    {
+        var serializer = YamlHelper.CreateSerializer();
+
+        await FileIteration.IterateTranslatedFilesInParallelAsync(workingDirectory, textFiles, async (outputFile, textFile, fileLines) =>
+        {
+            var resetCount = 0;
+
+            foreach (var line in fileLines)
+            {
+                foreach (var columnGroup in line.Splits.GroupBy(s => s.Split))
+                {
+                    var anchor = columnGroup.OrderBy(s => s.SubIndex).FirstOrDefault(f => f.SubIndex == 0) ?? columnGroup.First();
+
+                    if (anchor.QcStatus != QcStatus.Corrected)
+                        continue;
+
+                    Console.WriteLine($"Quality review cleanup: '{textFile.Path}' split {anchor.Split} was Corrected under the old scoring - resetting for re-review.");
+                    anchor.ResetQcState();
+                    resetCount++;
+                }
+            }
+
+            if (resetCount > 0)
+                await FileHelper.WriteAllTextWithRetryAsync(outputFile, serializer.Serialize(fileLines));
+        });
+    }
+
+    /// <summary>
     /// Resets every currently-flagged column (<see cref="TranslationSplit.FlaggedForQcReview"/>)
     /// whose <see cref="TranslationSplit.QcDefectCategory"/> is NOT in the configured
     /// <see cref="Configuration.QualityReviewConfig.AutoAcceptDefectCategories"/> back to

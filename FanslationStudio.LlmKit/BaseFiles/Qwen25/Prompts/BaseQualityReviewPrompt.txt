@@ -65,19 +65,31 @@ DO NOT flag or change:
   verb form, a dangling clause, subject-verb disagreement, etc. Flag and correct those exactly as
   you would anywhere else in the sentence.
 
-SCORING ANCHORS: SCORE is your confidence, not a strictness dial. Most translations with no
-flaggable issue deserve 80-100 - including short 2-6 character UI/stat labels and long literary or
-classical-flavored prose - even if you cannot independently verify a term against the glossary.
-Reserve a low score (below 40) for a defect you can name and put in CORRECTED: a garbled, dropped,
-or duplicated number or clause (e.g. a number from elsewhere in the string leaking into an
-unrelated value), a mistranslated domain term that breaks the setting (e.g. a period/wuxia weapon
-rendered as a modern one), a lost idiom or slang meaning rendered as a literal word-for-word gloss,
-or a term left untranslated/transliterated as Pinyin when it is not a proper noun and has a clear
-translatable meaning. Uncertainty alone, or a stylistic phrasing you would simply word differently,
-is not grounds for a low score. Short interjections, onomatopoeia, battle shouts, and single-line
-dialogue fragments (roughly under 15 SOURCE characters) almost never warrant a low score on their
-own - "I cannot independently verify this" is not a defect. Default these to 80+ unless you can name
-one of the specific defects above.
+SCORING ANCHORS: SCORE is your confidence, not a strictness dial - and it is never a fixed constant
+for either branch below, always judge the specific case.
+- DEFECT: NONE (no correction) - most translations with no flaggable issue deserve 80-100, including
+  short 2-6 character UI/stat labels and long literary or classical-flavored prose, even if you
+  cannot independently verify a term against the glossary. Uncertainty alone, or a stylistic
+  phrasing you would simply word differently, is not grounds for a low score. Short interjections,
+  onomatopoeia, battle shouts, and single-line dialogue fragments (roughly under 15 SOURCE
+  characters) almost never warrant a low score on their own - "I cannot independently verify this"
+  is not a defect.
+- DEFECT: <named> (CORRECTED contains a fix) - SCORE is your confidence that CORRECTED is now fully
+  and correctly resolved, on a real gradient, not a constant:
+  - 85-100: the defect and its fix are mechanical/unambiguous - a glossary term swapped in exactly
+    as given, a number/name restored from an unmistakable match elsewhere in the string, a stray
+    Pinyin term with one obvious translation. No judgment call was needed to be sure CORRECTED is
+    right.
+  - 60-84: the fix required real interpretive judgment - resolving an omitted subject/object from
+    dialogue context, choosing the best English rendering of an idiom, deciding a stammer's
+    reconstructed word from partial context - you believe it's right but a different reading was
+    plausible.
+  - Below 60: genuine uncertainty remains even after correcting - SOURCE is ambiguous enough that
+    more than one defensible fix exists and you cannot tell which one the context actually intends,
+    or the fix depends on surrounding context you do not have visibility into.
+  Do not default to either end of this range out of habit - most confidently-named, mechanical
+  defects (typos, garbled numbers, glossary mismatches) genuinely belong in the 85-100 band, and a
+  score should only fall as the actual uncertainty in the fix grows.
 
 GLOSSARY: if glossary terms are provided below and their Chinese term appears in SOURCE, your
 corrected text (if any) MUST use the given English term - do not substitute a different
@@ -105,16 +117,18 @@ DEFECT CATEGORIES: before scoring, decide which ONE of these applies, if any:
   labels, long literary prose, and terse list-style constructions - do not pick a category just to
   justify a hunch.
 
-CONSISTENCY: DEFECT, SCORE, and CORRECTED must agree with each other, mechanically:
+CONSISTENCY: DEFECT and CORRECTED must agree with each other, mechanically:
 - DEFECT: NONE requires SCORE 80-100 and CORRECTED: NONE.
-- Any other DEFECT value requires SCORE below 40 and CORRECTED containing the actual fix for that
-  named defect - never NONE.
+- Any other DEFECT value requires CORRECTED containing the actual fix for that named defect - never
+  NONE. SCORE follows the graduated scale in SCORING ANCHORS above, not a fixed value - judge the
+  actual confidence in CORRECTED case by case.
 Never choose a low SCORE without a DEFECT category that names why.
 
 OUTPUT FORMAT - respond with EXACTLY these lines and nothing else:
 DEFECT: <NONE, or one of GARBLED_NUMBER / DOMAIN_TERM / LOST_IDIOM / UNTRANSLATED_PINYIN /
 DROPPED_CONTENT / DROPPED_STUTTER / HARD_TO_PARSE_SEAM / OTHER_NAMED_DEFECT>
-SCORE: <a number from 0 to 100, your confidence that TRANSLATION is accurate and well-constructed>
+SCORE: <a number from 0 to 100 - your confidence that TRANSLATION is accurate if DEFECT: NONE,
+otherwise your confidence in CORRECTED as the fixed replacement>
 CORRECTED: <a corrected version of TRANSLATION, or the literal word NONE if no correction is needed>.
 If your correction spans what was multiple \n-joined sentences, keep it all on this one line using
 the literal two-character "\n" exactly as SOURCE/TRANSLATION do - never a real line break.

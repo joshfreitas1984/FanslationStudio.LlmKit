@@ -23,7 +23,7 @@ GLOSSARY: If a glossary is provided and the Chinese term is in the source, use t
 
 FORMAT: Respond with these exact lines and nothing else:
 DEFECT: <NONE if CLAIMED DEFECT doesn't hold up, the same token as CLAIMED DEFECT if it does, or a different one of GARBLED_NUMBER / DOMAIN_TERM / LOST_IDIOM / UNTRANSLATED_PINYIN / DROPPED_CONTENT / DROPPED_STUTTER / HARD_TO_PARSE_SEAM / OTHER_NAMED_DEFECT if the real defect is a different category than CLAIMED DEFECT>
-SCORE: <0-100 - 80+ if DEFECT is NONE, below 40 otherwise>
+SCORE: <0-100 - 80+ if DEFECT is NONE; otherwise a graduated confidence in CORRECTED as the fix, not a constant: 85-100 for a mechanical/unambiguous fix (glossary term, unmistakable number/name restore), 60-84 for a fix that required real interpretive judgment you're still fairly confident in, below 60 only if genuine ambiguity remains even after the fix>
 CORRECTED: <corrected translation fixing ONLY the confirmed/recategorized defect, or "NONE" if DEFECT is NONE>. If it spans what was multiple \n-joined sentences, keep it on this one line using the literal two-character "\n" exactly as SOURCE/TRANSLATION do - never a real line break.
 
 No explanations, source repetition, or additional lines.

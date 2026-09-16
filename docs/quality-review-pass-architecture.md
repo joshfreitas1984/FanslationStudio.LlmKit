@@ -309,6 +309,13 @@ Five levels, narrowest to broadest:
 - **`ResetLeakedQcCorrections`** — resets only columns whose stored correction/rejected-
   correction contains leaked QC-protocol text (see `ContainsLeakedProtocolText`). Routine, safe to
   run any time - a no-op once the corpus is clean.
+- **`ResetCorrectedQcState(workingDirectory, textFiles)`** — resets every column currently at
+  `QcStatus.Corrected` back to `NotReviewed`, regardless of its stored score. Status-based
+  counterpart to `ResetLowScoreQcState` below, for when the scoring itself changed enough that
+  every existing `Corrected` verdict's score is suspect no matter which side of a threshold it
+  lands on (a `scoreThreshold` on `ResetLowScoreQcState` can't express this if a rubric fix
+  overcorrects scores upward instead of down - see postmortem #4). Leaves `Passed`/
+  `FailedValidation`/rejected columns untouched.
 - **`ResetLowScoreQcState(workingDirectory, textFiles, hooks, scoreThreshold: null)`** — resets
   only columns whose current `QcQualityScore` is below `scoreThreshold` (default:
   `qualityReview.minAcceptableScore`), leaving every already-accepted column with an acceptable
@@ -680,6 +687,65 @@ acceptance block and `ApplyRulesToQcColumn`'s mirrored branch for an already-`Co
 way). Also added a `BaseQualityReviewPrompt.txt` `CONSISTENCY` rule (a low `SCORE` must come with an
 actual `CORRECTED` fix, never `NONE`) as a belt-and-suspenders prompt-level nudge against the same
 self-contradiction, though the retry-policy fix is what actually closes the bug.
+
+### 4. `CONSISTENCY` rule mechanically forcing every correction below `minAcceptableScore`
+
+A later revision of `BaseQualityReviewPrompt.txt` (all model families) tightened the `CONSISTENCY`
+rule from a one-directional implication ("a low SCORE requires a CORRECTED fix") into a
+bidirectional mandate: "any DEFECT value other than NONE requires SCORE below 40". That reads as
+harmless self-consistency, but it silently redefined what `SCORE` means for a `Corrected` outcome -
+instead of reflecting the model's actual confidence in its own fix, it became a mechanical echo of
+"a defect was named," always under 40 regardless of how clear-cut or confidently-resolved the fix
+was (an unambiguous glossary-term swap scored identically to a genuinely uncertain rewrite). Because
+`FlaggedForQcReview = score < minAcceptableScore` for an accepted correction (see "Data model"
+above), and every real-world `minAcceptableScore` sits well above 40, this made the score gate a
+no-op for the entire `Corrected` population - on a downstream project's full run, 2,979 of 2,994
+corrected columns (~99.5%) were flagged, not because the corrections were actually low-confidence,
+but because the rubric never allowed a corrected item to score high enough not to be. This defeats
+the purpose `PassesQcScoreGate`/triage exist for: distinguishing corrections worth trusting
+automatically from ones that genuinely need a human look.
+
+Fix: `CONSISTENCY` still requires `CORRECTED` to contain an actual fix whenever `DEFECT` is
+non-`NONE` (never `NONE`), but no longer mandates a specific score range for that case. `SCORE`'s own
+definition changed to match: confidence in `TRANSLATION` when `DEFECT: NONE`, confidence in
+`CORRECTED` as the replacement otherwise - so a clear, confidently-fixed defect can score 80+, and a
+low score is reserved for a fix the model isn't fully sure resolves the defect. Same fix applied to
+`BaseQualityReviewVerificationPrompt.txt`'s `SCORE` line (was `80+ if DEFECT is NONE, below 40
+otherwise`), since two-stage verification's call 2 shared the identical mechanical floor.
+
+**A downstream project that already ran a full QC pass under the old rubric has every `Corrected`
+column's score depressed by this bug** - re-scoring requires a fresh review, not just a prompt swap.
+`ResetLowScoreQcState()` with the default threshold (`qualityReview.minAcceptableScore`) is the
+targeted way to pick this up: since every `Corrected` column under the old rubric was forced below
+40, all of them already sit below any realistic `minAcceptableScore`, so the default threshold
+resets exactly the affected population without touching `Passed` columns (which were always
+correctly 80+, unaffected by this bug) or costing a full `ResetAllQcState` re-review. Do **not**
+pass an inflated `scoreThreshold` (e.g. 101) to "be thorough" - that resets every column regardless
+of status, same cost as `ResetAllQcState`.
+
+**First attempt at this fix overcorrected the other direction** - replacing the mechanical `below
+40` floor with permissive wording ("a clear-cut, confidently-fixed defect can still score 80+")
+gave the model a new anchor to default to instead of an actual gradient, and it collapsed to the
+opposite constant: on re-review, 100% of `Corrected` columns landed at 85-100, zero below
+`minAcceptableScore`, silencing `FlaggedForQcReview` for corrections just as completely as the
+original bug did, in the other direction. Compounding this, the original `SCORING ANCHORS`
+paragraph (a separate section from `CONSISTENCY`) still said "score low (below 40) only for a
+named defect" - left unedited, it flatly contradicted the new `CONSISTENCY` wording, and the model
+resolved the contradiction by picking a constant rather than actually reasoning about confidence.
+Fix: `SCORING ANCHORS` and `CONSISTENCY` now both point at one explicit three-band gradient for the
+`DEFECT`-named case (85-100 mechanical/unambiguous fix, 60-84 fix required real interpretive
+judgment, below 60 genuine ambiguity remains) instead of either a fixed floor or a fixed permission
+- a graduated scale needs concrete criteria for each band, not just "don't always score low"/"don't
+always score high," or the model will still find a single constant that technically satisfies the
+instruction. Applied identically to `BaseQualityReviewVerificationPrompt.txt`'s `SCORE` line.
+
+**Every `Corrected` column reviewed under either the overly-strict or the overly-permissive
+intermediate rubric needs another fresh review under the final graduated-scale prompt** -
+`ResetLowScoreQcState()`'s default threshold no longer catches them once they've been overcorrected
+upward to 85-100 (all above `minAcceptableScore`), and widening the threshold enough to catch them
+again (101) resets the entire corpus, `Passed` columns included, at full-re-review cost. This is
+exactly the gap `ResetCorrectedQcState` (see "Resetting Qc state" above) exists to close: it
+targets `QcStatus.Corrected` directly rather than inferring the affected set from score.
 
 ### Regression coverage
 

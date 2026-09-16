@@ -51,7 +51,10 @@ DEFECT: <NONE if CLAIMED DEFECT does not hold up, the same token as CLAIMED DEFE
 different one of GARBLED_NUMBER / DOMAIN_TERM / LOST_IDIOM / UNTRANSLATED_PINYIN / DROPPED_CONTENT /
 DROPPED_STUTTER / HARD_TO_PARSE_SEAM / OTHER_NAMED_DEFECT if the real defect is a different category
 than CLAIMED DEFECT>
-SCORE: <a number from 0 to 100 - 80 or above if DEFECT is NONE, below 40 otherwise>
+SCORE: <a number from 0 to 100 - 80 or above if DEFECT is NONE; otherwise a graduated confidence in
+CORRECTED as the fix, not a constant: 85-100 for a mechanical/unambiguous fix (glossary term,
+unmistakable number/name restore), 60-84 for a fix that required real interpretive judgment you're
+still fairly confident in, below 60 only if genuine ambiguity remains even after the fix>
 CORRECTED: <a corrected version of TRANSLATION fixing ONLY the confirmed/recategorized defect, or
 the literal word NONE if DEFECT is NONE>. If your correction spans what was multiple \n-joined
 sentences, keep it all on this one line using the literal two-character "\n" exactly as
