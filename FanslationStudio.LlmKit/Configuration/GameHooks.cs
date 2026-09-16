@@ -93,8 +93,9 @@ public class GameHooks
     /// - i.e. after every standard, game-agnostic packaging-time fixup (hyphen-undo, literal-"\n"
     /// undo) has already run. Lets a game-specific project add its own deterministic packaging-time
     /// text repair without needing its own duplicate call site in <see cref="Workflow.PrefabTextWorkflow"/>,
-    /// <see cref="Workflow.DynamicStringWorkflow"/>, and <see cref="Workflow.CsvGameDataWorkflow"/> -
-    /// registering the hook once here is enough for it to run everywhere packaging happens. Receives
+    /// <see cref="Workflow.DynamicStringWorkflow"/>, <see cref="Workflow.CsvGameDataWorkflow"/>, and
+    /// <see cref="Workflow.JsonGameDataWorkflow"/> - registering the hook once here is enough for it
+    /// to run everywhere packaging happens. Receives
     /// (textFile, column, raw, result) with the same semantics as <see cref="CustomColumnRepair"/>
     /// (textFile/column are null when packaging a plain PrefabText/DynamicString entry outside a CSV
     /// column context) and must return the (possibly repaired) result. Left null (no-op) unless a

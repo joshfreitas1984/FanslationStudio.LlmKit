@@ -5,8 +5,9 @@ namespace FanslationStudio.LlmKit.Utility;
 
 /// <summary>
 /// Single call site for every packaging-time text fixup, run from <see cref="Workflow.PrefabTextWorkflow"/>,
-/// <see cref="Workflow.DynamicStringWorkflow"/>, and <see cref="Workflow.CsvGameDataWorkflow"/> as each
-/// translated cell/line is packaged. <see cref="Apply"/> runs the standard, game-agnostic fixups
+/// <see cref="Workflow.DynamicStringWorkflow"/>, <see cref="Workflow.CsvGameDataWorkflow"/>, and
+/// <see cref="Workflow.JsonGameDataWorkflow"/> as each translated cell/line is packaged. <see cref="Apply"/>
+/// runs the standard, game-agnostic fixups
 /// below in order, then <see cref="GameHooks.CustomPackagingFixup"/> if the consuming project has
 /// registered one - so a game-specific repair never needs its own duplicate call site in every
 /// workflow, only a hook registered once on <see cref="LlmConfig.Hooks"/>.

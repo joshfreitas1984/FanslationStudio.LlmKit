@@ -167,6 +167,39 @@ for the full diagnosis. Fixed by scoping the score-gate check to only skip the `
 shortcut, never the ordinary fragment/`Translated` reconstruction — the same distinction the
 "Packaging" section above describes as steps 1 vs. 3.
 
+## Packaging-time text fixups (`Utility/PackagingTextFixups.cs`)
+
+Every workflow above runs each cell/line's packaged text through `PackagingTextFixups.Apply(config,
+textFile, column, raw, result)` right before it's written — the single call site for deterministic,
+packaging-time text repairs, so a fixup only needs to be added once rather than duplicated across
+`CsvGameDataWorkflow`, `JsonGameDataWorkflow`, `PrefabTextWorkflow`, and `DynamicStringWorkflow`.
+`column` is the zero-based CSV column index when known, `null` for a plain PrefabText/DynamicString/
+JSON-field entry with no column context.
+
+`Apply` runs two standard, game-agnostic fixups in order:
+
+1. **Hyphen undo** — the LLM/QC pass occasionally "typographically improves" an ASCII hyphen-minus
+   into the Unicode look-alike non-breaking hyphen U+2011. Undone unconditionally; a genuine U+2011
+   in source text isn't a realistic scenario for translated prose.
+2. **Literal-newline undo** — the LLM/QC pass occasionally emits a literal backslash-n (`\n` as the
+   two characters `\` and `n`) in a translated result instead of preserving the raw text's own
+   newline convention. Only fixed up when `raw` itself never contains a literal backslash-n — so
+   raw text that genuinely encodes its line breaks as literal `\n` (e.g. some prefab text/CSV cells
+   where the game's own display code replaces `\n` with a real line break at render time, rather
+   than the raw text using an actual newline character) is left untouched, since that's this field's
+   own convention and any `\n` the result produces is presumably intentional too. Note this compares
+   literal backslash-n against a literal backslash-n, not against a real newline character — `raw`
+   commonly contains real newline characters of its own that are irrelevant to this check.
+
+After the standard fixups, `Apply` invokes `config.Hooks.CustomPackagingFixup` (`Func<TextFileToSplit?,
+int?, string, string, string>?`, on `GameHooks` — see
+[`quality-review-pass-architecture.md`](quality-review-pass-architecture.md) for the sibling
+QC-side hooks on the same `GameHooks` instance) if the consuming project has registered one, passing
+its return value through as the final result. This is the extension point for a game-specific
+packaging-time repair — register it once on `LlmConfig.Hooks` and it runs everywhere packaging
+happens, without needing its own call site in any workflow. Left `null` (no-op) unless a caller
+opts in.
+
 ## `PackageOutput` and `SkipColumns`
 
 - `TextFileToSplit.PackageOutput` (bool, default `true`) — a per-file kill switch: when `false`,
