@@ -1517,28 +1517,31 @@ public static class TranslationService
 
             using var jsonDoc = JsonDocument.Parse(responseBody);
 
-            var result = string.Empty;
+            var messageElement = responseBody.Contains("\"choices\":")
+                ? jsonDoc.RootElement.GetProperty("choices")[0].GetProperty("message")
+                : jsonDoc.RootElement.GetProperty("message");
 
-            if (responseBody.Contains("\"choices\":"))
+            var result = messageElement.GetProperty("content").GetString()?.Trim() ?? string.Empty;
+
+            // Ollama's native /api/chat (think: true) puts reasoning in a SEPARATE "thinking" field
+            // on the message object, not inline in "content" - an OpenAI-compatible endpoint's
+            // equivalent is usually "reasoning_content". Neither is ever present when
+            // enableThinking is false (think stays false - see LlmHelpers.GenerateLlmRequestData),
+            // so this only ever fires for a diagnostic probe call. Folded into the same
+            // <think>...</think> marker RemoveThinkTags already knows how to strip, so a probe
+            // result still parses with the same DEFECT:/CORRECTED:/SCORE: regexes if needed.
+            if (enableThinking)
             {
-                result = jsonDoc.RootElement
-                    .GetProperty("choices")[0]
-                    .GetProperty("message")
-                    .GetProperty("content")
-                    .GetString()
-                    ?.Trim() ?? string.Empty;
-            }
-            else
-            {
-                result = jsonDoc.RootElement
-                    .GetProperty("message")!
-                    .GetProperty("content")!
-                    .GetString()
-                    ?.Trim() ?? string.Empty;
+                var thinking = messageElement.TryGetProperty("thinking", out var thinkingProp) ? thinkingProp.GetString()
+                    : messageElement.TryGetProperty("reasoning_content", out var reasoningProp) ? reasoningProp.GetString()
+                    : null;
+
+                if (!string.IsNullOrEmpty(thinking))
+                    result = $"<think>{thinking}</think>\n\n{result}";
             }
 
-            // Remove any <think> tags and their content - skipped when the caller explicitly asked
-            // for thinking, since a diagnostic probe wants that reasoning kept, not discarded.
+            // Remove any inline <think> tags and their content - skipped when the caller explicitly
+            // asked for thinking, since a diagnostic probe wants that reasoning kept, not discarded.
             if (!enableThinking)
                 result = RemoveThinkTags(result);
 
