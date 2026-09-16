@@ -64,6 +64,11 @@ Same three-tier split used by downstream consuming repos:
 | Post-translation quality review pass — current-state architecture (data model, `QualityReviewWorkflow`, staleness/freshness, packaging, presets/prompts) | [`quality-review-pass-architecture.md`](quality-review-pass-architecture.md) |
 | Post-translation quality review pass — original design plan/history (spans this repo + `DragonHierOverLlm`) | [`../../DragonHierOverLlm/docs/plans/quality-review-pass.md`](../../DragonHierOverLlm/docs/plans/quality-review-pass.md) |
 | Packaging — current-state architecture (Csv/Json/PrefabText/DynamicString reconstruction, QC score-gating, raw-fallback rules, per-workflow differences) | [`packaging-reference.md`](packaging-reference.md) |
+| Canonical downstream repo shape — index doc + sub-project layout pattern (deliberately-maintained target for `new-translation-project`/`upgrade-translation-project` to diff against, not whatever `DragonHierOverLlm` currently looks like) | [`canonical-project-shape.md`](canonical-project-shape.md) |
+| Canonical test file organization — one-file-per-workflow vs. shared files, and the `"0"`–`"9"` `DisplayName` numbering convention | [`canonical-test-organization.md`](canonical-test-organization.md) |
+| Canonical `Config.yaml` shape — required fields vs. game-specific placeholders | [`canonical-config-shape.md`](canonical-config-shape.md) |
+| Canonical BepInEx plugin project layout — IL2CPP and Mono branches | [`canonical-plugin-project-layout.md`](canonical-plugin-project-layout.md) |
+| Canonical root-level docs taxonomy a downstream repo should have (`AGENTS.md`/`CLAUDE.md`/`docs/README.md`/per-sub-project `KNOWN_ISSUES.md`) | [`canonical-repo-docs-taxonomy.md`](canonical-repo-docs-taxonomy.md) |
 
 See [`KNOWN_ISSUES.md`](../KNOWN_ISSUES.md) for the full issue index (mirrors this table with
 one-line summaries).
@@ -79,3 +84,4 @@ one-line summaries).
 | Understand or extend the quality-review pass work | [`quality-review-pass-architecture.md`](quality-review-pass-architecture.md) (current-state), [`../../DragonHierOverLlm/docs/plans/quality-review-pass.md`](../../DragonHierOverLlm/docs/plans/quality-review-pass.md) (design history) |
 | Investigate a packaging issue | [`packaging-reference.md`](packaging-reference.md) |
 | See how a downstream game project consumes this library | `DragonHierOverLlm/.github/instructions/tests-translation-workflow.instructions.md` (sibling repo) |
+| Check/reconcile a downstream repo's structure against the canonical shape | [`canonical-project-shape.md`](canonical-project-shape.md) (and its `canonical-test-organization.md`/`canonical-config-shape.md`/`canonical-plugin-project-layout.md`/`canonical-repo-docs-taxonomy.md` siblings) |

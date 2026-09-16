@@ -434,7 +434,7 @@ public static class QualityReviewWorkflow
             Console.WriteLine($"Quality review: sampling {workItems.Count} of the eligible column(s) (sampleSize={sample}).");
         }
 
-        Console.WriteLine($"Quality review: {workItems.Count} column(s) across {fileStates.Count} file(s) to consider, max concurrency {maxConcurrency}, model '{config.QualityReview.ModelName}'.");
+        Console.WriteLine($"Quality review: {workItems.Count} column(s) across {fileStates.Count} file(s) to consider, max concurrency {maxConcurrency}, model '{config.QualityReview.ModelName}', two-stage verification {(config.QualityReview.TwoStageVerificationEnabled ? "ON" : "off")}.");
 
         // Set once the final work item list is settled (post exclusion/freshness-filter/sampling),
         // so it reflects what will actually be dispatched this run - see QcFileState.PendingItems.
