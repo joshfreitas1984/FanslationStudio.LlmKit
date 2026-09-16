@@ -722,14 +722,36 @@ public static partial class CompoundFieldSplitter
         return sb.ToString();
     }
 
-    private static bool NeedsWordBoundarySpace(char? left, char? right) =>
-        left.HasValue && right.HasValue
-        && char.IsLetterOrDigit(right.Value)
-        // A closing ')' has no letter/digit of its own, but a translated fragment starting right
-        // after one (e.g. literal ")" followed by fragment "Improve Level") still needs a space -
-        // English convention always puts a space after a parenthetical before the next word.
-        && (char.IsLetterOrDigit(left.Value) || left.Value == ')')
-        && !(IsCjkIdeograph(left.Value) && IsCjkIdeograph(right.Value));
+    private static bool NeedsWordBoundarySpace(char? left, char? right)
+    {
+        if (!left.HasValue || !right.HasValue)
+            return false;
+
+        if (char.IsLetterOrDigit(right.Value)
+            // A closing ')' has no letter/digit of its own, but a translated fragment starting
+            // right after one (e.g. literal ")" followed by fragment "Improve Level") still needs
+            // a space - English convention always puts a space after a parenthetical before the
+            // next word.
+            && (char.IsLetterOrDigit(left.Value) || left.Value == ')')
+            && !(IsCjkIdeograph(left.Value) && IsCjkIdeograph(right.Value)))
+            return true;
+
+        // A literal '&' directly between two translated fragment ends (e.g. template "{0}&{1}"
+        // reconstructing two names to "Lou Dewang&Auntie Lou Qi") reads as a natural-language "and"
+        // once both sides are Latin-script text, and needs the same spacing English gives any other
+        // conjunction ("Lou Dewang & Auntie Lou Qi") - unlike the CJK/CJK case above, the source
+        // Chinese never carried a corresponding space here since '&' is otherwise a game-syntax
+        // AND/OR role separator (see compoundfieldsplitter-design.md), not sentence punctuation. The
+        // CJK exclusion here is required for the same reason as above: an untranslated (still-CJK)
+        // role token glued to '&' (e.g. "我&长老", never sent through translation) must round-trip
+        // byte-for-byte identical, only a genuinely translated Latin-script side should gain a space.
+        if (right.Value == '&' && char.IsLetterOrDigit(left.Value) && !IsCjkIdeograph(left.Value))
+            return true;
+        if (left.Value == '&' && char.IsLetterOrDigit(right.Value) && !IsCjkIdeograph(right.Value))
+            return true;
+
+        return false;
+    }
 
     private static bool IsCjkIdeograph(char c) => c is >= '\u4E00' and <= '\u9FFF';
 

@@ -133,4 +133,36 @@ public class QualityReviewConfig
     /// ~10-15% of a corpus call 1 flags with a named defect - never for a column call 1 passes.
     /// </summary>
     public bool TwoStageVerificationEnabled { get; set; } = false;
+
+    /// <summary>
+    /// Only meaningful when <see cref="TwoStageVerificationEnabled"/> is true. Runs call 2
+    /// (<see cref="Workflow.QualityReviewWorkflow.GetVerificationVerdictAsync"/>) with Ollama's
+    /// `think` mode on, instead of production's normal thinking-off default (see
+    /// <see cref="Utility.LlmHelpers.GenerateLlmRequestData"/>). Call 2 is a narrow, single-claim
+    /// judgment ("does call 1's claimed DEFECT actually hold up?") rather than an open-ended
+    /// judgment, and only runs for the ~10-15% of a corpus call 1 already flagged - the call where
+    /// reasoning is most likely to help without paying for it across the whole corpus. Never
+    /// affects call 1 (<see cref="Workflow.QualityReviewWorkflow.GetLlmVerdictAsync"/>) or call 3
+    /// (<see cref="Workflow.QualityReviewWorkflow.GetCorrectionRepairAsync"/>).
+    ///
+    /// Reasoning tokens are generated into the SAME num_predict/num_ctx budget as the final
+    /// DEFECT:/SCORE: answer, so this deliberately does NOT swap in a bigger budget per-call
+    /// (that would force Ollama to reload the model with different context params on every single
+    /// verification call, since call 1/call 3 keep running against the same loaded model in
+    /// between) - instead, the model's own <c>BaseFiles/&lt;Family&gt;/Config.yaml</c>
+    /// <c>modelParams</c> need enough static headroom (e.g. Qwen38's num_ctx/num_predict were raised
+    /// to 8192/4096) for a reasoning trace to fit before this flag is turned on, or a real reasoning
+    /// trace can consume the whole budget before the model ever reaches SCORE:, turning a
+    /// would-be-good verification into an unparseable/unscored one (see
+    /// <see cref="Workflow.QualityReviewWorkflow.GetVerificationVerdictAsync"/>'s parse-failure
+    /// branch) instead of an actual quality read. The reasoning trace itself is still always
+    /// discarded before parsing (<see cref="TranslationService.TranslateMessagesAsync"/>'s
+    /// `includeThinking` stays false) - only the final DEFECT:/SCORE: lines ever reach the regexes.
+    ///
+    /// False by default, matching every other production call's thinking-off default. Turn on to
+    /// test whether it measurably improves verification precision (re-run the per-category
+    /// hand-validation in docs/qc-qualityscore-noise-investigation.md before trusting it) - it costs
+    /// extra latency/tokens per call, but only for the already-flagged subset.
+    /// </summary>
+    public bool VerificationThinkingEnabled { get; set; } = false;
 }

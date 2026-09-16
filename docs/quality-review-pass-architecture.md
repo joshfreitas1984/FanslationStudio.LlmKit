@@ -552,6 +552,50 @@ model family (`BaseFiles/<preset>/Prompts/`), loaded/merged exactly like `BaseQu
   (`GetCorrectionRepairAsync`) attempts to improve a correction call 2 scored too low, re-scoring via
   call 2 after each attempt. Only meaningful when `twoStageVerificationEnabled` is true. See
   "Two-stage DEFECT verification and scoring" above.
+- `verificationThinkingEnabled` (bool, default false) — runs call 2 (`GetVerificationVerdictAsync`)
+  with Ollama's `think` mode on instead of production's normal thinking-off default. Only affects
+  call 2 (never call 1 or call 3), and only when `twoStageVerificationEnabled` is true. See
+  "Verification-call thinking" below.
+
+## Verification-call thinking (opt-in, `verificationThinkingEnabled`)
+
+Every production QC call runs with Ollama's `think` mode off (see
+`LlmHelpers.GenerateLlmRequestData`'s doc comment) - both cost and both prompts' output formats
+forbid a reasoning preamble. `verificationThinkingEnabled` turns thinking back on for call 2
+(`GetVerificationVerdictAsync`) only - never call 1 (`GetLlmVerdictAsync`) or call 3
+(`GetCorrectionRepairAsync`) - because call 2 is a narrow, single-claim judgment ("does call 1's
+claimed DEFECT actually hold up, given SOURCE/TRANSLATION/the proposed correction?") rather than an
+open-ended one, and only runs for the subset call 1 already flagged with a named defect (~10-15% of
+a corpus), not the whole thing - the cheapest place in the pipeline to test whether reasoning
+measurably improves precision.
+
+**Budget**: reasoning tokens are generated into the SAME `num_predict`/`num_ctx` budget as the final
+`DEFECT:`/`SCORE:` answer (Ollama's native `/api/chat` puts `think: true` reasoning in a separate
+`thinking` response field, but it's still drawn from the same generation/context budget as the
+visible `content`). With thinking off, that budget is essentially unused by anything but the two
+terse output lines. With thinking on, a real reasoning trace can consume a meaningful chunk of it
+before the model ever reaches `SCORE:`, and `GetVerificationVerdictAsync`'s regex parse can't tell
+that apart from any other malformed response - it just logs "could not parse verification
+response... treating as unscored." Rather than swap in a larger `num_predict`/`num_ctx` per-call
+(which would force Ollama to reload the model with different context params on every single
+verification call, since call 1/call 3 keep running with the base config in between), Qwen38's own
+`BaseFiles/Qwen38/Config.yaml` `modelParams` were raised to `num_ctx: 8192`/`num_predict: 4096` (was
+`4096`/`2048`) so the SAME loaded-model config has headroom for a reasoning trace on every call,
+whether or not this flag is on for a given run. This is a static, always-on increase for the whole
+model, not something scoped to `verificationThinkingEnabled` - if a different model family is
+configured for QC, its own `BaseFiles/<Family>/Config.yaml` would need the same headroom before
+turning this flag on against it.
+
+**The reasoning trace is still always discarded before parsing** - `TranslateMessagesAsync` is
+called with `enableThinking: true` but `includeThinking` left at its default `false`, so only the
+final `DEFECT:`/`SCORE:` lines in `content` ever reach `ScoreLineRegex`/`ParseDefectCategory`; the
+model's `thinking` field is simply never read.
+
+Off by default, matching every other call's thinking-off default. Turning it on is a precision
+experiment, not an assumed improvement - re-run the per-category hand-validation in
+`docs/qc-qualityscore-noise-investigation.md` (DragonHierOverLlm repo) against a sample before
+trusting that it moved anything, since it doubles call 2's token cost/latency for the flagged subset
+either way.
 
 ## Inline rule-check retries (bad words only)
 
@@ -900,6 +944,49 @@ Every `Corrected` column with `QcDefectCategory == OtherNamedDefect` (or any cat
 `QcTranslated` reverts a name to Pinyin, reviewed under the pre-fix prompts, needs a fresh review -
 `ResetCorrectedQcState` (added for postmortem #4) already covers this; there is no narrower
 category-scoped reset available since the bug wasn't scoped to one category.
+
+### 9. Model repeating its own DEFECT/CORRECTED block verbatim on longer, multi-clause corrections
+
+A downstream project (DragonHierOverLlm, Qwen38) reported `ContainsLeakedProtocolText` rejecting
+otherwise-good responses with logs like `"parsed correction for '...' contains leaked QC-protocol
+text - treating as unparseable"`, and the raw response showing the *entire* `DEFECT:`/`CORRECTED:`
+answer generated twice, byte-identical, back to back:
+
+```
+DEFECT: LOST_IDIOM
+CORRECTED: (Is she Little Zhuge of Flying Dragon Gate?\nThis person's Spear Technique is superlative...)
+DEFECT: LOST_IDIOM
+CORRECTED: (Is she Little Zhuge of Flying Dragon Gate?\nThis person's Spear Technique is superlative...)
+```
+
+`ContainsLeakedProtocolText`/`CorrectedLineRegex` (postmortem #2) worked exactly as designed here -
+the second block's `CORRECTED:` label is a genuine leak into the capture, correctly rejected rather
+than stored. But every real occurrence shared a pattern: all were multi-clause/multi-sentence
+templated corrections (`{0}\n{1}\n{2}`-shaped, several sentences joined with the literal `\n`
+convention), never a short single-sentence line - i.e. the model was reliably looping and re-emitting
+its whole structured answer specifically on the longer, more "creative" corrections (`LOST_IDIOM`'s
+"vivid, period-appropriate wuxia/proverb-register phrasing" instruction, or a multi-clause
+`DROPPED_CONTENT` restoration), not a resolution/plumbing bug. This is a generation-time degeneration
+failure (the model not stopping after a complete answer), not a parsing bug - no regex change closes
+it, only preventing the second block from ever being generated does.
+
+Fix: added `stop: ["\nDEFECT:", "\nCORRECTED:"]` to Qwen38's `modelParams`
+(`BaseFiles/Qwen38/Config.yaml`). Both call 1/call 2's legitimate output always starts its response
+with `DEFECT:` (no preceding newline, since it's the first token generated) and call 3's always
+starts with `CORRECTED:` the same way - so a stop sequence anchored to a *preceding* newline only
+ever matches a second, illegitimate block starting mid-response, never a call's own legitimate first
+line. Ollama halts generation the moment the stop sequence appears, so the model is cut off right as
+it starts to repeat, before the leak ever reaches `ContainsLeakedProtocolText` - turning what used to
+be a wasted, discarded HTTP round trip (and another full `NotReviewed` cycle before a retry
+succeeds) into a clean, immediately-accepted single answer. Considered but rejected: raising
+`repeat_penalty` (a corpus-wide sampling change risking translation-quality side effects elsewhere,
+for a fix narrowly targeted at one structural failure mode) and per-call `num_predict`/`num_ctx`
+overrides (would force Ollama to reload the model - see `verificationThinkingEnabled`'s doc comment
+for why that's avoided - every time a call needed a different budget than its neighbors).
+
+Any other model family/config wired up for QC should get the same `stop` entries if it shows the same
+repeated-block symptom - this fix is config-only, not a code change, so it doesn't propagate to a
+model family's `BaseFiles/<Family>/Config.yaml` automatically.
 
 ### Regression coverage
 

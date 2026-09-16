@@ -85,6 +85,19 @@
 `CompoundFieldSplitter.Reconstruct(template, translatedFragments)` rebuilds the cell by
 substituting `{0}`, `{1}`, ... in order — never rebuild compound cells by hand.
 
+**`Reconstruct`'s word-boundary spacing treats a literal `&` as a natural-language conjunction, not
+just a game-syntax separator** (fixed Sep 2026 after a WanXiangOverLlm QC report): a `Desc`-style
+column like `娄德旺&娄七姑` (two related names) decomposes to template `{0}&{1}`, and once both
+fragments are translated (`Lou Dewang`/`Auntie Lou Qi`) the reconstructed English needs to read
+`Lou Dewang & Auntie Lou Qi`, not `Lou Dewang&Auntie Lou Qi` — English always spaces a conjunction,
+even though the source Chinese never needed a space around `&` at all. This spacing rule only fires
+when the fragment side is genuinely translated Latin-script text (`char.IsLetterOrDigit` and NOT a
+CJK ideograph) — an untranslated role token still glued to `&` (e.g. `我&长老`, never sent through
+translation because it round-trips as `{0}&{1}` with identity fragments) must keep reconstructing
+byte-for-byte identical, so the AND/OR role-requirement usage below is unaffected. See
+`ReconstructInsertsWordBoundarySpaceAroundAmpersand`/`CompoundCellWithRoleSeparatorsStillSplits` in
+`Tests/CompoundFieldSplitterTests.cs` and `NeedsWordBoundarySpace` in `CompoundFieldSplitter.cs`.
+
 Known game-data compound patterns worth recognizing when reasoning about `Decompose` output:
 - `;` — separates a list of items within one cell (e.g. multiple building actions).
 - `-` — separates role/method metadata from the action payload within one item, **except** when

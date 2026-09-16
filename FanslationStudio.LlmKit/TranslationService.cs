@@ -1465,7 +1465,7 @@ public static class TranslationService
     /// content in the returned string instead of stripping it, so the reasoning is actually visible
     /// to the caller.
     /// </summary>
-    public static async Task<string> TranslateMessagesAsync(HttpClient client, LlmConfig config, ModelExecutionConfig modelToUse, List<object> messages, bool enableThinking = false)
+    public static async Task<string> TranslateMessagesAsync(HttpClient client, LlmConfig config, ModelExecutionConfig modelToUse, List<object> messages, bool enableThinking = false, bool includeThinking = false)
     {
         // Generate based on what would have been created
         var requestData = LlmHelpers.GenerateLlmRequestData(modelToUse, messages, enableThinking);
@@ -1530,7 +1530,7 @@ public static class TranslationService
             // so this only ever fires for a diagnostic probe call. Folded into the same
             // <think>...</think> marker RemoveThinkTags already knows how to strip, so a probe
             // result still parses with the same DEFECT:/CORRECTED:/SCORE: regexes if needed.
-            if (enableThinking)
+            if (enableThinking && includeThinking)
             {
                 var thinking = messageElement.TryGetProperty("thinking", out var thinkingProp) ? thinkingProp.GetString()
                     : messageElement.TryGetProperty("reasoning_content", out var reasoningProp) ? reasoningProp.GetString()

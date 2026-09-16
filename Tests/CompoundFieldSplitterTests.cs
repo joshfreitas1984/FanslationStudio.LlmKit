@@ -519,5 +519,22 @@ public class CompoundFieldSplitterTests
             "{3} {0} ({1} Level) Improve {2} Level",
             CompoundFieldSplitter.Reconstruct(template, translated));
     }
+
+    [Fact(DisplayName = "Reconstruct inserts word-boundary spaces around a literal '&' between two translated fragments")]
+    public void ReconstructInsertsWordBoundarySpaceAroundAmpersand()
+    {
+        var (template, fragments) = CompoundFieldSplitter.Decompose("娄德旺&娄七姑");
+
+        var translated = fragments.Select(f => f switch
+        {
+            "娄德旺" => "Lou Dewang",
+            "娄七姑" => "Auntie Lou Qi",
+            _ => f,
+        }).ToList();
+
+        Assert.Equal(
+            "Lou Dewang & Auntie Lou Qi",
+            CompoundFieldSplitter.Reconstruct(template, translated));
+    }
 }
 

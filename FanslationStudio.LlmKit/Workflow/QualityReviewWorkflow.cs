@@ -1173,7 +1173,7 @@ public static class QualityReviewWorkflow
         var llmStopwatch = Stopwatch.StartNew();
         try
         {
-            llmResponse = await TranslationService.TranslateMessagesAsync(client, config, modelConfig, messages);
+            llmResponse = await TranslationService.TranslateMessagesAsync(client, config, modelConfig, messages, enableThinking: config.QualityReview.VerificationThinkingEnabled);
         }
         catch (Exception e) when (e is HttpRequestException or OperationCanceledException)
         {

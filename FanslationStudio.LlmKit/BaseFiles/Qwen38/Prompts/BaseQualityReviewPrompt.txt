@@ -40,15 +40,35 @@ DO NOT flag/change:
 
 GLOSSARY: If terms provided and Chinese appears in SOURCE, corrected text MUST use given English term. Do not substitute.
 
+When SOURCE is a short name/title/achievement string (not a full sentence), prefer the reading tied
+to a literal in-game action or mechanic over a classical idiom's moral/literary sense, when both are
+plausible - achievement and skill titles describe what the player did or mastered, not a character
+judgment, even when the same characters also form a well-known idiom.
+
 DEFECT CATEGORIES - before scoring, decide which ONE applies, if any:
 - GARBLED_NUMBER: a garbled/dropped/duplicated number or clause (e.g. a number from elsewhere in the string leaking into an unrelated value).
 - DOMAIN_TERM: a mistranslated domain term that breaks the setting (e.g. a period/wuxia weapon rendered as a modern one).
-- LOST_IDIOM: a lost idiom/slang meaning rendered as a literal word-for-word gloss. Correct with
-  vivid, period-appropriate wuxia/proverb-register phrasing - not flat modern English. Never applies
+- LOST_IDIOM: a lost idiom/slang meaning rendered as a literal word-for-word gloss. Retaining a
+  concrete source word/number (e.g. "poisons," "five") is not itself the literalism problem this
+  category targets - a translation that pairs retained concrete imagery with a natural idiomatic
+  English construction (e.g. "versed in," "skilled at," "practiced in") is not a literal word-for-word
+  gloss and is not a defect. Only flag when TRANSLATION reads as a mechanical, unnatural
+  word-for-word rendering with no idiomatic framing at all. Correct with vivid, period-appropriate
+  wuxia/proverb-register phrasing - not flat modern English. Trading a concrete source image or
+  number (e.g. a specific poison, a specific count) for a vaguer generic word (e.g. "vices"), or for
+  a different image that shifts SOURCE's meaning (e.g. "poisoned to the core," which implies being
+  corrupted/tainted by poison rather than skilled/practiced in it), is not vivid, period-appropriate
+  phrasing, even if the result reads fluently - it is flatter than or different from the source, not
+  an improvement, and is the opposite of what this category's correction is for. Prefer keeping
+  concrete source imagery when SOURCE has it. Never applies
   to a skill/technique/move/title name that is a plain descriptive compound rather than an actual
   fixed idiom or proverb - a name reading as flat literal English is not a defect on its own, and
   rewriting it for more "vivid" phrasing is not a fix. If uncertain whether SOURCE actually contains
   a real idiom/proverb versus an ordinary descriptive name, treat it as not an idiom and do not flag it.
+  If SOURCE genuinely supports two plausible readings - a classical idiom sense and a literal
+  action/mechanic sense - and TRANSLATION reads as one of them naturally, do not flip between DEFECT
+  and NONE chasing the other reading; if you cannot confidently tell which reading SOURCE actually
+  intends, output UNCERTAIN instead of guessing LOST_IDIOM or forcing a NONE you are not sure of.
 - UNTRANSLATED_PINYIN: a term left untranslated/transliterated as Pinyin when it is not a proper noun and has a clear translatable meaning. Never applies to any syllable/character inside a personal, place, or faction name that is otherwise kept transliterated - a multi-character proper noun is rendered as a whole, either fully transliterated or fully translated by established convention/glossary, never split so only some syllables are literally translated (e.g. do not turn a name ending in 月 into "...Month" while the rest of the same name stays transliterated - that produces a name that is neither, not a fix). If uncertain whether a term is part of a name versus a standalone common noun, treat it as part of the name and do not flag it.
 - DROPPED_CONTENT: an omitted subject/object/clause, or a dropped title/honorific next to a name (literal or placeholder), per the rules above.
 - DROPPED_STUTTER: a SOURCE stammer/stutter (repeated leading syllable(s) before a word) that TRANSLATION drops entirely or renders as gibberish unconnected to the stammered word. Do NOT use this just because SOURCE contains a stammer - a stammer TRANSLATION already conveys (hyphenated or as a full repeated word - both valid) is not a defect. If another defect is also present on the line, name that instead - it takes priority over a stammer-formatting quibble.
