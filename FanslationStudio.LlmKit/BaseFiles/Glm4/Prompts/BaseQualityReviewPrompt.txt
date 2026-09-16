@@ -26,7 +26,11 @@ DEFECT CATEGORIES: before scoring, decide which ONE applies, if any:
 - GARBLED_NUMBER: a garbled/dropped/duplicated number or clause (e.g. a number from elsewhere in the string leaking into an unrelated value).
 - DOMAIN_TERM: a mistranslated domain term that breaks the setting (e.g. a period/wuxia weapon rendered as a modern one).
 - LOST_IDIOM: a lost idiom/slang meaning rendered as a literal word-for-word gloss. Correct with
-  vivid, period-appropriate wuxia/proverb-register phrasing - not flat modern English.
+  vivid, period-appropriate wuxia/proverb-register phrasing - not flat modern English. Never applies
+  to a skill/technique/move/title name that is a plain descriptive compound rather than an actual
+  fixed idiom or proverb - a name reading as flat literal English is not a defect on its own, and
+  rewriting it for more "vivid" phrasing is not a fix. If uncertain whether SOURCE actually contains
+  a real idiom/proverb versus an ordinary descriptive name, treat it as not an idiom and do not flag it.
 - UNTRANSLATED_PINYIN: a term left untranslated/transliterated as Pinyin when it is not a proper noun and has a clear translatable meaning. Never applies to any syllable/character inside a personal, place, or faction name that is otherwise kept transliterated - a multi-character proper noun is rendered as a whole, either fully transliterated or fully translated by established convention/glossary, never split so only some syllables are literally translated (e.g. don't turn a name ending in 月 into "...Month" while the rest of the same name stays transliterated - that produces a name that is neither, not a fix). If uncertain whether a term is part of a name versus a standalone common noun, treat it as part of the name and don't flag it.
 - DROPPED_CONTENT: an omitted subject/object/clause, or a dropped title/honorific next to a placeholder, per the rules above.
 - DROPPED_STUTTER: a SOURCE stammer/stutter (repeated leading syllable(s) before a word) that TRANSLATION drops entirely or renders as gibberish unconnected to the stammered word. Do NOT use this just because SOURCE contains a stammer - a stammer TRANSLATION already conveys (hyphenated or as a full repeated word - both valid) is not a defect. If another defect is also present on the line, name that instead - it takes priority over a stammer-formatting quibble.

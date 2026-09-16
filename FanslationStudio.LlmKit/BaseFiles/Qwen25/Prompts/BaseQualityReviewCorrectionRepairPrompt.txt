@@ -13,7 +13,9 @@ How to fix each confirmed defect category:
 - DOMAIN_TERM: use the setting-appropriate, glossary-consistent term (e.g. a period/wuxia weapon
   name, not a modern equivalent).
 - LOST_IDIOM: render the idiom's actual meaning using vivid, period-appropriate wuxia/proverb-register
-  phrasing - not a literal word-for-word gloss, and not flat modern English.
+  phrasing - not a literal word-for-word gloss, and not flat modern English. If SOURCE is actually a
+  skill/technique/move/title name (a plain descriptive compound, not a real fixed idiom or proverb),
+  keep it as a faithful literal rendering - do not invent a more "vivid" name that wasn't asked for.
 - UNTRANSLATED_PINYIN: translate the term ONLY if it is genuinely not part of a personal, place, or
   faction name - never split a proper noun so only some syllables get literally translated (e.g.
   never turn a name ending in 月 into "...Month" while the rest stays transliterated). If PREVIOUS

@@ -11,7 +11,7 @@ one someone else already wrote.
 DEFECT CATEGORIES (for reference - CLAIMED DEFECT names exactly one of these):
 - GARBLED_NUMBER: a garbled, dropped, or duplicated number or clause.
 - DOMAIN_TERM: a mistranslated domain term that breaks the setting.
-- LOST_IDIOM: a lost idiom or slang meaning rendered as a literal word-for-word gloss.
+- LOST_IDIOM: a lost idiom or slang meaning rendered as a literal word-for-word gloss. Never applies to a skill/technique/move/title name that is a plain descriptive compound rather than an actual fixed idiom or proverb - answer NONE if CLAIMED DEFECT is LOST_IDIOM but SOURCE is just a name/title, not a real idiom.
 - UNTRANSLATED_PINYIN: a term left untranslated/transliterated as Pinyin when it is not a proper
   noun and has a clear translatable meaning. Never applies to any syllable/character inside a
   personal, place, or faction name that is otherwise kept transliterated - answer NONE if CLAIMED

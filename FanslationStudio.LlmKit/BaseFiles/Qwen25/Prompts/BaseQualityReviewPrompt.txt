@@ -75,7 +75,11 @@ DEFECT CATEGORIES: before scoring, decide which ONE of these applies, if any:
 - DOMAIN_TERM: a mistranslated domain term that breaks the setting (e.g. a period/wuxia weapon
   rendered as a modern one).
 - LOST_IDIOM: a lost idiom or slang meaning rendered as a literal word-for-word gloss. Correct with
-  vivid, period-appropriate wuxia/proverb-register phrasing - not flat modern English.
+  vivid, period-appropriate wuxia/proverb-register phrasing - not flat modern English. Never applies
+  to a skill/technique/move/title name that is a plain descriptive compound rather than an actual
+  fixed idiom or proverb - a name reading as flat literal English is not a defect on its own, and
+  rewriting it for more "vivid" phrasing is not a fix. If uncertain whether SOURCE actually contains
+  a real idiom/proverb versus an ordinary descriptive name, treat it as not an idiom and do not flag it.
 - UNTRANSLATED_PINYIN: a term left untranslated/transliterated as Pinyin when it is not a proper
   noun and has a clear translatable meaning. Never applies to any syllable/character inside a
   personal, place, or faction name that is otherwise kept transliterated - a multi-character proper

@@ -824,6 +824,40 @@ Every `Corrected` column reviewed under any of the pre-#6 scoring behavior (self
 call 2 re-deriving its own fix) needs a fresh review under this pipeline - `ResetCorrectedQcState`
 (added for postmortem #4) already covers this.
 
+### 7. `LOST_IDIOM` misapplied to skill/technique names, embellishing a correct literal name
+
+Same shape of bug as postmortem #5 (`UNTRANSLATED_PINYIN` misapplied inside proper nouns), but for a
+different `DEFECT` category and a different field kind: a downstream project reported SOURCE
+`衡山备战心` (a skill/technique `Name` column, `衡山` = the Hengshan faction/place name, `备战心` a
+plain descriptive compound - "battle-preparation heart/mind", not a real Chinese idiom or proverb),
+already correctly translated literally as "Hengshan Preparations Heart", "corrected" by QC to
+"Hengshan's Battle-Preparation Resolve" under `DEFECT: LOST_IDIOM`, `SCORE: 85`. There is no idiom in
+the source to lose - `LOST_IDIOM`'s definition ("a lost idiom/slang meaning rendered as a literal
+word-for-word gloss") was being satisfied by the model treating *any* flat/literal-sounding name as
+evidence of a missed idiomatic reading, then rewriting it toward more "vivid" phrasing regardless of
+whether SOURCE actually contained an idiom. Unlike postmortem #5's fix, `LOST_IDIOM` had no
+proper-noun/name carve-out at all in any prompt family until this fix, so nothing stopped the model
+confidently "improving" a skill name's register on every review pass it happened to sample - and,
+per postmortem #6, a self-consistent 85 score gave the correction nothing to be caught by the score
+gate either (above `minAcceptableScore`, and two-stage verification only re-checks a call-1 *claim*,
+which the same model reliably re-confirms since its false belief that "battle-preparation heart" is
+an idiom is not corrected between call 1 and call 2).
+
+Fix: `LOST_IDIOM`'s definition (all three model families, base + verification + correction-repair
+prompts) gained an explicit carve-out mirroring postmortem #5's - it never applies to a
+skill/technique/move/title name that is a plain descriptive compound rather than an actual fixed
+idiom or proverb; a name reading as flat literal English is not itself a defect, and rewriting it for
+more "vivid" register is not a fix; when uncertain whether SOURCE actually contains a real
+idiom/proverb versus an ordinary descriptive name, treat it as not an idiom and don't flag it. The
+verification prompt's copy specifically tells call 2 to answer `DEFECT: NONE` when `CLAIMED DEFECT`
+is `LOST_IDIOM` but SOURCE turns out to be a plain name/title, and the correction-repair prompt tells
+call 3 to keep a confirmed-defect name as a faithful literal rendering rather than inventing a more
+vivid one.
+
+Every `Corrected` column with `QcDefectCategory == LostIdiom` reviewed under the pre-fix prompts
+needs a fresh review - `ResetCorrectedQcState` (added for postmortem #4) already covers this by
+category.
+
 ### Regression coverage
 
 `Tests/TranslationWorkflowTests.cs`'s `"3g. QcOmittedSubjectRegression"` (DragonHierOverLlm repo)
