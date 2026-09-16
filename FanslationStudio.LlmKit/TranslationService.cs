@@ -102,6 +102,46 @@ public static class TranslationService
             : t.Split == split.Split);
 
     /// <summary>
+    /// The compound column a fragment belongs to (its <see cref="TranslationSplit.SplitPath"/>, or
+    /// <see cref="TranslationSplit.Split"/> for CSV-style files that leave SplitPath empty) - only
+    /// meaningful when <see cref="IsCompoundFragment"/> is true. Two fragments of the SAME column
+    /// (e.g. the same JSON field across different rows) sharing bare text is a genuine, safe dedup
+    /// opportunity - they decompose from the same template and mean the same thing. Two fragments
+    /// of DIFFERENT columns that merely happen to decompose to the same bare text (e.g. "反弹伤害"
+    /// as the base of both an "ItemName" field templated "{0}（{0}/{1}）" and a "Desc" field
+    /// templated "{0}+{0}%" on the same row) must never share a cache slot - each column's
+    /// reconstruction is independent, so one column's already-wrong (or merely differently-shaped)
+    /// stored value bleeding into the other via a shared bare-text key produces exactly the
+    /// template-suffix-contamination symptom this was added to fix (see
+    /// docs/compoundfieldsplitter-design.md).
+    /// </summary>
+    private static string ColumnIdentity(TranslationSplit split) =>
+        !string.IsNullOrEmpty(split.SplitPath) ? split.SplitPath : $"#{split.Split}";
+
+    /// <summary>
+    /// Cache key for a compound-template fragment in <c>fragmentCache</c> - namespaced by
+    /// <see cref="ColumnIdentity"/> so fragments of different columns never collide even when their
+    /// bare text is identical. Never used for a non-fragment (whole-cell) split, which keys/dedupes
+    /// on bare <see cref="TranslationSplit.Text"/> alone in the main <c>translationCache</c>, same
+    /// as before this fragment-isolation work existed.
+    /// </summary>
+    private static string FragmentCacheKey(TranslationSplit split) =>
+        $"{ColumnIdentity(split)}{split.Text}";
+
+    /// <summary>
+    /// Grouping key used everywhere a scheduler dedups/propagates identical-text splits (unique
+    /// work-item selection and duplicate propagation, both schedulers) - a whole-cell split dedupes
+    /// broadly on bare text alone (unchanged, intended behavior), but a fragment only dedupes
+    /// against other fragments of the SAME column (see <see cref="ColumnIdentity"/>), never against
+    /// a whole-cell split or a fragment of a different column that merely shares bare text.
+    /// </summary>
+    private static (bool IsFragment, string ColumnIdentity, string Text) DedupKey(TranslationLine line, TranslationSplit split)
+    {
+        var isFragment = IsCompoundFragment(line, split);
+        return (isFragment, isFragment ? ColumnIdentity(split) : string.Empty, split.Text);
+    }
+
+    /// <summary>
     /// True if <paramref name="text"/> exactly matches a glossary or manual-translation entry that
     /// is scoped to specific output files ("only"/"exclude" - see
     /// <see cref="GlossaryLine.IsFileRestricted"/>). Such entries must never be read from or
@@ -148,7 +188,8 @@ public static class TranslationService
     public static async Task FillTranslationCacheAsync(string workingDirectory,
         int charsToCache, ConcurrentDictionary<string, string> cache,
         LlmConfig config, TextFileToSplit[] textFiles,
-        ConcurrentDictionary<string, string>? fragmentCache = null)
+        ConcurrentDictionary<string, string>? fragmentCache = null,
+        HashSet<string>? overrideKeys = null)
     {
         // Build the O(1) file-restriction lookup once per run before any splits are processed -
         // see BuildFileRestrictedIndex/RuntimeValues.FileRestrictedEntriesByText.
@@ -157,15 +198,20 @@ public static class TranslationService
         // Add Manual adjustments
         //
         // Skip entries scoped via "only"/"exclude" - see IsFileRestrictedText above. Seeded into
-        // both caches - an authored override is correct for a bare string regardless of whether a
-        // given occurrence happens to be a whole cell or one fragment of a compound field.
+        // cache (plain key) only - an authored override is correct for a bare string regardless of
+        // whether a given occurrence happens to be a whole cell or one fragment of a compound
+        // field, but fragmentCache is namespaced per-column (see FragmentCacheKey) and an override
+        // has no single column to namespace under. overrideKeys records which plain keys in cache
+        // came from here (rather than from ordinary whole-cell auto-learned translations), so a
+        // fragment lookup can safely consult cache for JUST these keys without risking a whole-cell
+        // auto-learned entry leaking into a fragment - see TryGetCachedTranslation.
         foreach (var k in config.Runtime.ManualTranslations)
         {
             if (k.IsFileRestricted)
                 continue;
 
             cache.TryAdd(k.Raw, k.Result);
-            fragmentCache?.TryAdd(k.Raw, k.Result);
+            overrideKeys?.Add(k.Raw);
         }
 
         // Add Glossary Lines to Cache
@@ -183,7 +229,7 @@ public static class TranslationService
                 continue;
 
             cache.TryAdd(line.Raw, line.Result);
-            fragmentCache?.TryAdd(line.Raw, line.Result);
+            overrideKeys?.Add(line.Raw);
         }
 
 
@@ -207,10 +253,11 @@ public static class TranslationService
                         continue;
 
                     // A compound-field fragment's bare text must never seed (or be satisfied by)
-                    // the same cache slot a genuine whole-cell translation uses - see
-                    // IsCompoundFragment's doc comment.
+                    // the same cache slot a genuine whole-cell translation uses, NOR the slot of a
+                    // fragment belonging to a different column - see IsCompoundFragment/
+                    // ColumnIdentity's doc comments.
                     if (fragmentCache != null && IsCompoundFragment(line, split))
-                        fragmentCache.TryAdd(split.Text, split.Translated);
+                        fragmentCache.TryAdd(FragmentCacheKey(split), split.Translated);
                     else
                         cache.TryAdd(split.Text, split.Translated);
                 }
@@ -237,7 +284,7 @@ public static class TranslationService
                         continue;
 
                     if (fragmentCache != null && IsCompoundFragment(line, split))
-                        fragmentCache.TryAdd(split.Text, split.Translated);
+                        fragmentCache.TryAdd(FragmentCacheKey(split), split.Translated);
                     else
                         cache.TryAdd(split.Text, split.Translated);
                 }
@@ -251,11 +298,44 @@ public static class TranslationService
     }
 
     /// <summary>
+    /// Single source of truth for reading a split's cached translation, whole-cell or fragment
+    /// alike - see <see cref="FillTranslationCacheAsync"/>'s cache/fragmentCache/overrideKeys doc
+    /// comments for why a fragment cannot simply check the same plain-keyed cache a whole-cell
+    /// split does. A fragment is satisfied by (in order) an authored override (glossary/manual,
+    /// found via <paramref name="overrideKeys"/> gating a plain-key lookup in
+    /// <paramref name="cache"/>) or a same-column fragment cache hit - never by an arbitrary
+    /// whole-cell auto-learned entry, even one sharing its exact bare text.
+    /// </summary>
+    private static bool TryGetCachedTranslation(TranslationSplit split, bool isFragment,
+        ConcurrentDictionary<string, string> cache, ConcurrentDictionary<string, string> fragmentCache,
+        HashSet<string> overrideKeys, out string result)
+    {
+        if (!isFragment)
+            return cache.TryGetValue(split.Text, out result!);
+
+        if (overrideKeys.Contains(split.Text) && cache.TryGetValue(split.Text, out result!))
+            return true;
+
+        return fragmentCache.TryGetValue(FragmentCacheKey(split), out result!);
+    }
+
+    /// <summary>Counterpart to <see cref="TryGetCachedTranslation"/> for writing a freshly
+    /// translated split back into the correct cache/key.</summary>
+    private static void CacheTranslation(TranslationSplit split, bool isFragment,
+        ConcurrentDictionary<string, string> cache, ConcurrentDictionary<string, string> fragmentCache)
+    {
+        if (isFragment)
+            fragmentCache.TryAdd(FragmentCacheKey(split), split.Translated);
+        else
+            cache.TryAdd(split.Text, split.Translated);
+    }
+
+    /// <summary>
     /// Loads config and the run-wide translation cache once, shared by both
     /// <see cref="TranslateViaLlmAsyncBatched"/> and <see cref="TranslateViaLlmAsyncPooled"/>.
     /// Caller owns the returned <see cref="HttpClient"/> and must dispose it.
     /// </summary>
-    private static async Task<(LlmConfig Config, ConcurrentDictionary<string, string> Cache, ConcurrentDictionary<string, string> FragmentCache, HttpClient Client)> PrepareTranslationRunAsync(
+    private static async Task<(LlmConfig Config, ConcurrentDictionary<string, string> Cache, ConcurrentDictionary<string, string> FragmentCache, HashSet<string> OverrideKeys, HttpClient Client)> PrepareTranslationRunAsync(
         string workingDirectory, TextFileToSplit[] textFiles, GameHooks? hooks = null)
     {
         var config = ConfigurationExtensions.GetConfiguration(workingDirectory, hooks);
@@ -264,19 +344,23 @@ public static class TranslationService
         // (manual translations, glossary, TestResults/OldFiles, already-translated splits).
         // ConcurrentDictionary because splits are translated in parallel (both schedulers) and
         // each worker reads/writes this cache concurrently. fragmentCache is a second, isolated
-        // pool for compound-template fragments only (see IsCompoundFragment) - kept separate so a
-        // fragment's bare text can never cache-collide with an unrelated whole-cell translation of
-        // the same text, in either direction.
+        // pool for compound-template fragments only (see IsCompoundFragment), namespaced per
+        // column (see ColumnIdentity/FragmentCacheKey) so a fragment's bare text can never
+        // cache-collide with an unrelated whole-cell translation OR a fragment of a different
+        // column, in either direction. overrideKeys is built once here (single-threaded, before any
+        // parallel translation starts) and only ever read afterward, so plain HashSet reads from
+        // multiple workers are safe.
         var translationCache = new ConcurrentDictionary<string, string>();
         var fragmentCache = new ConcurrentDictionary<string, string>();
-        await FillTranslationCacheAsync(workingDirectory, TranslationCacheMaxChars, translationCache, config, textFiles, fragmentCache);
+        var overrideKeys = new HashSet<string>();
+        await FillTranslationCacheAsync(workingDirectory, TranslationCacheMaxChars, translationCache, config, textFiles, fragmentCache, overrideKeys);
 
         var client = new HttpClient
         {
             Timeout = TimeSpan.FromSeconds(300)
         };
 
-        return (config, translationCache, fragmentCache, client);
+        return (config, translationCache, fragmentCache, overrideKeys, client);
     }
 
     /// <summary>
@@ -314,7 +398,7 @@ public static class TranslationService
         if (!Directory.Exists(outputPath))
             Directory.CreateDirectory(outputPath);
 
-        var (config, translationCache, fragmentCache, client) = await PrepareTranslationRunAsync(workingDirectory, textFiles, hooks);
+        var (config, translationCache, fragmentCache, overrideKeys, client) = await PrepareTranslationRunAsync(workingDirectory, textFiles, hooks);
         using var _ = client;
         var charsToCache = TranslationCacheMaxChars;
 
@@ -353,12 +437,14 @@ public static class TranslationService
                 var batch = fileLines.GetRange(i, batchRange);
 
                 // Get Unique splits incase the batch has the same entry multiple times (eg. NPC Names).
-                // Grouped by (IsCompoundFragment, Text), not bare Text alone - two splits with the
-                // same source text but different fragment-ness must never be treated as duplicates
-                // of each other (see IsCompoundFragment's doc comment).
+                // Grouped by (IsCompoundFragment, ColumnIdentity-if-fragment, Text), not bare Text
+                // alone - two splits with the same source text but different fragment-ness, or two
+                // fragments of DIFFERENT columns (e.g. "ItemName" vs "Desc") that merely happen to
+                // share bare text, must never be treated as duplicates of each other (see
+                // IsCompoundFragment/ColumnIdentity's doc comments).
                 var uniqueSplits = batch
                     .SelectMany(line => line.Splits.Select(split => (Line: line, Split: split)))
-                    .GroupBy(x => (IsFragment: IsCompoundFragment(x.Line, x.Split), x.Split.Text))
+                    .GroupBy(x => DedupKey(x.Line, x.Split))
                     .Select(group => group.First())
                     .ToList(); // Materialize to prevent multiple enumerations;
 
@@ -370,14 +456,14 @@ public static class TranslationService
                         return;
 
                     var isFragment = IsCompoundFragment(line, split);
-                    var targetCache = isFragment ? fragmentCache : translationCache;
 
                     // File-restricted glossary/manual entries (only:/exclude:) must never be read
                     // from or written into this shared cache - see IsFileRestrictedText.
                     var isFileRestricted = IsFileRestrictedText(split.Text, config);
 
+                    var cachedTranslation = string.Empty;
                     var cacheHit = !isFileRestricted
-                        && targetCache.ContainsKey(split.Text)
+                        && TryGetCachedTranslation(split, isFragment, translationCache, fragmentCache, overrideKeys, out cachedTranslation)
                         // We use this for name files etc which will be in cache
                         && textFileToTranslate.EnableGlossary;
 
@@ -388,7 +474,7 @@ public static class TranslationService
                         var original = split.Translated;
 
                         if (cacheHit)
-                            split.Translated = targetCache[split.Text];
+                            split.Translated = cachedTranslation;
                         else if (TryGetOnlyFileDirectTranslation(split.Text, textFileToTranslate.Path, config, out var directResult))
                             // Exact "only" match for this file - use it directly, no LLM call.
                             split.Translated = directResult;
@@ -410,14 +496,14 @@ public static class TranslationService
                     {
                         //Two translations could be doing this at the same time
                         if (!cacheHit && !isFileRestricted && split.Text.Length <= charsToCache)
-                            targetCache.TryAdd(split.Text, split.Translated);
+                            CacheTranslation(split, isFragment, translationCache, fragmentCache);
                     }
                 }));
 
-                // Duplicates - same (IsCompoundFragment, Text) grouping as uniqueSplits above.
+                // Duplicates - same dedup key as uniqueSplits above.
                 var duplicates = batch
                     .SelectMany(line => line.Splits.Select(split => (Line: line, Split: split)))
-                    .GroupBy(x => (IsFragment: IsCompoundFragment(x.Line, x.Split), x.Split.Text))
+                    .GroupBy(x => DedupKey(x.Line, x.Split))
                     .Where(group => group.Count() > 1)
                     .Select(group => group.Select(x => x.Split));
 
@@ -522,7 +608,7 @@ public static class TranslationService
         if (!Directory.Exists(outputPath))
             Directory.CreateDirectory(outputPath);
 
-        var (config, translationCache, fragmentCache, client) = await PrepareTranslationRunAsync(workingDirectory, textFiles, hooks);
+        var (config, translationCache, fragmentCache, overrideKeys, client) = await PrepareTranslationRunAsync(workingDirectory, textFiles, hooks);
         using var _ = client;
 
         var maxConcurrency = config.MaxConcurrency ?? config.BatchSize ?? 20;
@@ -564,14 +650,14 @@ public static class TranslationService
         var unprocessableLogPath = $"{workingDirectory}/TestResults/UnprocessableItems.log";
 
         // Unique-per-file splits (same dedup semantics as the batched scheduler), flattened across
-        // every file into one global work list for the pool to consume.
-        // Grouped by (IsCompoundFragment, Text), not bare Text alone - see IsCompoundFragment's
-        // doc comment for why a fragment and an unrelated whole-cell split must never be treated
-        // as duplicates of each other just because they share the same source text.
+        // every file into one global work list for the pool to consume. See DedupKey's doc comment
+        // for why a fragment and an unrelated whole-cell split - or two fragments of different
+        // columns - must never be treated as duplicates of each other just because they share the
+        // same source text.
         var workItems = fileStates
             .SelectMany(file => file.FileLines
                 .SelectMany(line => line.Splits.Select(split => (Line: line, Split: split)))
-                .GroupBy(x => (IsFragment: IsCompoundFragment(x.Line, x.Split), x.Split.Text))
+                .GroupBy(x => DedupKey(x.Line, x.Split))
                 .Select(group => group.First())
                 .Select(x => (File: file, Line: x.Line, Split: x.Split)))
             .ToList();
@@ -624,14 +710,14 @@ public static class TranslationService
                 return;
 
             var isFragment = IsCompoundFragment(line, split);
-            var targetCache = isFragment ? fragmentCache : translationCache;
 
             // File-restricted glossary/manual entries (only:/exclude:) must never be read from or
             // written into this shared cache - see IsFileRestrictedText.
             var isFileRestricted = IsFileRestrictedText(split.Text, config);
 
+            var cachedTranslation = string.Empty;
             var cacheHit = !isFileRestricted
-                && targetCache.ContainsKey(split.Text)
+                && TryGetCachedTranslation(split, isFragment, translationCache, fragmentCache, overrideKeys, out cachedTranslation)
                 // We use this for name files etc which will be in cache
                 && file.TextFile.EnableGlossary;
 
@@ -642,7 +728,7 @@ public static class TranslationService
                 var original = split.Translated;
 
                 if (cacheHit)
-                    split.Translated = targetCache[split.Text];
+                    split.Translated = cachedTranslation;
                 else if (TryGetOnlyFileDirectTranslation(split.Text, file.TextFile.Path, config, out var directResult))
                     // Exact "only" match for this file - use it directly, no LLM call.
                     split.Translated = directResult;
@@ -713,7 +799,7 @@ public static class TranslationService
                 Interlocked.Increment(ref incorrectLineCount);
             else if (!cacheHit && !isFileRestricted && split.Text.Length <= TranslationCacheMaxChars)
                 //Two translations could be doing this at the same time
-                targetCache.TryAdd(split.Text, split.Translated);
+                CacheTranslation(split, isFragment, translationCache, fragmentCache);
 
             }
             finally
@@ -792,12 +878,12 @@ public static class TranslationService
     private static void PropagateDuplicates(PooledFileState file, bool forceRetranslation, LlmConfig config,
         ref int totalRecordsProcessed)
     {
-        // Grouped by (IsCompoundFragment, Text), not bare Text alone - see IsCompoundFragment's
-        // doc comment for why a fragment and an unrelated whole-cell split sharing the same source
-        // text must never be propagated onto each other.
+        // See DedupKey's doc comment for why a fragment and an unrelated whole-cell split, or two
+        // fragments of different columns, sharing the same source text must never be propagated
+        // onto each other.
         var duplicates = file.FileLines
             .SelectMany(line => line.Splits.Select(split => (Line: line, Split: split)))
-            .GroupBy(x => (IsFragment: IsCompoundFragment(x.Line, x.Split), x.Split.Text))
+            .GroupBy(x => DedupKey(x.Line, x.Split))
             .Where(group => group.Count() > 1)
             .Select(group => group.Select(x => x.Split));
 

@@ -46,4 +46,16 @@ public enum QcDefectCategory
 
     /// <summary>Something else concrete and nameable, not covered by the categories above.</summary>
     OtherNamedDefect,
+
+    /// <summary>Model believes something about the translation may be off but isn't confident
+    /// enough to name a specific category or draft a fix it trusts - see
+    /// docs/quality-review-pass-architecture.md postmortem #9. Unlike every other non-<see
+    /// cref="None"/> category, this one is never paired with a real <c>CORRECTED</c> fix (call 1's
+    /// drafted text, if any, is discarded - see <c>QualityReviewWorkflow.GetLlmVerdictAsync</c>),
+    /// never runs two-stage verification (there is nothing to grade), is never eligible for
+    /// <see cref="Configuration.QualityReviewConfig.AutoAcceptDefectCategories"/> (there is no
+    /// <see cref="TranslationSplit.QcTranslated"/> to accept), and always leaves the column flagged
+    /// with no score - a genuine "ask a human" signal instead of forcing a low-confidence hunch to
+    /// round up to a fully-committed named defect and fix.</summary>
+    Uncertain,
 }

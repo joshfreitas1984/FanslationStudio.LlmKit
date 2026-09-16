@@ -16,6 +16,9 @@ Examine the given Chinese text and its current English translation to assess acc
 - A SOURCE stammer/stutter (a word's leading syllable(s) repeated right before the full word, separated by 、 or , - e.g. "思、思阁主" stammering on 思, "你、你、你……" stammering on 你 three times) that TRANSLATION drops entirely (no repetition of the corresponding word at all) or renders as gibberish unconnected to the stammered word (e.g. a stray transliterated syllable standing in for it, like "Shi," for 什). A hyphenated partial repeat ("Y-y-you") and a full separately-spoken repeat ("You, you, you") are BOTH valid English stammer renderings - never flag/correct a line only to convert one into the other; that's a style preference, not a defect. A SOURCE stammer that TRANSLATION already conveys in some form is not itself a defect - if SOURCE stammers but something else is wrong on the same line (a name, place, idiom, number, or dropped meaning), that's the defect to name, not this one; those take priority over a stammer-formatting quibble. When you do correct a genuinely dropped/garbled stammer, touch only the stammering word/name - never let the fix also change a name, place, idiom, or meaning elsewhere in the line.
 
 DO NOT alter:
+- An already-translated proper noun/title "corrected" back to raw Pinyin transliteration - a
+  translated name is not itself a defect just because a Pinyin rendering also exists, and undoing an
+  existing translation is a regression, not a fix, no matter which DEFECT category seems to apply.
 - Tokens in curly braces, e.g. {0}, {1} - replace automatically post-review as given.
 - Minor stylistic decisions if the sentence is correct and natural.
 - Existing \n sequences in the translation - check what precedes the \n in the source. If it's a comma (or no terminal punctuation), the \n is just a UI line-wrap splitting one continuing sentence in two - merging it into a single fluent English sentence with no \n is fine and often preferred; don't penalize such a merge. E.g. source "随身携带的珍宝，\n若学识足够会每日自动尝试鉴定。" should read as one sentence, "Treasures carried with you will be automatically appraised each day if your knowledge is sufficient." - not a two-line version with a dangling clause like "If learned enough, it will...". If instead a terminal mark (。！？!?.) precedes the \n, treat it as a structural separator between two complete sentences and never remove/add/shift it. Either way, still flag and correct real grammar errors on either side of a \n exactly as you would anywhere else (missing subject/pronoun, wrong verb form, a dangling clause, etc.).
@@ -35,7 +38,9 @@ DEFECT CATEGORIES: before scoring, decide which ONE applies, if any:
 - DROPPED_CONTENT: an omitted subject/object/clause, or a dropped title/honorific next to a placeholder, per the rules above.
 - DROPPED_STUTTER: a SOURCE stammer/stutter (repeated leading syllable(s) before a word) that TRANSLATION drops entirely or renders as gibberish unconnected to the stammered word. Do NOT use this just because SOURCE contains a stammer - a stammer TRANSLATION already conveys (hyphenated or as a full repeated word - both valid) is not a defect. If another defect is also present on the line, name that instead - it takes priority over a stammer-formatting quibble.
 - HARD_TO_PARSE_SEAM: a stitched-fragment seam that is genuinely hard to parse, ambiguous, or changes meaning - not just less fluent than an alternative.
-- OTHER_NAMED_DEFECT: something else concrete and nameable, not covered above.
+- OTHER_NAMED_DEFECT: something else concrete and nameable, not covered above. Never covers
+  replacing an already-translated proper noun/title with a Pinyin transliteration - see the DO NOT
+  alter rule above; that's a regression, not a fix.
 - NONE: nothing above applies. This is the answer for most translations, including short UI/stat labels, long literary prose, and terse list-style constructions - don't pick a category just to justify a hunch.
 
 CONSISTENCY: DEFECT and CORRECTED must agree, mechanically. DEFECT: NONE requires CORRECTED: NONE. Any other DEFECT value requires CORRECTED containing the actual fix for that named defect - never NONE.

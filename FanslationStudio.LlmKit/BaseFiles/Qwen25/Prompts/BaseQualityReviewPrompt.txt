@@ -45,6 +45,9 @@ specifically for:
   word/name - never let the fix also change a name, place, idiom, or meaning elsewhere in the line.
 
 DO NOT flag or change:
+- An already-translated proper noun/title "corrected" back to raw Pinyin transliteration - a
+  translated name is not itself a defect just because a Pinyin rendering also exists, and undoing an
+  existing translation is a regression, not a fix, no matter which DEFECT category seems to apply.
 - Placeholder tokens in curly braces, e.g. {0}, {1} - these are restored automatically after your
   review and must appear in your corrected text exactly as given, in the same relative position.
 - Minor stylistic choices that don't change meaning (word order, synonym choice) if the sentence
@@ -97,7 +100,9 @@ DEFECT CATEGORIES: before scoring, decide which ONE of these applies, if any:
   the line, name that instead - it takes priority over a stammer-formatting quibble.
 - HARD_TO_PARSE_SEAM: a stitched-fragment seam that is genuinely hard to parse, ambiguous, or
   changes meaning - not just less fluent than an alternative.
-- OTHER_NAMED_DEFECT: something else concrete and nameable, not covered above.
+- OTHER_NAMED_DEFECT: something else concrete and nameable, not covered above. Never covers
+  replacing an already-translated proper noun/title with a Pinyin transliteration - see the DO NOT
+  flag/change rule above; that is a regression, not a fix.
 - NONE: nothing above applies. This is the answer for most translations, including short UI/stat
   labels, long literary prose, and terse list-style constructions - do not pick a category just to
   justify a hunch.

@@ -28,7 +28,10 @@ DEFECT CATEGORIES (for reference - CLAIMED DEFECT names exactly one of these):
   preference, not a defect.
 - HARD_TO_PARSE_SEAM: a stitched-fragment seam that is genuinely hard to parse, ambiguous, or
   changes meaning - not just less fluent than an alternative.
-- OTHER_NAMED_DEFECT: something else concrete and nameable.
+- OTHER_NAMED_DEFECT: something else concrete and nameable. Never covers replacing an already-
+  translated proper noun/title with a Pinyin transliteration - answer NONE if CLAIMED DEFECT is
+  OTHER_NAMED_DEFECT (or any other category) but PROPOSED CORRECTION does this; a translated name is
+  not a defect, and undoing it is a regression, not a fix.
 
 Judge CLAIMED DEFECT against SOURCE and TRANSLATION yourself - do not assume the first review was
 correct just because it made a claim. Answer with a DEFECT token, exactly like the first review did:
@@ -36,7 +39,8 @@ correct just because it made a claim. Answer with a DEFECT token, exactly like t
   DROPPED_STUTTER is that TRANSLATION already conveys the SOURCE stammer in some valid form (either
   style described above), or SOURCE has a stammer but nothing about how TRANSLATION handles it is
   actually wrong. Also answer NONE if the claimed issue amounts to a stylistic phrasing preference
-  rather than a genuine defect.
+  rather than a genuine defect, or if PROPOSED CORRECTION reverts an already-translated proper
+  noun/title to raw Pinyin - regardless of which DEFECT category was claimed for it.
 - Answer DEFECT: <the same token as CLAIMED DEFECT> if that claim is present and correctly
   categorized.
 - Answer DEFECT: <a different token from the list above> if a real defect IS present but it belongs

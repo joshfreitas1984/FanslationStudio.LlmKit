@@ -858,6 +858,45 @@ Every `Corrected` column with `QcDefectCategory == LostIdiom` reviewed under the
 needs a fresh review - `ResetCorrectedQcState` (added for postmortem #4) already covers this by
 category.
 
+### 8. `OTHER_NAMED_DEFECT` (and other categories) rubber-stamping a translated name reverted to Pinyin
+
+Same shape of bug as postmortems #5/#7 (a proper-noun handling mistake that both scores high and
+survives two-stage verification unchallenged), but the direction is reversed and the category is the
+catch-all rather than one with a specific definition: a downstream project (WanXiangOverLlm) reported
+SOURCE `"七巧连环"左灵珠解锁红颜` where TRANSLATION already correctly rendered the puzzle name in
+English (`"Seventhsilk Chain Puzzle" Zuo Lingzhu unlocks 'Crimson Beauty`), and QC "corrected" it back
+to raw Pinyin (`"Qiqiao Lianhuan" Zuo Lingzhu unlocks Crimson Beauty`) under `DEFECT:
+OTHER_NAMED_DEFECT`, `SCORE: 85`. This is the opposite mistake from `UNTRANSLATED_PINYIN` (which
+exists specifically to catch text *left* in Pinyin) - here the model treated an already-resolved
+English name as the defect and "fixed" it into Pinyin instead.
+
+Unlike postmortems #5/#7, this couldn't be closed with a carve-out on a single named category: since
+`OTHER_NAMED_DEFECT` is explicitly "something else concrete and nameable, not covered above," it has
+no fixed definition to add an exception to, and the same mistake could in principle surface under
+`DOMAIN_TERM` too (a translated name treated as a "mistranslated domain term"). Two-stage
+verification's call 2 didn't catch it either - with no specific criteria to weigh `OTHER_NAMED_DEFECT`
+against, a "concrete, nameable" change is trivially true of reverting a name to Pinyin, so call 2 had
+nothing to disagree with in call 1's framing and reconfirmed it at the same mechanical-fix score band.
+
+A corpus-wide check on this project's `Files/Converted` at the time (24,568 reviewed splits) showed
+this wasn't an isolated case of miscalibration: only 5 scores in the entire corpus were below 85, and
+zero columns were ever `RejectedByGate`/`FailedValidation` - consistent with postmortem #6's finding
+that the model clusters near the top of whichever band the prompt anchors to, now confirmed at
+production scale rather than from a handful of sampled corrections.
+
+Fix: added a category-agnostic rule (all three model families, base + verification prompts) instead
+of a per-category carve-out - `BaseQualityReviewPrompt.txt`'s `DO NOT flag/change` list gained
+"reverting an already-translated proper noun/title to raw Pinyin is a regression, not a fix, no
+matter which DEFECT category seems to apply," `OTHER_NAMED_DEFECT`'s definition cross-references it,
+and `BaseQualityReviewVerificationPrompt.txt`'s `DEFECT: NONE` conditions gained the same rule
+independent of `CLAIMED DEFECT`'s value - so call 2 rejects this shape of correction even if a future
+call-1 claim uses a different category than `OTHER_NAMED_DEFECT`/`DOMAIN_TERM` to justify it.
+
+Every `Corrected` column with `QcDefectCategory == OtherNamedDefect` (or any category) whose
+`QcTranslated` reverts a name to Pinyin, reviewed under the pre-fix prompts, needs a fresh review -
+`ResetCorrectedQcState` (added for postmortem #4) already covers this; there is no narrower
+category-scoped reset available since the bug wasn't scoped to one category.
+
 ### Regression coverage
 
 `Tests/TranslationWorkflowTests.cs`'s `"3g. QcOmittedSubjectRegression"` (DragonHierOverLlm repo)
