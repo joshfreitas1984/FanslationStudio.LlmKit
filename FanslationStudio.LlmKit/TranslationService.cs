@@ -87,6 +87,21 @@ public static class TranslationService
     }
 
     /// <summary>
+    /// True when <paramref name="split"/> is one fragment of a compound/templated field on its own
+    /// <paramref name="line"/> (i.e. <see cref="TranslationLine.Templates"/> has an entry for this
+    /// split's column) rather than a genuine whole-cell translation. A fragment's bare
+    /// <see cref="TranslationSplit.Text"/> is frequently identical to some unrelated whole-cell
+    /// string elsewhere in the corpus (e.g. a compound field "剩余{0}点" decomposes to a fragment
+    /// with the same bare text "剩余" that a totally different, ordinary column might also contain
+    /// as its entire cell) - see the <see cref="FillTranslationCacheAsync"/> fragment-cache doc
+    /// comment for why that makes bare-text the wrong dedup/cache key on its own.
+    /// </summary>
+    private static bool IsCompoundFragment(TranslationLine line, TranslationSplit split) =>
+        line.Templates.Any(t => !string.IsNullOrEmpty(split.SplitPath)
+            ? t.SplitPath == split.SplitPath
+            : t.Split == split.Split);
+
+    /// <summary>
     /// True if <paramref name="text"/> exactly matches a glossary or manual-translation entry that
     /// is scoped to specific output files ("only"/"exclude" - see
     /// <see cref="GlossaryLine.IsFileRestricted"/>). Such entries must never be read from or
@@ -132,7 +147,8 @@ public static class TranslationService
 
     public static async Task FillTranslationCacheAsync(string workingDirectory,
         int charsToCache, ConcurrentDictionary<string, string> cache,
-        LlmConfig config, TextFileToSplit[] textFiles)
+        LlmConfig config, TextFileToSplit[] textFiles,
+        ConcurrentDictionary<string, string>? fragmentCache = null)
     {
         // Build the O(1) file-restriction lookup once per run before any splits are processed -
         // see BuildFileRestrictedIndex/RuntimeValues.FileRestrictedEntriesByText.
@@ -140,13 +156,16 @@ public static class TranslationService
 
         // Add Manual adjustments
         //
-        // Skip entries scoped via "only"/"exclude" - see IsFileRestrictedText above.
+        // Skip entries scoped via "only"/"exclude" - see IsFileRestrictedText above. Seeded into
+        // both caches - an authored override is correct for a bare string regardless of whether a
+        // given occurrence happens to be a whole cell or one fragment of a compound field.
         foreach (var k in config.Runtime.ManualTranslations)
         {
             if (k.IsFileRestricted)
                 continue;
 
             cache.TryAdd(k.Raw, k.Result);
+            fragmentCache?.TryAdd(k.Raw, k.Result);
         }
 
         // Add Glossary Lines to Cache
@@ -164,6 +183,7 @@ public static class TranslationService
                 continue;
 
             cache.TryAdd(line.Raw, line.Result);
+            fragmentCache?.TryAdd(line.Raw, line.Result);
         }
 
 
@@ -186,7 +206,13 @@ public static class TranslationService
                     if (IsFileRestrictedText(split.Text, config))
                         continue;
 
-                    cache.TryAdd(split.Text, split.Translated);
+                    // A compound-field fragment's bare text must never seed (or be satisfied by)
+                    // the same cache slot a genuine whole-cell translation uses - see
+                    // IsCompoundFragment's doc comment.
+                    if (fragmentCache != null && IsCompoundFragment(line, split))
+                        fragmentCache.TryAdd(split.Text, split.Translated);
+                    else
+                        cache.TryAdd(split.Text, split.Translated);
                 }
             }
         }
@@ -207,7 +233,12 @@ public static class TranslationService
                     if (IsFileRestrictedText(split.Text, config))
                         continue;
 
-                    if (split.Text.Length <= charsToCache)
+                    if (split.Text.Length > charsToCache)
+                        continue;
+
+                    if (fragmentCache != null && IsCompoundFragment(line, split))
+                        fragmentCache.TryAdd(split.Text, split.Translated);
+                    else
                         cache.TryAdd(split.Text, split.Translated);
                 }
             }
@@ -224,7 +255,7 @@ public static class TranslationService
     /// <see cref="TranslateViaLlmAsyncBatched"/> and <see cref="TranslateViaLlmAsyncPooled"/>.
     /// Caller owns the returned <see cref="HttpClient"/> and must dispose it.
     /// </summary>
-    private static async Task<(LlmConfig Config, ConcurrentDictionary<string, string> Cache, HttpClient Client)> PrepareTranslationRunAsync(
+    private static async Task<(LlmConfig Config, ConcurrentDictionary<string, string> Cache, ConcurrentDictionary<string, string> FragmentCache, HttpClient Client)> PrepareTranslationRunAsync(
         string workingDirectory, TextFileToSplit[] textFiles, GameHooks? hooks = null)
     {
         var config = ConfigurationExtensions.GetConfiguration(workingDirectory, hooks);
@@ -232,16 +263,20 @@ public static class TranslationService
         // Translation Cache - dedups repeated strings within this run and across history
         // (manual translations, glossary, TestResults/OldFiles, already-translated splits).
         // ConcurrentDictionary because splits are translated in parallel (both schedulers) and
-        // each worker reads/writes this cache concurrently.
+        // each worker reads/writes this cache concurrently. fragmentCache is a second, isolated
+        // pool for compound-template fragments only (see IsCompoundFragment) - kept separate so a
+        // fragment's bare text can never cache-collide with an unrelated whole-cell translation of
+        // the same text, in either direction.
         var translationCache = new ConcurrentDictionary<string, string>();
-        await FillTranslationCacheAsync(workingDirectory, TranslationCacheMaxChars, translationCache, config, textFiles);
+        var fragmentCache = new ConcurrentDictionary<string, string>();
+        await FillTranslationCacheAsync(workingDirectory, TranslationCacheMaxChars, translationCache, config, textFiles, fragmentCache);
 
         var client = new HttpClient
         {
             Timeout = TimeSpan.FromSeconds(300)
         };
 
-        return (config, translationCache, client);
+        return (config, translationCache, fragmentCache, client);
     }
 
     /// <summary>
@@ -279,7 +314,7 @@ public static class TranslationService
         if (!Directory.Exists(outputPath))
             Directory.CreateDirectory(outputPath);
 
-        var (config, translationCache, client) = await PrepareTranslationRunAsync(workingDirectory, textFiles, hooks);
+        var (config, translationCache, fragmentCache, client) = await PrepareTranslationRunAsync(workingDirectory, textFiles, hooks);
         using var _ = client;
         var charsToCache = TranslationCacheMaxChars;
 
@@ -317,24 +352,32 @@ public static class TranslationService
                 // Use a slice of the list directly
                 var batch = fileLines.GetRange(i, batchRange);
 
-                // Get Unique splits incase the batch has the same entry multiple times (eg. NPC Names)
-                var uniqueSplits = batch.SelectMany(line => line.Splits)
-                    .GroupBy(split => split.Text)
+                // Get Unique splits incase the batch has the same entry multiple times (eg. NPC Names).
+                // Grouped by (IsCompoundFragment, Text), not bare Text alone - two splits with the
+                // same source text but different fragment-ness must never be treated as duplicates
+                // of each other (see IsCompoundFragment's doc comment).
+                var uniqueSplits = batch
+                    .SelectMany(line => line.Splits.Select(split => (Line: line, Split: split)))
+                    .GroupBy(x => (IsFragment: IsCompoundFragment(x.Line, x.Split), x.Split.Text))
                     .Select(group => group.First())
                     .ToList(); // Materialize to prevent multiple enumerations;
 
                 // Process the unique in parallel
-                await Task.WhenAll(uniqueSplits.Select(async split =>
+                await Task.WhenAll(uniqueSplits.Select(async item =>
                 {
+                    var (line, split) = item;
                     if (string.IsNullOrEmpty(split.Text) || !split.SafeToTranslate)
                         return;
+
+                    var isFragment = IsCompoundFragment(line, split);
+                    var targetCache = isFragment ? fragmentCache : translationCache;
 
                     // File-restricted glossary/manual entries (only:/exclude:) must never be read
                     // from or written into this shared cache - see IsFileRestrictedText.
                     var isFileRestricted = IsFileRestrictedText(split.Text, config);
 
                     var cacheHit = !isFileRestricted
-                        && translationCache.ContainsKey(split.Text)
+                        && targetCache.ContainsKey(split.Text)
                         // We use this for name files etc which will be in cache
                         && textFileToTranslate.EnableGlossary;
 
@@ -345,7 +388,7 @@ public static class TranslationService
                         var original = split.Translated;
 
                         if (cacheHit)
-                            split.Translated = translationCache[split.Text];
+                            split.Translated = targetCache[split.Text];
                         else if (TryGetOnlyFileDirectTranslation(split.Text, textFileToTranslate.Path, config, out var directResult))
                             // Exact "only" match for this file - use it directly, no LLM call.
                             split.Translated = directResult;
@@ -367,14 +410,16 @@ public static class TranslationService
                     {
                         //Two translations could be doing this at the same time
                         if (!cacheHit && !isFileRestricted && split.Text.Length <= charsToCache)
-                            translationCache.TryAdd(split.Text, split.Translated);
+                            targetCache.TryAdd(split.Text, split.Translated);
                     }
                 }));
 
-                // Duplicates
-                var duplicates = batch.SelectMany(line => line.Splits)
-                    .GroupBy(split => split.Text)
-                    .Where(group => group.Count() > 1);
+                // Duplicates - same (IsCompoundFragment, Text) grouping as uniqueSplits above.
+                var duplicates = batch
+                    .SelectMany(line => line.Splits.Select(split => (Line: line, Split: split)))
+                    .GroupBy(x => (IsFragment: IsCompoundFragment(x.Line, x.Split), x.Split.Text))
+                    .Where(group => group.Count() > 1)
+                    .Select(group => group.Select(x => x.Split));
 
                 foreach (var splitDupes in duplicates)
                 {
@@ -477,7 +522,7 @@ public static class TranslationService
         if (!Directory.Exists(outputPath))
             Directory.CreateDirectory(outputPath);
 
-        var (config, translationCache, client) = await PrepareTranslationRunAsync(workingDirectory, textFiles, hooks);
+        var (config, translationCache, fragmentCache, client) = await PrepareTranslationRunAsync(workingDirectory, textFiles, hooks);
         using var _ = client;
 
         var maxConcurrency = config.MaxConcurrency ?? config.BatchSize ?? 20;
@@ -520,22 +565,33 @@ public static class TranslationService
 
         // Unique-per-file splits (same dedup semantics as the batched scheduler), flattened across
         // every file into one global work list for the pool to consume.
+        // Grouped by (IsCompoundFragment, Text), not bare Text alone - see IsCompoundFragment's
+        // doc comment for why a fragment and an unrelated whole-cell split must never be treated
+        // as duplicates of each other just because they share the same source text.
         var workItems = fileStates
             .SelectMany(file => file.FileLines
-                .SelectMany(line => line.Splits)
-                .GroupBy(split => split.Text)
+                .SelectMany(line => line.Splits.Select(split => (Line: line, Split: split)))
+                .GroupBy(x => (IsFragment: IsCompoundFragment(x.Line, x.Split), x.Split.Text))
                 .Select(group => group.First())
-                .Select(split => (File: file, Split: split)))
+                .Select(x => (File: file, Line: x.Line, Split: x.Split)))
             .ToList();
 
         // Same "does this item actually need work" condition used inside the loop below - computed
-        // up front purely for a more useful denominator in the progress log. workItems.Count is
-        // every unique split in the run (including ones already translated from a prior run, which
-        // the loop below skips near-instantly) - logging progress against that count makes an
-        // already-mostly-translated run look far more "stuck" than it really is.
-        var pendingCount = workItems.Count(wi => string.IsNullOrEmpty(wi.Split.Translated)
-            || forceRetranslation
-            || (config.TranslateFlagged && wi.Split.FlaggedForRetranslation));
+        // up front purely for a more useful denominator in the progress log. Deliberately NOT
+        // workItems.Count(...) - workItems is already deduped to one representative per
+        // (IsCompoundFragment, Text) group, but the "Processed" counter this is compared against
+        // (totalRecordsProcessed) also counts every duplicate split PropagateDuplicates fills in
+        // from that representative's result, which are a strictly larger population than
+        // workItems. Counting pendingCount against the deduped set let "Processed" run past
+        // "pending" whenever a run had a lot of duplicate/ambiguous text (e.g. after flagging many
+        // splits that happen to share common short source text for retranslation) - see
+        // docs/compoundfieldsplitter-design.md. Summing over every split in every file (not just
+        // workItems) matches what totalRecordsProcessed actually accumulates over the run.
+        var pendingCount = fileStates.Sum(f => f.FileLines
+            .SelectMany(l => l.Splits)
+            .Count(s => string.IsNullOrEmpty(s.Translated)
+                || forceRetranslation
+                || (config.TranslateFlagged && s.FlaggedForRetranslation)));
 
         Console.WriteLine($"Pooled translation: {workItems.Count} unique split(s) across {fileStates.Count} file(s) ({pendingCount} need translation), max concurrency {maxConcurrency}");
 
@@ -556,7 +612,7 @@ public static class TranslationService
 
         await Parallel.ForEachAsync(workItems, new ParallelOptions { MaxDegreeOfParallelism = maxConcurrency }, async (item, _) =>
         {
-            var (file, split) = item;
+            var (file, line, split) = item;
 
             // Wraps the whole per-item body (including every early return below) so the
             // PendingItems decrement/last-item flush in the finally block always runs exactly once
@@ -567,12 +623,15 @@ public static class TranslationService
             if (string.IsNullOrEmpty(split.Text) || !split.SafeToTranslate)
                 return;
 
+            var isFragment = IsCompoundFragment(line, split);
+            var targetCache = isFragment ? fragmentCache : translationCache;
+
             // File-restricted glossary/manual entries (only:/exclude:) must never be read from or
             // written into this shared cache - see IsFileRestrictedText.
             var isFileRestricted = IsFileRestrictedText(split.Text, config);
 
             var cacheHit = !isFileRestricted
-                && translationCache.ContainsKey(split.Text)
+                && targetCache.ContainsKey(split.Text)
                 // We use this for name files etc which will be in cache
                 && file.TextFile.EnableGlossary;
 
@@ -583,7 +642,7 @@ public static class TranslationService
                 var original = split.Translated;
 
                 if (cacheHit)
-                    split.Translated = translationCache[split.Text];
+                    split.Translated = targetCache[split.Text];
                 else if (TryGetOnlyFileDirectTranslation(split.Text, file.TextFile.Path, config, out var directResult))
                     // Exact "only" match for this file - use it directly, no LLM call.
                     split.Translated = directResult;
@@ -654,7 +713,7 @@ public static class TranslationService
                 Interlocked.Increment(ref incorrectLineCount);
             else if (!cacheHit && !isFileRestricted && split.Text.Length <= TranslationCacheMaxChars)
                 //Two translations could be doing this at the same time
-                translationCache.TryAdd(split.Text, split.Translated);
+                targetCache.TryAdd(split.Text, split.Translated);
 
             }
             finally
@@ -733,10 +792,14 @@ public static class TranslationService
     private static void PropagateDuplicates(PooledFileState file, bool forceRetranslation, LlmConfig config,
         ref int totalRecordsProcessed)
     {
+        // Grouped by (IsCompoundFragment, Text), not bare Text alone - see IsCompoundFragment's
+        // doc comment for why a fragment and an unrelated whole-cell split sharing the same source
+        // text must never be propagated onto each other.
         var duplicates = file.FileLines
-            .SelectMany(line => line.Splits)
-            .GroupBy(split => split.Text)
-            .Where(group => group.Count() > 1);
+            .SelectMany(line => line.Splits.Select(split => (Line: line, Split: split)))
+            .GroupBy(x => (IsFragment: IsCompoundFragment(x.Line, x.Split), x.Split.Text))
+            .Where(group => group.Count() > 1)
+            .Select(group => group.Select(x => x.Split));
 
         foreach (var splitDupes in duplicates)
         {

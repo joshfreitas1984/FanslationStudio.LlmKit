@@ -206,6 +206,45 @@ Do not regress to `Text`-only matching as the primary key — with multi-fragmen
 cross-matching unrelated fragments that happen to share the same Chinese text (e.g. a common `我`
 or `交易` fragment appearing in many different lines/columns).
 
+## The same risk in `TranslationService`'s translation-memory cache
+
+The warning above (never key purely by `Text` once fragments exist) was heeded for
+`MergeFilesIntoTranslatedAsync`'s re-export matching but was missed in a second place:
+`TranslationService`'s run-wide translation cache (`FillTranslationCacheAsync`, and the
+per-split cache read/write in both `TranslateViaLlmAsyncBatched` and `TranslateViaLlmAsyncPooled`)
+used to key and dedup purely by `TranslationSplit.Text`, with no awareness of `SplitPath`/`Split`/
+`SubIndex`/`FieldTemplate` at all.
+
+Symptom seen in the wild (a JSON `Dictionary` column decomposed as `"剩余" + {0} + "点"` via
+template `"{0}⟦0⟧{1}"`): fragment 0 (`Text: "剩余"`) ended up with `Translated: "You have {0} points
+remaining"` — a whole different cell's full-sentence translation, borrowed purely because that
+cell's bare Chinese text happened to equal this fragment's bare text. Fragment 1 (`Text: "点"`) is
+the mirror case: translated in total isolation with zero template/sibling context, so an ambiguous
+single character picked an unrelated sense (`"Click"` instead of "point(s)").
+
+Fragments are translated one at a time with **no shared context between fragments of the same
+compound column** (`TranslateSplitAsync`/`GenerateBaseMessages` only ever see one fragment's own
+text), so a fragment's bare text is exactly as likely to collide with an unrelated whole-cell
+string elsewhere in the corpus as with another fragment.
+
+Fix: `IsCompoundFragment(TranslationLine, TranslationSplit)` (checks whether the split's column has
+a `FieldTemplate` entry) now routes every fragment into a second, isolated `fragmentCache` -
+completely separate from the main `translationCache` used for whole-cell splits - for both
+population (`FillTranslationCacheAsync`'s old-files/current-run loops) and the batched/pooled
+schedulers' per-item cache read/write and same-batch duplicate-dedup/-propagation `GroupBy`s (all
+now key on `(IsCompoundFragment, Text)`, not `Text` alone). Manual translations and glossary lines
+are still seeded into *both* caches unprefixed - an authored override is correct for a bare string
+regardless of whether a given occurrence is a whole cell or a fragment, so that part of the
+original behavior is intentionally preserved.
+
+Existing corpora translated before this fix may have fragments with a `Translated` value borrowed
+from an unrelated whole-cell string (or vice versa) - look for a `SubIndex`-bearing split whose
+`Translated` is implausibly long/sentence-shaped relative to its own `Text`, or contains a literal
+`{n}`-style token that isn't part of its own fragment. Repair is a targeted re-translation
+(clear `Translated`/set `FlaggedForRetranslation` on every split that is `IsCompoundFragment`, or
+whose `Text` collides with some other split's `Text` across a fragment/whole-cell boundary), not a
+full corpus retranslation - see the downstream repo's own remediation notes for numbers.
+
 ## Known cost of the fragment model
 
 Splitting a compound column into multiple fragments changes `TranslationSplit.Text` for that
