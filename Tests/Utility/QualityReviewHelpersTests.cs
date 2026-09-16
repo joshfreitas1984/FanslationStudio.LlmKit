@@ -1,3 +1,4 @@
+using FanslationStudio.LlmKit.Configuration;
 using FanslationStudio.LlmKit.Support;
 using FanslationStudio.LlmKit.Utility;
 
@@ -5,6 +6,8 @@ namespace Tests.Utility;
 
 public class QualityReviewHelpersTests
 {
+    private static readonly QualityReviewConfig EnabledConfig = new() { Enabled = true };
+
     [Theory(DisplayName = "IsCorrectedLabelLeak flags a QcTranslated still carrying a CORRECTED: label")]
     [InlineData("Wealth in the millions CORRECTED: NONE", true)]
     [InlineData("Become the number one in the heroes' battle rankings CORRECTED: Become the top fighter in the heroes' battle rankings", true)]
@@ -32,7 +35,7 @@ public class QualityReviewHelpersTests
             QcTranslated = "Wealth in the millions CORRECTED: NONE",
         };
 
-        var fresh = QualityReviewHelpers.IsQcReviewFresh(split, null, [split]);
+        var fresh = QualityReviewHelpers.IsQcReviewFresh(split, null, [split], EnabledConfig);
 
         Assert.False(fresh);
     }
@@ -48,8 +51,11 @@ public class QualityReviewHelpersTests
             QcTranslated = "Wealth in the millions",
         };
 
-        var fresh = QualityReviewHelpers.IsQcReviewFresh(split, null, [split]);
+        var fresh = QualityReviewHelpers.IsQcReviewFresh(split, null, [split], EnabledConfig);
 
         Assert.True(fresh);
+
+        var disabledFresh = QualityReviewHelpers.IsQcReviewFresh(split, null, [split], new QualityReviewConfig { Enabled = false });
+        Assert.False(disabledFresh);
     }
 }

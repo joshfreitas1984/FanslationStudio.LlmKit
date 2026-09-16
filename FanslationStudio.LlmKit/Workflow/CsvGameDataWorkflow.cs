@@ -110,7 +110,8 @@ public static class CsvGameDataWorkflow
         var outputPath = $"{workingDirectory}/Mod";
         Directory.CreateDirectory(outputPath);
 
-        var qualityReview = ConfigurationExtensions.GetConfiguration(workingDirectory).QualityReview;
+        var config = ConfigurationExtensions.GetConfiguration(workingDirectory);
+        var qualityReview = config.QualityReview;
 
         var outputLines = new List<string>();
         var passedCount = 0;
@@ -140,15 +141,15 @@ public static class CsvGameDataWorkflow
                         .ToList();
 
                     var anchor = fragments.FirstOrDefault(f => f.SubIndex == 0) ?? fragments.FirstOrDefault();
-                    var qcFresh = anchor != null && QualityReviewHelpers.IsQcReviewFresh(anchor, template, fragments);
+                    var qcFresh = anchor != null && QualityReviewHelpers.IsQcReviewFresh(anchor, template, fragments, qualityReview);
                     var useQcTranslated = qcFresh
                         && !string.IsNullOrEmpty(anchor!.QcTranslated)
                         && QualityReviewHelpers.PassesQcScoreGate(anchor.QcQualityScore, anchor.QcDefectCategory, qualityReview);
 
                     if (useQcTranslated)
                     {
-                        splits[template.Split] = anchor!.QcTranslated;
-                        onColumnPackaged?.Invoke(template.Split, anchor.Text, anchor.QcTranslated);
+                        splits[template.Split] = PackagingTextFixups.Apply(config, textFile, template.Split, anchor!.Text, anchor.QcTranslated);
+                        onColumnPackaged?.Invoke(template.Split, anchor.Text, splits[template.Split]);
                         continue;
                     }
 
@@ -177,8 +178,9 @@ public static class CsvGameDataWorkflow
                         break;
 
                     var reconstructed = CompoundFieldSplitter.Reconstruct(template.Template, translatedFragments);
-                    splits[template.Split] = reconstructed;
-                    onColumnPackaged?.Invoke(template.Split, string.Concat(fragments.Select(f => f.Text)), reconstructed);
+                    var rawConcat = string.Concat(fragments.Select(f => f.Text));
+                    splits[template.Split] = PackagingTextFixups.Apply(config, textFile, template.Split, rawConcat, reconstructed);
+                    onColumnPackaged?.Invoke(template.Split, rawConcat, splits[template.Split]);
                 }
 
                 if (!failed)
@@ -198,7 +200,7 @@ public static class CsvGameDataWorkflow
                             break;
                         }
 
-                        var plainQcFresh = QualityReviewHelpers.IsQcReviewFresh(split, null, [split]);
+                        var plainQcFresh = QualityReviewHelpers.IsQcReviewFresh(split, null, [split], qualityReview);
                         var usePlainQcTranslated = plainQcFresh
                             && !string.IsNullOrEmpty(split.QcTranslated)
                             && QualityReviewHelpers.PassesQcScoreGate(split.QcQualityScore, split.QcDefectCategory, qualityReview);
@@ -207,8 +209,8 @@ public static class CsvGameDataWorkflow
 
                         if (!string.IsNullOrEmpty(effectiveTranslated))
                         {
-                            splits[split.Split] = effectiveTranslated;
-                            onColumnPackaged?.Invoke(split.Split, split.Text, effectiveTranslated);
+                            splits[split.Split] = PackagingTextFixups.Apply(config, textFile, split.Split, split.Text, effectiveTranslated);
+                            onColumnPackaged?.Invoke(split.Split, split.Text, splits[split.Split]);
                         }
                         else if (!string.IsNullOrEmpty(split.Text))
                         {
@@ -228,7 +230,7 @@ public static class CsvGameDataWorkflow
                     if (rowPostProcess != null)
                         splits = rowPostProcess(splits);
 
-                    var rebuilt = CompoundFieldSplitter.RebuildCsvRow(splits).Replace("‑", "-");
+                    var rebuilt = CompoundFieldSplitter.RebuildCsvRow(splits);
                     outputLines.Add(rebuilt);
                     passedCount++;
                 }

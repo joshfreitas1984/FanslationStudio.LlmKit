@@ -49,8 +49,16 @@ public static class QualityReviewHelpers
     /// it somehow got written by a path other than <see cref="Workflow.QualityReviewWorkflow"/>'s own
     /// (already-guarded) parsing.
     /// </summary>
-    public static bool IsQcReviewFresh(TranslationSplit anchor, FieldTemplate? template, IReadOnlyList<TranslationSplit> fragments)
+    public static bool IsQcReviewFresh(TranslationSplit anchor, FieldTemplate? template, IReadOnlyList<TranslationSplit> fragments, QualityReviewConfig qualityReview)
     {
+        // Single choke point every packaging path checks before trusting any Qc*-derived field -
+        // flipping `qualityReview.enabled: false` and re-packaging (no LLM calls, no re-running QC)
+        // makes every column package as if QC had never run: plain pre-QC Translated text, with
+        // minAcceptableScore/autoAcceptDefectCategories never consulted. See
+        // docs/plans/quality-review-pass.md (DragonHierOverLlm repo).
+        if (!qualityReview.Enabled)
+            return false;
+
         if (anchor.QcStatus == QcStatus.NotReviewed)
             return false;
 

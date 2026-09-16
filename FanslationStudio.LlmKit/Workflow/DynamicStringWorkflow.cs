@@ -110,7 +110,8 @@ public static class DynamicStringWorkflow
         var outputPath = $"{workingDirectory}/Mod";
         Directory.CreateDirectory(outputPath);
 
-        var qualityReview = Configuration.ConfigurationExtensions.GetConfiguration(workingDirectory).QualityReview;
+        var config = Configuration.ConfigurationExtensions.GetConfiguration(workingDirectory);
+        var qualityReview = config.QualityReview;
 
         var results = new List<DynamicStringResult>();
         var seenBareRaw = new HashSet<string>();
@@ -123,11 +124,28 @@ public static class DynamicStringWorkflow
             foreach (var line in fileLines)
             {
                 var (result, reason, bareFragment) = ReconstructLine(line, textFile, qualityReview);
+
+                // Count regardless of whether result is null - a RawFallback (or, more rarely, a
+                // QcRejected whose Translated also turned out unusable) is a real, reportable
+                // failure even though it now deliberately packages nothing rather than raw
+                // Chinese text (see ReconstructLine's doc comment).
+                switch (reason)
+                {
+                    case PackagingFailureReason.QcRejected:
+                        qcRejectedCount++;
+                        break;
+                    case PackagingFailureReason.RawFallback:
+                        rawFallbackCount++;
+                        break;
+                    case PackagingFailureReason.None when result != null:
+                        passedCount++;
+                        break;
+                }
+
                 if (result == null)
                     continue;
 
-                // Undo hyphen
-                result = result.Replace("\u2011", "-");
+                result = PackagingTextFixups.Apply(config, textFile, null, line.Raw, result);
 
                 // A raw string still containing a literal "{n}" placeholder (e.g.
                 // "{0}年{1}月{2}日") is a String.Format-style template - see
@@ -149,19 +167,6 @@ public static class DynamicStringWorkflow
                     && seenBareRaw.Add(fragment.Raw))
                 {
                     results.Add(new DynamicStringResult(fragment.Raw, fragment.Result));
-                }
-
-                switch (reason)
-                {
-                    case PackagingFailureReason.QcRejected:
-                        qcRejectedCount++;
-                        break;
-                    case PackagingFailureReason.RawFallback:
-                        rawFallbackCount++;
-                        break;
-                    default:
-                        passedCount++;
-                        break;
                 }
             }
 
@@ -198,13 +203,26 @@ public static class DynamicStringWorkflow
 
     /// <summary>
     /// Reconstructs a single line's packaged output. The returned <see cref="PackagingFailureReason"/>
-    /// reflects whether/why the line fell back to its original raw text: <c>QcRejected</c> when it
-    /// fails <see cref="Utility.QualityReviewHelpers.PassesQcScoreGate"/> (a low score not covered by
-    /// an auto-accepted DEFECT category), <c>RawFallback</c>
-    /// when a fragment/split was unsafe, flagged for retranslation, or missing its translation - this
-    /// must be reported by the caller as an actual failure (see <see cref="PackageDynamicStringsAsync"/>)
-    /// rather than silently folded into the same bucket as a genuinely successful line, since all
-    /// three cases otherwise look identical in the packaged raw/result YAML.
+    /// is purely informational, for <see cref="PackageDynamicStringsAsync"/>'s reporting counts -
+    /// <c>Result</c> is <c>null</c> for BOTH failure reasons below, meaning the line is entirely
+    /// EXCLUDED from the packaged dictionary rather than written with any Chinese text:
+    /// <c>QcRejected</c> means a proposed correction existed but was held back by
+    /// <see cref="Utility.QualityReviewHelpers.PassesQcScoreGate"/> (a low score not covered by an
+    /// auto-accepted DEFECT category) AND the column's ordinary pre-QC <c>Translated</c> text was
+    /// also unusable (unsafe/flagged/missing) - if a usable <c>Translated</c> exists, that's what
+    /// gets packaged instead (see the <c>PassesQcScoreGate</c> check below) and this line reports
+    /// <c>None</c>, not <c>QcRejected</c>. <c>RawFallback</c> means a fragment/split was unsafe,
+    /// flagged for retranslation, or missing its translation entirely, with nothing usable to
+    /// package.
+    ///
+    /// Deliberately never falls back to raw Chinese text (<c>line.Raw</c>/<c>fragment.Text</c>) the
+    /// way this used to: this dictionary is applied as a runtime *substring* replacement (see the
+    /// type's own doc comment), and packaging an explicit raw-to-raw-Chinese entry risks the
+    /// runtime's own "does this still contain untranslated Chinese" check re-matching its own
+    /// output and looping - simply omitting the entry means no substitution happens at all, leaving
+    /// the original text untouched exactly as if this raw string had never been dumped. See
+    /// DragonHierOverLlm/Tests/docs/qc-run-startup-crash-investigation-2026-09-15.md for the real
+    /// startup-breaking bug an explicit raw-Chinese entry used to cause.
     ///
     /// <paramref name="BareFragment"/> is populated only when the line is a single-fragment
     /// template (exactly one translatable split, e.g. "打扰了;GovernPlotStart;1" -> label
@@ -225,12 +243,16 @@ public static class DynamicStringWorkflow
             // - a retranslation since the last review must never be silently overridden by a stale
             // score/correction just because nobody has re-run the quality review pass yet.
             var anchor = fragments.FirstOrDefault(f => f.SubIndex == 0);
-            var qcFresh = anchor != null && QualityReviewHelpers.IsQcReviewFresh(anchor, template, fragments);
+            var qcFresh = anchor != null && QualityReviewHelpers.IsQcReviewFresh(anchor, template, fragments, qualityReview);
 
-            if (qcFresh && !QualityReviewHelpers.PassesQcScoreGate(anchor!.QcQualityScore, anchor.QcDefectCategory, qualityReview))
-                return (line.Raw, PackagingFailureReason.QcRejected, null);
+            // A low score/unaccepted DEFECT category means "don't trust QcTranslated" - it must
+            // NOT mean "discard the already-good pre-QC Translated fragments too" (that used to
+            // fall through to `line.Raw`, dumping raw Chinese into Files/Mod - see this method's
+            // doc comment). Only skip the QcTranslated shortcut below; still reconstruct from
+            // fragments normally.
+            var qcRejected = qcFresh && !QualityReviewHelpers.PassesQcScoreGate(anchor!.QcQualityScore, anchor.QcDefectCategory, qualityReview);
 
-            if (qcFresh && !string.IsNullOrEmpty(anchor!.QcTranslated))
+            if (qcFresh && !qcRejected && !string.IsNullOrEmpty(anchor!.QcTranslated))
                 // Known limitation: bypassing Reconstruct() here means the single-fragment "bare
                 // label" dictionary entry (see the doc comment on PackageDynamicStringsAsync's
                 // bareFragment handling, needed for NPC dialogue-option buttons) can't be derived
@@ -244,12 +266,12 @@ public static class DynamicStringWorkflow
             foreach (var fragment in fragments)
             {
                 if (!textFile.PackageOutput || fragment.FlaggedForRetranslation || !fragment.SafeToTranslate)
-                    return (line.Raw, PackagingFailureReason.RawFallback, null);
+                    return (null, PackagingFailureReason.RawFallback, null);
 
                 if (!string.IsNullOrEmpty(fragment.Translated))
                     translatedFragments.Add(fragment.Translated);
                 else if (!string.IsNullOrEmpty(fragment.Text))
-                    return (line.Raw, PackagingFailureReason.RawFallback, null);
+                    return (null, PackagingFailureReason.RawFallback, null);
                 else
                     translatedFragments.Add(fragment.Text);
             }
@@ -259,23 +281,24 @@ public static class DynamicStringWorkflow
                 ? (fragments[0].Text, translatedFragments[0])
                 : ((string Raw, string Result)?)null;
 
-            return (reconstructed, PackagingFailureReason.None, bareFragment);
+            return (reconstructed, qcRejected ? PackagingFailureReason.QcRejected : PackagingFailureReason.None, bareFragment);
         }
 
         var split = line.Splits.FirstOrDefault(s => s.Split == 0);
         if (split == null)
             return (null, PackagingFailureReason.None, null);
 
-        var plainQcFresh = QualityReviewHelpers.IsQcReviewFresh(split, null, [split]);
+        var plainQcFresh = QualityReviewHelpers.IsQcReviewFresh(split, null, [split], qualityReview);
 
-        if (plainQcFresh && !QualityReviewHelpers.PassesQcScoreGate(split.QcQualityScore, split.QcDefectCategory, qualityReview))
-            return (split.Text, PackagingFailureReason.QcRejected, null);
+        // See the templated branch above for why a score-gate rejection must fall back to the
+        // already-good Translated text, not all the way to raw Chinese.
+        var plainQcRejected = plainQcFresh && !QualityReviewHelpers.PassesQcScoreGate(split.QcQualityScore, split.QcDefectCategory, qualityReview);
 
-        var effectiveTranslated = plainQcFresh && !string.IsNullOrEmpty(split.QcTranslated) ? split.QcTranslated : split.Translated;
+        var effectiveTranslated = plainQcFresh && !plainQcRejected && !string.IsNullOrEmpty(split.QcTranslated) ? split.QcTranslated : split.Translated;
 
         if (!string.IsNullOrEmpty(effectiveTranslated) && !split.FlaggedForRetranslation && split.SafeToTranslate)
-            return (effectiveTranslated, PackagingFailureReason.None, null);
+            return (effectiveTranslated, plainQcRejected ? PackagingFailureReason.QcRejected : PackagingFailureReason.None, null);
 
-        return (split.Text, PackagingFailureReason.RawFallback, null);
+        return (null, PackagingFailureReason.RawFallback, null);
     }
 }

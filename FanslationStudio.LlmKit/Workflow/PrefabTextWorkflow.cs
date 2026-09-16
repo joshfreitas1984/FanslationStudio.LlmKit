@@ -114,7 +114,8 @@ public static class PrefabTextWorkflow
         var outputPath = $"{workingDirectory}/Mod";
         Directory.CreateDirectory(outputPath);
 
-        var qualityReview = Configuration.ConfigurationExtensions.GetConfiguration(workingDirectory).QualityReview;
+        var config = Configuration.ConfigurationExtensions.GetConfiguration(workingDirectory);
+        var qualityReview = config.QualityReview;
 
         var results = new List<PrefabTextResult>();
         var passedCount = 0;
@@ -126,14 +127,11 @@ public static class PrefabTextWorkflow
             foreach (var line in fileLines)
             {
                 var (result, reason) = ReconstructLine(line, textFile, qualityReview);
-                if (result == null)
-                    continue;
 
-                // Undo hyphen
-                result = result.Replace("\u2011", "-");
-
-                results.Add(new PrefabTextResult(line.Raw, result));
-
+                // Count regardless of whether result is null - a RawFallback (or, more rarely, a
+                // QcRejected whose Translated also turned out unusable) is a real, reportable
+                // failure even though it now deliberately packages nothing rather than raw
+                // Chinese text (see ReconstructLine's doc comment).
                 switch (reason)
                 {
                     case PackagingFailureReason.QcRejected:
@@ -142,10 +140,17 @@ public static class PrefabTextWorkflow
                     case PackagingFailureReason.RawFallback:
                         rawFallbackCount++;
                         break;
-                    default:
+                    case PackagingFailureReason.None when result != null:
                         passedCount++;
                         break;
                 }
+
+                if (result == null)
+                    continue;
+
+                result = PackagingTextFixups.Apply(config, textFile, null, line.Raw, result);
+
+                results.Add(new PrefabTextResult(line.Raw, result));
             }
 
             await Task.CompletedTask;
@@ -159,15 +164,28 @@ public static class PrefabTextWorkflow
 
     /// <summary>
     /// Reconstructs a single line's packaged output. The returned <see cref="PackagingFailureReason"/>
-    /// reflects whether/why the line fell back to its original raw text: <c>QcRejected</c> when (see
-    /// docs/plans/quality-review-pass.md) it fails <see cref="Utility.QualityReviewHelpers.PassesQcScoreGate"/>
-    /// (a low score not covered by an auto-accepted DEFECT category), <c>RawFallback</c> when a fragment/split was unsafe, flagged for
-    /// retranslation, or missing its translation - this must be reported by the caller as an actual
-    /// failure (see <see cref="PackagePrefabTextAsync"/>) rather than silently folded into the same
-    /// bucket as a genuinely successful line, since all three cases otherwise look identical in the
-    /// packaged raw/result YAML. The underlying <c>Translated</c>/<c>QcTranslated</c>/<c>QcQualityScore</c>
-    /// values are never modified here regardless of outcome - this only decides what gets written
-    /// to <c>Files/Mod</c>, never what's kept in <c>Files/Converted</c>.
+    /// is purely informational, for <see cref="PackagePrefabTextAsync"/>'s reporting counts:
+    /// <c>QcRejected</c> means the line packaged fine on its ordinary pre-QC <c>Translated</c> text
+    /// (see docs/plans/quality-review-pass.md), but a proposed correction existed and was held back
+    /// by <see cref="Utility.QualityReviewHelpers.PassesQcScoreGate"/> (a low score not covered by an
+    /// auto-accepted DEFECT category). <c>RawFallback</c> means a fragment/split was unsafe, flagged
+    /// for retranslation, or missing its translation entirely, with no usable <c>Translated</c> to
+    /// fall back to either.
+    ///
+    /// Neither failure reason EVER falls back to raw Chinese text (<c>line.Raw</c>/<c>split.Text</c>)
+    /// - <c>Result</c> is <c>null</c> for <c>RawFallback</c> (this dictionary is looked up by exact
+    /// whole-string match, so omitting the entry simply means no replacement happens and the UI
+    /// keeps showing whatever it already had - equivalent in effect to raw fallback, without ever
+    /// writing an explicit Chinese "translation" into the dictionary). A held-back QC correction
+    /// similarly must never discard an already-good pre-QC translation down to raw Chinese - see
+    /// DragonHierOverLlm/Tests/docs/qc-run-startup-crash-investigation-2026-09-15.md for the real
+    /// startup-breaking bug an explicit raw-Chinese packaged entry used to cause. This must be
+    /// reported by the caller as an actual failure rather than silently folded into the same bucket
+    /// as a genuinely successful line, since a `None` outcome and a `RawFallback` outcome can
+    /// otherwise look identical (a line simply missing from the packaged YAML). The underlying
+    /// <c>Translated</c>/<c>QcTranslated</c>/<c>QcQualityScore</c> values are never modified here
+    /// regardless of outcome - this only decides what gets written to <c>Files/Mod</c>, never what's
+    /// kept in <c>Files/Converted</c>.
     /// </summary>
     private static (string? Result, PackagingFailureReason Reason) ReconstructLine(TranslationLine line, TextFileToSplit textFile, Configuration.QualityReviewConfig qualityReview)
     {
@@ -184,12 +202,17 @@ public static class PrefabTextWorkflow
             // never silently override a legitimately newer translation just because nobody has
             // re-run the quality review pass yet.
             var anchor = fragments.FirstOrDefault(f => f.SubIndex == 0);
-            var qcFresh = anchor != null && QualityReviewHelpers.IsQcReviewFresh(anchor, template, fragments);
+            var qcFresh = anchor != null && QualityReviewHelpers.IsQcReviewFresh(anchor, template, fragments, qualityReview);
 
-            if (qcFresh && !QualityReviewHelpers.PassesQcScoreGate(anchor!.QcQualityScore, anchor.QcDefectCategory, qualityReview))
-                return (line.Raw, PackagingFailureReason.QcRejected);
+            // A low score/unaccepted DEFECT category means "don't trust QcTranslated" - it must
+            // NOT mean "discard the already-good pre-QC Translated fragments too" (that used to
+            // fall through to `line.Raw`, dumping raw Chinese into Files/Mod for a column whose
+            // ordinary translation was perfectly fine - see
+            // DragonHierOverLlm/Tests/docs/qc-run-startup-crash-investigation-2026-09-15.md). Only
+            // skip the QcTranslated shortcut below; still reconstruct from fragments normally.
+            var qcRejected = qcFresh && !QualityReviewHelpers.PassesQcScoreGate(anchor!.QcQualityScore, anchor.QcDefectCategory, qualityReview);
 
-            if (qcFresh && !string.IsNullOrEmpty(anchor!.QcTranslated))
+            if (qcFresh && !qcRejected && !string.IsNullOrEmpty(anchor!.QcTranslated))
                 return (anchor.QcTranslated, PackagingFailureReason.None);
 
             var translatedFragments = new List<string>();
@@ -197,33 +220,35 @@ public static class PrefabTextWorkflow
             foreach (var fragment in fragments)
             {
                 if (!textFile.PackageOutput || fragment.FlaggedForRetranslation || !fragment.SafeToTranslate)
-                    return (line.Raw, PackagingFailureReason.RawFallback);
+                    return (null, PackagingFailureReason.RawFallback);
 
                 if (!string.IsNullOrEmpty(fragment.Translated))
                     translatedFragments.Add(fragment.Translated);
                 else if (!string.IsNullOrEmpty(fragment.Text))
-                    return (line.Raw, PackagingFailureReason.RawFallback);
+                    return (null, PackagingFailureReason.RawFallback);
                 else
                     translatedFragments.Add(fragment.Text);
             }
 
-            return (CompoundFieldSplitter.Reconstruct(template.Template, translatedFragments), PackagingFailureReason.None);
+            var reconstructedResult = CompoundFieldSplitter.Reconstruct(template.Template, translatedFragments);
+            return (reconstructedResult, qcRejected ? PackagingFailureReason.QcRejected : PackagingFailureReason.None);
         }
 
         var split = line.Splits.FirstOrDefault(s => s.Split == 0);
         if (split == null)
             return (null, PackagingFailureReason.None);
 
-        var plainQcFresh = QualityReviewHelpers.IsQcReviewFresh(split, null, [split]);
+        var plainQcFresh = QualityReviewHelpers.IsQcReviewFresh(split, null, [split], qualityReview);
 
-        if (plainQcFresh && !QualityReviewHelpers.PassesQcScoreGate(split.QcQualityScore, split.QcDefectCategory, qualityReview))
-            return (split.Text, PackagingFailureReason.QcRejected);
+        // See the templated branch above for why a score-gate rejection must fall back to the
+        // already-good Translated text, not all the way to raw Chinese.
+        var plainQcRejected = plainQcFresh && !QualityReviewHelpers.PassesQcScoreGate(split.QcQualityScore, split.QcDefectCategory, qualityReview);
 
-        var effectiveTranslated = plainQcFresh && !string.IsNullOrEmpty(split.QcTranslated) ? split.QcTranslated : split.Translated;
+        var effectiveTranslated = plainQcFresh && !plainQcRejected && !string.IsNullOrEmpty(split.QcTranslated) ? split.QcTranslated : split.Translated;
 
         if (!string.IsNullOrEmpty(effectiveTranslated) && !split.FlaggedForRetranslation && split.SafeToTranslate)
-            return (effectiveTranslated, PackagingFailureReason.None);
+            return (effectiveTranslated, plainQcRejected ? PackagingFailureReason.QcRejected : PackagingFailureReason.None);
 
-        return (split.Text, PackagingFailureReason.RawFallback);
+        return (null, PackagingFailureReason.RawFallback);
     }
 }

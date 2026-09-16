@@ -8,10 +8,22 @@ Code, or otherwise) can find the right source of truth without relying on vendor
 A reusable "over LLM" game-translation kit: shared `Line → Splits → (Templates)` data model,
 CSV/compound-field parsing, LLM translation service (retry/escalation/validation), and workflow
 classes for extracting translatable text from game data and reassembling translated output back
-into the original file shape. Consumed by downstream "over LLM" translation projects (e.g.
-`DragonHierOverLlm`, `LegendOfMortalOverLlm`) via a **project reference**
-(`../../FanslationStudio.LlmKit/...csproj`), not a NuGet package — it's meant to be edited in
-lockstep with the games that use it.
+into the original file shape. Consumed by downstream "over LLM" translation projects via a
+**project reference** (`../../FanslationStudio.LlmKit/...csproj`), not a NuGet package — it's meant
+to be edited in lockstep with the games that use it.
+
+## Related downstream repos
+
+All of these are per-game translation projects that consume this repo via project reference. Each
+should have its own `AGENTS.md`/`docs/README.md` mirroring this repo's taxonomy, and should
+cross-link back to this repo's QC/Packaging docs rather than re-explaining LlmKit-internal
+behavior locally.
+
+| Repo | Notes |
+| --- | --- |
+| `../../DragonHierOverLlm` | Most actively developed; source of most cross-repo postmortems referenced below. |
+| `../../LegendOfMortalOverLlm` | |
+| `../../WanXiangOverLlm` | |
 
 ## Documentation taxonomy
 
@@ -51,6 +63,7 @@ Same three-tier split used by downstream consuming repos:
 | `TextFileType.PrefabText` workflow design (flat, row/column-less dumped text files) | [`prefabtext-workflow.md`](prefabtext-workflow.md) |
 | Post-translation quality review pass — current-state architecture (data model, `QualityReviewWorkflow`, staleness/freshness, packaging, presets/prompts) | [`quality-review-pass-architecture.md`](quality-review-pass-architecture.md) |
 | Post-translation quality review pass — original design plan/history (spans this repo + `DragonHierOverLlm`) | [`../../DragonHierOverLlm/docs/plans/quality-review-pass.md`](../../DragonHierOverLlm/docs/plans/quality-review-pass.md) |
+| Packaging — current-state architecture (Csv/Json/PrefabText/DynamicString reconstruction, QC score-gating, raw-fallback rules, per-workflow differences) | [`packaging-reference.md`](packaging-reference.md) |
 
 See [`KNOWN_ISSUES.md`](../KNOWN_ISSUES.md) for the full issue index (mirrors this table with
 one-line summaries).
@@ -64,4 +77,5 @@ one-line summaries).
 | Investigate a translation retry/validation/escalation issue | [`translation-retry-escalation-and-fixes.md`](translation-retry-escalation-and-fixes.md) |
 | Add support for a new flat/prefab-style dumped text file | [`prefabtext-workflow.md`](prefabtext-workflow.md) |
 | Understand or extend the quality-review pass work | [`quality-review-pass-architecture.md`](quality-review-pass-architecture.md) (current-state), [`../../DragonHierOverLlm/docs/plans/quality-review-pass.md`](../../DragonHierOverLlm/docs/plans/quality-review-pass.md) (design history) |
+| Investigate a packaging issue | [`packaging-reference.md`](packaging-reference.md) |
 | See how a downstream game project consumes this library | `DragonHierOverLlm/.github/instructions/tests-translation-workflow.instructions.md` (sibling repo) |

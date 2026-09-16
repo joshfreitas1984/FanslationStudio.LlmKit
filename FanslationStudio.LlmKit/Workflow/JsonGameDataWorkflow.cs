@@ -149,7 +149,8 @@ public static class JsonGameDataWorkflow
         var outputPath = $"{workingDirectory}/Mod";
         Directory.CreateDirectory(outputPath);
 
-        var qualityReview = ConfigurationExtensions.GetConfiguration(workingDirectory).QualityReview;
+        var config = ConfigurationExtensions.GetConfiguration(workingDirectory);
+        var qualityReview = config.QualityReview;
 
         var outputArray = new JsonArray();
         var passedCount = 0;
@@ -174,7 +175,7 @@ public static class JsonGameDataWorkflow
                     var fragments = group.OrderBy(s => s.SubIndex).ToList();
                     var template = templatesByPath.GetValueOrDefault(splitPath);
 
-                    var (ok, packagedText) = PackageField(fragments, template, textFile, qualityReview);
+                    var (ok, packagedText) = PackageField(fragments, template, textFile, qualityReview, config);
 
                     if (!ok)
                     {
@@ -206,19 +207,20 @@ public static class JsonGameDataWorkflow
     }
 
     private static (bool Ok, string Text) PackageField(
-        List<TranslationSplit> fragments, FieldTemplate? template, TextFileToSplit textFile, QualityReviewConfig qualityReview)
+        List<TranslationSplit> fragments, FieldTemplate? template, TextFileToSplit textFile, QualityReviewConfig qualityReview,
+        LlmConfig config)
     {
         var anchor = fragments.FirstOrDefault(f => f.SubIndex == 0) ?? fragments.FirstOrDefault();
         if (anchor == null)
             return (false, string.Empty);
 
-        var qcFresh = QualityReviewHelpers.IsQcReviewFresh(anchor, template, fragments);
+        var qcFresh = QualityReviewHelpers.IsQcReviewFresh(anchor, template, fragments, qualityReview);
         var useQcTranslated = qcFresh
             && !string.IsNullOrEmpty(anchor.QcTranslated)
             && QualityReviewHelpers.PassesQcScoreGate(anchor.QcQualityScore, anchor.QcDefectCategory, qualityReview);
 
         if (useQcTranslated)
-            return (true, anchor.QcTranslated);
+            return (true, PackagingTextFixups.Apply(config, textFile, null, anchor.Text, anchor.QcTranslated));
 
         var translatedFragments = new List<string>();
 
@@ -239,7 +241,8 @@ public static class JsonGameDataWorkflow
             ? CompoundFieldSplitter.Reconstruct(template.Template, translatedFragments)
             : translatedFragments[0];
 
-        return (true, packaged);
+        var rawText = string.Concat(fragments.Select(f => f.Text));
+        return (true, PackagingTextFixups.Apply(config, textFile, null, rawText, packaged));
     }
 
     private static void SetValueAtPath(JsonObject root, string splitPath, string text)

@@ -419,7 +419,7 @@ public static class QualityReviewWorkflow
         // Safe to do once up front: nothing in this workflow makes reviewing column A change
         // column B's own readiness/freshness, so a column's answer here can't go stale mid-run.
         var alreadyFreshCount = workItems.Count;
-        workItems = workItems.Where(item => EvaluateReadiness(item).needsReview).ToList();
+        workItems = workItems.Where(item => EvaluateReadiness(item, config.QualityReview).needsReview).ToList();
         alreadyFreshCount -= workItems.Count;
 
         if (alreadyFreshCount > 0)
@@ -610,7 +610,7 @@ public static class QualityReviewWorkflow
     /// <c>effectiveTranslated</c> even when <paramref name="item"/> isn't ready (empty string) -
     /// callers that only care about <c>needsReview</c> (the pre-scan) simply ignore it.
     /// </summary>
-    private static (bool needsReview, string effectiveTranslated) EvaluateReadiness(QcWorkItem item)
+    private static (bool needsReview, string effectiveTranslated) EvaluateReadiness(QcWorkItem item, Configuration.QualityReviewConfig qualityReview)
     {
         var anchor = item.Anchor;
 
@@ -635,7 +635,7 @@ public static class QualityReviewWorkflow
         // skip the LLM call entirely. Same freshness check packaging uses to decide whether a
         // prior Qc* outcome can still be trusted (see QualityReviewHelpers.IsQcReviewFresh) -
         // here it means "no re-review needed" instead of "no longer trustworthy".
-        if (QualityReviewHelpers.IsQcReviewFresh(anchor, item.Template, item.Fragments))
+        if (QualityReviewHelpers.IsQcReviewFresh(anchor, item.Template, item.Fragments, qualityReview))
             return (false, effectiveTranslated);
 
         return (true, effectiveTranslated);
@@ -645,7 +645,7 @@ public static class QualityReviewWorkflow
     {
         var anchor = item.Anchor;
 
-        var (needsReview, effectiveTranslated) = EvaluateReadiness(item);
+        var (needsReview, effectiveTranslated) = EvaluateReadiness(item, config.QualityReview);
         if (!needsReview)
             return QcOutcome.Skipped;
 

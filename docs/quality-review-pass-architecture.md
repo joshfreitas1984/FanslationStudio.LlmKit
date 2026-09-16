@@ -18,7 +18,8 @@ Nothing about the core `Line → Splits → (Templates)` contract changes — th
 fields, one new workflow class, and packaging-time behavior gated on those new fields.
 
 Entirely opt-in: a project that never sets `qualityReview.enabled: true` in `Config.yaml` sees zero
-behavior change anywhere in the pipeline.
+behavior change anywhere in the pipeline. `enabled` also gates packaging, not just whether the QC
+pass itself runs — see "Packaging" below.
 
 ## Data model (`Support/TranslationSplit.cs`, `Support/QcStatus.cs`)
 
@@ -103,7 +104,7 @@ authority for the whole column.
    cell, not individual fragments in isolation, since the splitter-seam problem it exists to catch
    is a property of the whole cell.
 3. **Skip if already reviewed and unchanged**: `QualityReviewHelpers.IsQcReviewFresh(anchor,
-   template, fragments)` — compares the freshly computed effective text against the stored
+   template, fragments, qualityReview)` — compares the freshly computed effective text against the stored
    `QcReviewedText`. True means no LLM call needed. This is the "don't re-review every line every
    run" mechanism, and it's fully self-invalidating: if `Translated` changes for any reason
    (retranslation, a future re-export/merge), the next run's freshly computed effective text won't
@@ -164,11 +165,16 @@ an unrelated cause (a glossary change flags a column via
 `Translated` but leaves `Qc*` fields describing the *old* translation, since `ResetFlags()`
 deliberately doesn't touch them. Every place that would otherwise trust `QcTranslated`/
 `QcQualityScore` must first check **`QualityReviewHelpers.IsQcReviewFresh(anchor, template,
-fragments)`** — recomputes the current effective text and compares it against `QcReviewedText`.
-`false` means treat the column exactly as if it had never been reviewed (fall through to plain
-`Translated`, ignore the score gate entirely) — never trust stale Qc data just because it happens
-to be non-empty. Used identically by the QC engine itself (to decide "does this need re-reviewing"
-— see step 3 above) and by every packaging path (to decide "can this be trusted right now").
+fragments, qualityReview)`** — recomputes the current effective text and compares it against
+`QcReviewedText`. `false` means treat the column exactly as if it had never been reviewed (fall
+through to plain `Translated`, ignore the score gate entirely) — never trust stale Qc data just
+because it happens to be non-empty. Used identically by the QC engine itself (to decide "does this
+need re-reviewing" — see step 3 above) and by every packaging path (to decide "can this be trusted
+right now").
+
+`IsQcReviewFresh` also returns `false` outright, before checking anything else, when
+`qualityReview.enabled` is `false` — see "Packaging" below for why this matters beyond just gating
+whether the QC pass runs.
 
 `GameFileHandlingBase.MergeFilesIntoTranslatedAsync` (re-export merge) also now carries a matched
 split's `Qc*` fields forward alongside `.Translated` via `CopyQcState` — both of its match paths
@@ -185,18 +191,63 @@ Every packaging path — `CsvGameDataWorkflow.PackageAsync`, `JsonGameDataWorkfl
 (all four in this repo) — applies the same two checks per column, both gated on `IsQcReviewFresh`:
 
 1. If fresh and `Utility.QualityReviewHelpers.PassesQcScoreGate(QcQualityScore, QcDefectCategory,
-   qualityReview)` returns `false` → treat the column as not-ready-to-package (same bucket a
-   `FlaggedForRetranslation`/unsafe/missing-translation column already falls into) — held back from
-   `Files/Mod`, but `Files/Converted` is untouched, so no translation work is ever lost.
-   `PassesQcScoreGate` is the single choke point every packaging path shares for this decision: it
-   passes outright if the score cleared `qualityReview.minAcceptableScore`, and otherwise still
-   passes if `QcDefectCategory` is in `qualityReview.AutoAcceptDefectCategories` — see "DEFECT
-   categories and per-category policy" below for what that second clause is for.
+   qualityReview)` returns `false` → the proposed `QcTranslated` correction is discarded, but that's
+   ALL that's discarded: the column still packages normally on its ordinary pre-QC `Translated` text
+   (step 3 below), exactly as if QC had never touched it. `PassesQcScoreGate` is the single choke
+   point every packaging path shares for this decision: it passes outright if the score cleared
+   `qualityReview.minAcceptableScore`, and otherwise still passes if `QcDefectCategory` is in
+   `qualityReview.AutoAcceptDefectCategories` — see "DEFECT categories and per-category policy"
+   below for what that second clause is for.
+
+   **This was a real bug until 2026-09-16**: `PrefabTextWorkflow`/`DynamicStringWorkflow` used to
+   treat a score-gate failure as "not-ready-to-package" and discard the column all the way down to
+   raw, untranslated Chinese text (`line.Raw`/`split.Text`) — throwing away the perfectly good
+   pre-QC `Translated` text along with the rejected correction.
+   `CsvGameDataWorkflow`/`JsonGameDataWorkflow` never had this bug; they always fell back to
+   `Translated` correctly. The bug shipped raw Chinese UI text — including an age-rating splash
+   notice shown on the very first boot screen — into a real build and broke game startup. See
+   `DragonHierOverLlm/Tests/docs/qc-run-startup-crash-investigation-2026-09-15.md` for the full
+   diagnosis. Fixed by scoping the score-gate check to only skip the `QcTranslated` shortcut in step
+   2 below, never the ordinary fragment/`Translated` reconstruction in step 3.
 2. Else if fresh and `QcTranslated` is non-empty → use it in place of `Translated` (for a templated
    column, this bypasses `Reconstruct()` for that column entirely, using the anchor's `QcTranslated`
    as the literal cell value).
-3. Otherwise (never reviewed, or reviewed-but-stale) → falls through to ordinary `Translated`-based
-   packaging, unaffected by anything Qc-related.
+3. Otherwise (never reviewed, reviewed-but-stale, or `qualityReview.enabled: false`) → falls through
+   to ordinary `Translated`-based packaging, unaffected by anything Qc-related.
+
+**`qualityReview.enabled` gates packaging too, not just the QC pass.** Because step 1 is gated on
+`IsQcReviewFresh` and that now returns `false` whenever `enabled` is `false`, setting
+`qualityReview.enabled: false` and re-running packaging (no LLM calls) makes every column package as
+if QC had never touched it — plain pre-QC `Translated` text everywhere, with
+`minAcceptableScore`/`autoAcceptDefectCategories` never consulted, even for columns that already
+have a stored `QcTranslated`/`QcQualityScore` from a prior run. This is the intended way to isolate
+"did QC's correction introduce this defect" from "was it already there before QC touched it" — see
+`DragonHierOverLlm/Tests/docs/qc-run-startup-crash-investigation-2026-09-15.md` for a worked example.
+Re-enabling restores the stored Qc data exactly as it was; nothing is deleted or reset by toggling
+this flag.
+
+### Raw-text fallback: never raw Chinese for PrefabText/DynamicString
+
+Independent of QC, a column can still be genuinely unusable at packaging time — unsafe
+(`!SafeToTranslate`), flagged for retranslation, or missing its translation entirely
+(`PackagingFailureReason.RawFallback`). `CsvGameDataWorkflow`/`JsonGameDataWorkflow` package these
+rows with their original raw CSV cell value, since a CSV row structurally must have *something* in
+every column. `PrefabTextWorkflow`/`DynamicStringWorkflow` package a flat raw-string dictionary
+instead, where every entry is optional — so as of 2026-09-16 a `RawFallback` line there is **omitted
+from the packaged dictionary entirely** rather than written as an explicit raw-Chinese entry.
+`ReconstructLine` returns `(null, PackagingFailureReason.RawFallback, ...)` for this case; the
+caller (`PackagePrefabTextAsync`/`PackageDynamicStringsAsync`) still counts it toward the reported
+`RawFallback` total even though nothing is added to `results`.
+
+This matters most for `DynamicStringWorkflow`, consumed as a runtime *substring* replacement (see
+this file's own type-level doc comment): an explicit raw-Chinese dictionary entry risks the
+runtime's own "does this text still contain untranslated Chinese" check matching the very entry
+that was deliberately left as Chinese, re-triggering whatever that check does on every match — a
+replace-and-recheck cycle that can loop. Omitting the entry instead means no substitution happens at
+all: visually identical to a raw-Chinese entry (the original text is untouched either way), but with
+no re-match risk. See
+`DragonHierOverLlm/Tests/docs/qc-run-startup-crash-investigation-2026-09-15.md` for the real
+incident this generalizes from.
 
 **Known limitation** (`DynamicStringWorkflow`): a single-fragment template's "bare label" dictionary
 entry (needed for NPC dialogue-option buttons — see that file's own doc comments) can't be derived
@@ -462,7 +513,11 @@ project that hasn't opted in sees no change in behavior or LLM call volume.
 
 `LlmConfig.QualityReview` (`qualityReview:` in `Config.yaml`):
 
-- `enabled` (bool, default false) — the whole feature is a documented no-op when false.
+- `enabled` (bool, default false) — gates both whether the QC pass runs AND whether packaging
+  trusts any already-stored `QcTranslated`/`QcQualityScore` (via `IsQcReviewFresh` — see
+  "Packaging" above). Safe to flip and re-run packaging only, no LLM calls needed: turning it off
+  reverts every column to its pre-QC `Translated` text without touching `Files/Converted`, and
+  turning it back on restores the stored QC data exactly as it was.
 - `modelName` (string) — must match a configured `models:` entry; validated at config-load time in
   `ConfigurationExtensions.GetConfiguration` (throws on a typo, same treatment as
   `LlmConfig.EscalationModelName`), but only checked when `enabled` is true.
