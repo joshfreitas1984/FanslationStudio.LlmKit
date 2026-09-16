@@ -31,7 +31,8 @@ TRANSLATION RULES:
    next to a name placeholder (e.g. #PlayerName#少侠，) is still a title and must be translated
    and kept, not dropped just because it sits beside a placeholder - "#PlayerName#少侠，" becomes
    "Young Hero #PlayerName#," not "#PlayerName#,".
-7. Translate idioms by meaning rather than literal wording.
+7. Translate idioms by meaning, using vivid, period-appropriate wuxia/proverb-register phrasing -
+   not a literal gloss, and not flat modern English.
 8. Maintain natural, grammatically correct English.
 9. Translate months into full English names.
 10. Chinese frequently omits subjects and objects across consecutive sentences and dialogue lines.

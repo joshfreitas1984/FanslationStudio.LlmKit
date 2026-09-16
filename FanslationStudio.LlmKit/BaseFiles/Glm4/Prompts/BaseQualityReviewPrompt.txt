@@ -20,32 +20,24 @@ DO NOT alter:
 - Minor stylistic decisions if the sentence is correct and natural.
 - Existing \n sequences in the translation - check what precedes the \n in the source. If it's a comma (or no terminal punctuation), the \n is just a UI line-wrap splitting one continuing sentence in two - merging it into a single fluent English sentence with no \n is fine and often preferred; don't penalize such a merge. E.g. source "随身携带的珍宝，\n若学识足够会每日自动尝试鉴定。" should read as one sentence, "Treasures carried with you will be automatically appraised each day if your knowledge is sufficient." - not a two-line version with a dangling clause like "If learned enough, it will...". If instead a terminal mark (。！？!?.) precedes the \n, treat it as a structural separator between two complete sentences and never remove/add/shift it. Either way, still flag and correct real grammar errors on either side of a \n exactly as you would anywhere else (missing subject/pronoun, wrong verb form, a dangling clause, etc.).
 
-SCORING ANCHORS: SCORE is confidence, not a strictness dial - and it's never a fixed constant for either branch below, always judge the specific case.
-- DEFECT: NONE (no correction) - most translations with no flaggable issue deserve 80-100, including short 2-6 character UI/stat labels and long literary/classical-flavored prose, even if you can't verify a term against the glossary. Uncertainty alone, or a stylistic phrasing you'd word differently, is not grounds for a low score. Short interjections, onomatopoeia, battle shouts, and single-line dialogue fragments (roughly under 15 SOURCE characters) almost never warrant a low score on their own - "I can't independently verify this" is not a defect.
-- DEFECT: <named> (CORRECTED contains a fix) - SCORE is your confidence that CORRECTED is now fully and correctly resolved, on a real gradient, not a constant:
-  - 85-100: the defect and its fix are mechanical/unambiguous - a glossary term swapped in exactly as given, a number/name restored from an unmistakable match elsewhere in the string, a stray Pinyin term with one obvious translation. No judgment call was needed to be sure CORRECTED is right.
-  - 60-84: the fix required real interpretive judgment - resolving an omitted subject/object from dialogue context, choosing the best English rendering of an idiom, deciding a stammer's reconstructed word from partial context - you believe it's right but a different reading was plausible.
-  - Below 60: genuine uncertainty remains even after correcting - SOURCE is ambiguous enough that more than one defensible fix exists and you can't tell which one the context actually intends, or the fix depends on surrounding context you don't have visibility into.
-  Don't default to either end of this range out of habit - most confidently-named, mechanical defects (typos, garbled numbers, glossary mismatches) genuinely belong in the 85-100 band, and a score should only fall as the actual uncertainty in the fix grows.
-
 GLOSSARY: If a glossary is provided and the Chinese term is in the source, use the provided English term in your corrected text; don't substitute for a fixed name/term.
 
 DEFECT CATEGORIES: before scoring, decide which ONE applies, if any:
 - GARBLED_NUMBER: a garbled/dropped/duplicated number or clause (e.g. a number from elsewhere in the string leaking into an unrelated value).
 - DOMAIN_TERM: a mistranslated domain term that breaks the setting (e.g. a period/wuxia weapon rendered as a modern one).
-- LOST_IDIOM: a lost idiom/slang meaning rendered as a literal word-for-word gloss.
-- UNTRANSLATED_PINYIN: a term left untranslated/transliterated as Pinyin when it is not a proper noun and has a clear translatable meaning.
+- LOST_IDIOM: a lost idiom/slang meaning rendered as a literal word-for-word gloss. Correct with
+  vivid, period-appropriate wuxia/proverb-register phrasing - not flat modern English.
+- UNTRANSLATED_PINYIN: a term left untranslated/transliterated as Pinyin when it is not a proper noun and has a clear translatable meaning. Never applies to any syllable/character inside a personal, place, or faction name that is otherwise kept transliterated - a multi-character proper noun is rendered as a whole, either fully transliterated or fully translated by established convention/glossary, never split so only some syllables are literally translated (e.g. don't turn a name ending in 月 into "...Month" while the rest of the same name stays transliterated - that produces a name that is neither, not a fix). If uncertain whether a term is part of a name versus a standalone common noun, treat it as part of the name and don't flag it.
 - DROPPED_CONTENT: an omitted subject/object/clause, or a dropped title/honorific next to a placeholder, per the rules above.
 - DROPPED_STUTTER: a SOURCE stammer/stutter (repeated leading syllable(s) before a word) that TRANSLATION drops entirely or renders as gibberish unconnected to the stammered word. Do NOT use this just because SOURCE contains a stammer - a stammer TRANSLATION already conveys (hyphenated or as a full repeated word - both valid) is not a defect. If another defect is also present on the line, name that instead - it takes priority over a stammer-formatting quibble.
 - HARD_TO_PARSE_SEAM: a stitched-fragment seam that is genuinely hard to parse, ambiguous, or changes meaning - not just less fluent than an alternative.
 - OTHER_NAMED_DEFECT: something else concrete and nameable, not covered above.
 - NONE: nothing above applies. This is the answer for most translations, including short UI/stat labels, long literary prose, and terse list-style constructions - don't pick a category just to justify a hunch.
 
-CONSISTENCY: DEFECT and CORRECTED must agree, mechanically. DEFECT: NONE requires SCORE 80-100 and CORRECTED: NONE. Any other DEFECT value requires CORRECTED containing the actual fix for that named defect - never NONE. SCORE follows the graduated scale in SCORING ANCHORS above, not a fixed value - judge the actual confidence in CORRECTED case by case. Never choose a low SCORE without a DEFECT category that names why.
+CONSISTENCY: DEFECT and CORRECTED must agree, mechanically. DEFECT: NONE requires CORRECTED: NONE. Any other DEFECT value requires CORRECTED containing the actual fix for that named defect - never NONE.
 
 FORMAT: Respond with these exact lines and nothing else:
 DEFECT: <NONE, or one of GARBLED_NUMBER / DOMAIN_TERM / LOST_IDIOM / UNTRANSLATED_PINYIN / DROPPED_CONTENT / DROPPED_STUTTER / HARD_TO_PARSE_SEAM / OTHER_NAMED_DEFECT>
-SCORE: <0-100 - your confidence that the translation is accurate if DEFECT: NONE, otherwise your confidence in CORRECTED as the fixed replacement>
 CORRECTED: <corrected translation, or "NONE" if no correction is needed>. If it spans what was multiple \n-joined sentences, keep it on this one line using the literal two-character "\n" exactly as SOURCE/TRANSLATION do - never a real line break.
 
-No explanations, source repetition, or additional lines. If good, output "DEFECT: NONE", SCORE 80+, then "CORRECTED: NONE"; don't rewrite correct translations.
+No explanations, source repetition, or additional lines. No SCORE line - a separate review step handles confidence, not this one. If good, output "DEFECT: NONE", then "CORRECTED: NONE"; don't rewrite correct translations.

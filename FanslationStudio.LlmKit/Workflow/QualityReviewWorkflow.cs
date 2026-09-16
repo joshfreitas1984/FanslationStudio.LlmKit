@@ -22,13 +22,35 @@ namespace FanslationStudio.LlmKit.Workflow;
 public static class QualityReviewWorkflow
 {
     /// <summary>
-    /// Response format the QC prompt asks the model for - deliberately simple (two labeled lines)
-    /// rather than JSON, since small/local models are more reliable at producing this than
-    /// well-formed JSON. A response that doesn't match <see cref="ScoreLineRegex"/> is treated as
-    /// unparseable and the column is left untouched (picked up again next run) rather than
-    /// recording a guessed score - see ReviewColumnAsync.
+    /// Response format call 2 (<see cref="GetVerificationVerdictAsync"/>) asks the model for -
+    /// deliberately simple labeled lines rather than JSON, since small/local models are more
+    /// reliable at producing this than well-formed JSON. Call 1 (<see cref="GetLlmVerdictAsync"/>)
+    /// no longer has a SCORE line at all (see docs/quality-review-pass-architecture.md postmortem
+    /// #6 - it never scores its own draft) - only call 2 ever parses this. A response that doesn't
+    /// match this regex is treated as unscored, and <see cref="FinalizeVerdictAsync"/> has no
+    /// fallback score to use instead, so the whole column is left untouched (picked up again next
+    /// run).
     /// </summary>
     private static readonly Regex ScoreLineRegex = new(@"^\s*SCORE:\s*(\d+)", RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Compiled);
+
+    /// <summary>
+    /// The real column identity for a split/template, matching whichever of the two mutually
+    /// exclusive schemes the source file actually uses: <see cref="TranslationSplit.SplitPath"/>/
+    /// <see cref="FieldTemplate.SplitPath"/> for JSON-field-path files, or <see
+    /// cref="TranslationSplit.Split"/>/<see cref="FieldTemplate.Split"/> for CSV/PrefabText/
+    /// DynamicStrings files that leave SplitPath empty. Grouping/matching on the bare int <c>Split</c>
+    /// alone is wrong for JSON files - every field on a JSON line shares <c>Split == 0</c> (see
+    /// JsonGameDataWorkflow's extraction), so it would collapse every field of the line (Name,
+    /// ItemName, Desc, ...) into a single fake "column", handing one field's translation to another
+    /// field's template. The "#" prefix on the int form keeps it from ever colliding with a numeric-
+    /// looking SplitPath string.
+    /// </summary>
+    private static string ColumnKey(TranslationSplit split) =>
+        string.IsNullOrEmpty(split.SplitPath) ? $"#{split.Split}" : split.SplitPath;
+
+    /// <inheritdoc cref="ColumnKey(TranslationSplit)"/>
+    private static string ColumnKey(FieldTemplate template) =>
+        string.IsNullOrEmpty(template.SplitPath) ? $"#{template.Split}" : template.SplitPath;
 
     /// <summary>
     /// Captures the <c>DEFECT:</c> category line the DEFECT-first prompt restructuring added ahead
@@ -80,12 +102,13 @@ public static class QualityReviewWorkflow
         _ => QcDefectCategory.OtherNamedDefect,
     };
 
-    /// <summary>Reverse of <see cref="DefectTokenToCategory"/> - the token <see cref="GetVerificationVerdictAsync"/>
-    /// puts in its user prompt's CLAIMED DEFECT line so the verification model is told exactly which
-    /// single category call 1 claimed, in the same vocabulary its own prompt already defines. Returns
-    /// null for <see cref="QcDefectCategory.Unknown"/> (never a valid claim - see
-    /// <see cref="FinalizeVerdictAsync"/>, which never calls verification for it) and
-    /// <see cref="QcDefectCategory.None"/> (nothing to verify).</summary>
+    /// <summary>Reverse of <see cref="DefectTokenToCategory"/> - the token
+    /// <see cref="GetVerificationVerdictAsync"/> puts in its CLAIMED DEFECT line and
+    /// <see cref="GetCorrectionRepairAsync"/> puts in its CONFIRMED DEFECT line, so either call is
+    /// told exactly which category is in play, in the same vocabulary the prompts already define.
+    /// Returns null for <see cref="QcDefectCategory.Unknown"/> (never a valid claim - see
+    /// <see cref="FinalizeVerdictAsync"/>, which never calls either for it) and
+    /// <see cref="QcDefectCategory.None"/> (nothing to verify or repair).</summary>
     private static string? DefectCategoryToToken(QcDefectCategory category) => category switch
     {
         QcDefectCategory.GarbledNumber => "GARBLED_NUMBER",
@@ -248,7 +271,16 @@ public static class QualityReviewWorkflow
     /// a known SOURCE/TRANSLATION pair without needing a corpus row (see DragonHierOverLlm's
     /// `"3g. QcOmittedSubjectRegression"` test).
     /// </summary>
-    internal sealed record LlmVerdict(bool Success, int Score, string? CorrectedRawMasked, QcDefectCategory Defect = QcDefectCategory.Unknown);
+    internal sealed record LlmVerdict(bool Success, int? Score, string? CorrectedRawMasked, QcDefectCategory Defect = QcDefectCategory.Unknown);
+
+    /// <summary>
+    /// Call 2's (<see cref="GetVerificationVerdictAsync"/>) result - a pure grade of a GIVEN
+    /// candidate correction it did not write, never a full <see cref="LlmVerdict"/>, since it never
+    /// produces text. See docs/quality-review-pass-architecture.md postmortem #6 for why scoring was
+    /// moved here entirely: a call that also drafts a fix cannot grade its own confidence in that fix
+    /// without the same self-preference bias no rubric wording reliably overcomes.
+    /// </summary>
+    internal sealed record ScoreVerdict(bool Success, QcDefectCategory Defect, int Score);
 
     /// <summary>
     /// SOURCE + CURRENT TRANSLATION + the glossary prompt built for them (see
@@ -374,11 +406,11 @@ public static class QualityReviewWorkflow
         {
             foreach (var line in file.FileLines)
             {
-                foreach (var columnGroup in line.Splits.GroupBy(s => s.Split))
+                foreach (var columnGroup in line.Splits.GroupBy(ColumnKey))
                 {
                     var fragments = columnGroup.OrderBy(s => s.SubIndex).ToList();
                     var anchor = fragments.FirstOrDefault(f => f.SubIndex == 0) ?? fragments[0];
-                    var template = line.Templates.FirstOrDefault(t => t.Split == columnGroup.Key);
+                    var template = line.Templates.FirstOrDefault(t => ColumnKey(t) == columnGroup.Key);
 
                     if (config.Hooks?.CustomQcExclusionRule != null)
                     {
@@ -386,7 +418,7 @@ public static class QualityReviewWorkflow
                             ? CompoundFieldSplitter.Reconstruct(template.Template, fragments.Select(f => f.Text).ToList())
                             : anchor.Text;
 
-                        if (config.Hooks.CustomQcExclusionRule(file.TextFile, columnGroup.Key, rawText))
+                        if (config.Hooks.CustomQcExclusionRule(file.TextFile, anchor.Split, rawText))
                         {
                             excludedCount++;
                             continue;
@@ -694,11 +726,11 @@ public static class QualityReviewWorkflow
             // separate step (ApplyRulesToCurrentQcTranslated) that only runs as part of
             // RunBruteForce - a plain RunAsync call must leave QcStatus just as accurate as a
             // brute-forced one, not dependent on which caller happened to invoke this.
-            if (TryRetryForLowScore(config, anchor, effectiveTranslated, verdict.Score, item.File.TextFile))
+            if (TryRetryForLowScore(config, anchor, effectiveTranslated, verdict.Score ?? 100, item.File.TextFile))
                 return QcOutcome.Passed;
 
             anchor.QcStatus = QcStatus.Passed;
-            anchor.FlaggedForQcReview = verdict.Score < config.QualityReview.MinAcceptableScore;
+            anchor.FlaggedForQcReview = verdict.Score is not int passedScore || passedScore < config.QualityReview.MinAcceptableScore;
             return QcOutcome.Passed;
         }
 
@@ -812,7 +844,7 @@ public static class QualityReviewWorkflow
         anchor.QcRuleCheckFailureBaseline = string.Empty;
         anchor.QcStatus = QcStatus.Corrected;
         anchor.QcTranslated = correctedResult;
-        anchor.FlaggedForQcReview = verdict.Score < config.QualityReview.MinAcceptableScore;
+        anchor.FlaggedForQcReview = verdict.Score is not int correctedScore || correctedScore < config.QualityReview.MinAcceptableScore;
         return QcOutcome.Corrected;
     }
 
@@ -922,18 +954,20 @@ public static class QualityReviewWorkflow
             {
                 RecordLlmCall(timing, llmStopwatch);
                 Console.WriteLine($"Quality review request error: {e.Message}");
-                return new LlmVerdict(false, 0, null);
+                return new LlmVerdict(false, null, null);
             }
             RecordLlmCall(timing, llmStopwatch);
 
-            var scoreMatch = ScoreLineRegex.Match(llmResponse);
-            if (!scoreMatch.Success)
+            // No SCORE line anymore - call 1 only drafts DEFECT/CORRECTED (see
+            // docs/quality-review-pass-architecture.md postmortem #6). Parse validity is now
+            // anchored on DEFECT: a response missing it entirely can't be trusted at all, same
+            // treatment the missing-SCORE case used to get.
+            if (!DefectLineRegex.IsMatch(llmResponse))
             {
                 Console.WriteLine($"Quality review: could not parse response for '{rawText}' - skipping. Raw response: {llmResponse}");
-                return new LlmVerdict(false, 0, null);
+                return new LlmVerdict(false, null, null);
             }
 
-            var score = Math.Clamp(int.Parse(scoreMatch.Groups[1].Value), 0, 100);
             var defect = ParseDefectCategory(llmResponse);
 
             var correctedMatch = CorrectedLineRegex.Match(llmResponse);
@@ -950,7 +984,7 @@ public static class QualityReviewWorkflow
             if (ContainsLeakedProtocolText(correctedRaw))
             {
                 Console.WriteLine($"Quality review: parsed correction for '{rawText}' contains leaked QC-protocol text - treating as unparseable. Raw response: {llmResponse}");
-                return new LlmVerdict(false, 0, null);
+                return new LlmVerdict(false, null, null);
             }
 
             var hasCorrection = correctedMatch.Success
@@ -958,7 +992,7 @@ public static class QualityReviewWorkflow
                 && !correctedRaw.Equals("NONE", StringComparison.OrdinalIgnoreCase);
 
             if (!hasCorrection)
-                return await FinalizeVerdictAsync(config, modelConfig, client, rawText, maskedRaw, maskedTranslated, glossaryPrompt, score, defect, null, timing);
+                return await FinalizeVerdictAsync(config, modelConfig, client, rawText, maskedRaw, maskedTranslated, glossaryPrompt, defect, null, timing);
 
             // Only the bad-words check is safe to run here: it's a pure function of the candidate
             // text alone (TranslationWorkflow.MatchesBadWords), unlike the rest of EvaluateRules
@@ -972,7 +1006,7 @@ public static class QualityReviewWorkflow
             // unchanged.
             var badWordMatches = TranslationWorkflow.FindBadWordMatches(correctedRaw);
             if (badWordMatches.Count == 0 || attempt >= maxInlineRetries)
-                return await FinalizeVerdictAsync(config, modelConfig, client, rawText, maskedRaw, maskedTranslated, glossaryPrompt, score, defect, correctedRaw, timing);
+                return await FinalizeVerdictAsync(config, modelConfig, client, rawText, maskedRaw, maskedTranslated, glossaryPrompt, defect, correctedRaw, timing);
 
             Console.WriteLine($"Quality review: correction for '{rawText}' matched the bad-words list ({string.Join(", ", badWordMatches)}) - inline retry {attempt + 1}/{maxInlineRetries}.");
             TranslationService.AddCorrectionMessages(
@@ -980,21 +1014,28 @@ public static class QualityReviewWorkflow
                 llmResponse,
                 $"That correction is not acceptable: it uses the banned word(s) \"{string.Join("\", \"", badWordMatches)}\". " +
                 "Propose a different corrected line that says the same thing without using any banned word, " +
-                "in the same SCORE:/CORRECTED: format.");
+                "in the same DEFECT:/CORRECTED: format.");
         }
     }
 
     /// <summary>
-    /// Single choke point every <see cref="GetLlmVerdictAsync"/> return path (a non-correction verdict
-    /// and an accepted-after-retries correction) funnels a raw call-1 verdict through before it
-    /// becomes the method's actual return value. When <see cref="QualityReviewConfig.TwoStageVerificationEnabled"/>
-    /// is off, or <paramref name="defect"/> isn't a real named claim (<see cref="QcDefectCategory.None"/>/
-    /// <see cref="QcDefectCategory.Unknown"/> - nothing to verify), this is a no-op passthrough - call
-    /// 1's own verdict stands exactly as before this feature existed. Otherwise it hands the claim to
-    /// <see cref="GetVerificationVerdictAsync"/> and returns ITS verdict instead, falling back to call
-    /// 1's own verdict only if verification itself fails to produce a usable one (never discards call
-    /// 1's answer just because verification didn't happen). See docs/quality-review-pass-architecture.md
-    /// "Two-stage DEFECT verification".
+    /// Choke point every <see cref="GetLlmVerdictAsync"/> return path funnels through. Call 1 never
+    /// scores its own draft (see docs/quality-review-pass-architecture.md postmortem #6), so this is
+    /// where scoring actually happens - by call 2 (<see cref="GetVerificationVerdictAsync"/>), which
+    /// grades a candidate it did not write, looping through call 3
+    /// (<see cref="GetCorrectionRepairAsync"/>) up to <see cref="QualityReviewConfig.MaxScoreRepairIterations"/>
+    /// times when the score is too low, re-scoring via call 2 after every repair attempt (never
+    /// trusting call 3's own confidence in its own rewrite either).
+    ///
+    /// <paramref name="correctedRaw"/> null means call 1 said <c>DEFECT: NONE</c> - fixed
+    /// <c>Score = 100</c>, no correction, no call 2 ever, regardless of config (matches the existing
+    /// "nothing to fix" convention used elsewhere - see <see cref="ReviewColumnAsync"/>'s
+    /// <c>correctedResult == effectiveTranslated</c> branch). Otherwise: if
+    /// <see cref="QualityReviewConfig.TwoStageVerificationEnabled"/> is off, or either the
+    /// verification or repair prompt is missing for this model, the correction is still accepted
+    /// (same validation gate applies downstream either way) but with <c>Score = null</c> - there is
+    /// no fallback self-score to use since call 1 was never asked to produce one, so
+    /// <see cref="ReviewColumnAsync"/> always flags it for human review instead.
     /// </summary>
     private static async Task<LlmVerdict> FinalizeVerdictAsync(
         LlmConfig config,
@@ -1004,40 +1045,68 @@ public static class QualityReviewWorkflow
         string maskedRaw,
         string maskedTranslated,
         string glossaryPrompt,
-        int score,
         QcDefectCategory defect,
         string? correctedRaw,
         QcTimingStats? timing = null)
     {
-        if (!config.QualityReview.TwoStageVerificationEnabled
-            || defect is QcDefectCategory.None or QcDefectCategory.Unknown
-            || !modelConfig.Prompts.ContainsKey("BaseQualityReviewVerificationPrompt"))
-            return new LlmVerdict(true, score, correctedRaw, defect);
+        if (correctedRaw == null)
+            return new LlmVerdict(true, 100, null, QcDefectCategory.None);
 
-        var verification = await GetVerificationVerdictAsync(config, modelConfig, client, rawText, maskedRaw, maskedTranslated, glossaryPrompt, defect, timing);
-        return verification ?? new LlmVerdict(true, score, correctedRaw, defect);
+        if (!config.QualityReview.TwoStageVerificationEnabled
+            || !modelConfig.Prompts.ContainsKey("BaseQualityReviewVerificationPrompt")
+            || !modelConfig.Prompts.ContainsKey("BaseQualityReviewCorrectionRepairPrompt"))
+            return new LlmVerdict(true, null, correctedRaw, defect);
+
+        var candidate = correctedRaw;
+        var currentDefect = defect;
+        var maxRepairAttempts = Math.Max(0, config.QualityReview.MaxScoreRepairIterations);
+
+        for (var repairAttempt = 0; ; repairAttempt++)
+        {
+            var scoreVerdict = await GetVerificationVerdictAsync(config, modelConfig, client, rawText, maskedRaw, maskedTranslated, glossaryPrompt, currentDefect, candidate, timing);
+            if (scoreVerdict is not { Success: true })
+                // Scoring failed outright (network/parse error) - nothing trustworthy to record for
+                // this column at all, since call 1 never produced its own score to fall back to.
+                // Picked up again next run, same as any other unparseable response.
+                return new LlmVerdict(false, null, null);
+
+            if (scoreVerdict.Defect == QcDefectCategory.None)
+                // Call 2 rejected the claim entirely - same fixed-100 "nothing's wrong" convention
+                // as call 1's own DEFECT: NONE branch above, never a free-generated score.
+                return new LlmVerdict(true, 100, null, QcDefectCategory.None);
+
+            currentDefect = scoreVerdict.Defect;
+
+            if (scoreVerdict.Score >= config.QualityReview.MinAcceptableScore || repairAttempt >= maxRepairAttempts)
+                return new LlmVerdict(true, scoreVerdict.Score, candidate, currentDefect);
+
+            var repaired = await GetCorrectionRepairAsync(config, modelConfig, client, rawText, maskedRaw, maskedTranslated, glossaryPrompt, currentDefect, candidate, timing);
+            if (repaired == null)
+                // Call 3 couldn't improve on it (or errored/leaked) - accept the last scored
+                // candidate rather than looping forever or discarding a validated correction.
+                return new LlmVerdict(true, scoreVerdict.Score, candidate, currentDefect);
+
+            candidate = repaired;
+            // Loop back to call 2 to re-score the NEW candidate - every iteration, not just the
+            // first, so nothing ever grades a fix it (or a call in the same authoring role) wrote.
+        }
     }
 
     /// <summary>
-    /// Second-stage check for a column call 1 (<see cref="GetLlmVerdictAsync"/>) flagged with a named
-    /// DEFECT - only ever invoked via <see cref="FinalizeVerdictAsync"/>, never for
-    /// <see cref="QcDefectCategory.None"/>/<see cref="QcDefectCategory.Unknown"/>. Deliberately a
-    /// separate, narrower LLM call rather than trusting call 1's own freehand CORRECTED: shown ONLY
-    /// the claimed DEFECT (not asked to rediscover one from scratch), it confirms, rejects as a false
-    /// positive, or recategorizes the claim, and - only if confirmed/recategorized - proposes a
-    /// correction scoped to just that one defect. Motivation: hand-validating the DroppedStutter
-    /// category (see DragonHierOverLlm's docs/qc-qualityscore-noise-investigation.md) found call 1
-    /// routinely flagging a stammer just because SOURCE happened to contain one (even though
-    /// TRANSLATION already conveyed it validly), and - worse - "fixing" a claimed stammer defect while
-    /// introducing an unrelated one (a wrong name, an inverted meaning, an untranslated term) in the
-    /// same freehand rewrite.
+    /// Call 2 - grades a GIVEN candidate correction (<paramref name="proposedCorrectionMasked"/>) it
+    /// did not write, and confirms/rejects/recategorizes the claimed defect. Never drafts text
+    /// itself (see <see cref="ScoreVerdict"/>'s doc comment for why - a call that also writes a fix
+    /// cannot grade its own confidence in it without self-preference bias). Shown the *original*
+    /// TRANSLATION (never a previous repair attempt's own reasoning) plus whichever candidate is
+    /// currently on the table, so repeated calls across <see cref="FinalizeVerdictAsync"/>'s repair
+    /// loop always judge a fresh candidate against the same fixed baseline.
     ///
-    /// Returns null (not a failed/unsuccessful <see cref="LlmVerdict"/>) when the request errors or the
-    /// response doesn't parse - <see cref="FinalizeVerdictAsync"/> falls back to call 1's own verdict
-    /// rather than discarding it, since a failure here means "verification didn't work this time," not
-    /// "call 1 was wrong."
+    /// Returns a failed <see cref="ScoreVerdict"/> (not null) when the request errors, the response
+    /// doesn't parse, or `DEFECT` is unparseable - <see cref="FinalizeVerdictAsync"/> treats any of
+    /// these as "can't produce a trustworthy verdict for this column at all this run," since there is
+    /// no call-1 self-score left to fall back to.
     /// </summary>
-    internal static async Task<LlmVerdict?> GetVerificationVerdictAsync(
+    internal static async Task<ScoreVerdict> GetVerificationVerdictAsync(
         LlmConfig config,
         ModelExecutionConfig modelConfig,
         HttpClient client,
@@ -1046,16 +1115,18 @@ public static class QualityReviewWorkflow
         string maskedTranslated,
         string glossaryPrompt,
         QcDefectCategory claimedDefect,
+        string proposedCorrectionMasked,
         QcTimingStats? timing = null)
     {
         var claimedToken = DefectCategoryToToken(claimedDefect);
         if (claimedToken == null)
-            return null;
+            return new ScoreVerdict(false, QcDefectCategory.Unknown, 0);
 
         var userPrompt = new StringBuilder();
         userPrompt.AppendLine($"SOURCE (Chinese): {maskedRaw}");
         userPrompt.AppendLine($"CURRENT TRANSLATION (English): {maskedTranslated}");
         userPrompt.AppendLine($"CLAIMED DEFECT: {claimedToken}");
+        userPrompt.AppendLine($"PROPOSED CORRECTION: {proposedCorrectionMasked}");
         if (!string.IsNullOrEmpty(glossaryPrompt))
         {
             userPrompt.AppendLine("Relevant glossary terms (must be preserved if they appear in SOURCE):");
@@ -1078,34 +1149,96 @@ public static class QualityReviewWorkflow
         {
             RecordLlmCall(timing, llmStopwatch);
             Console.WriteLine($"Quality review verification request error for '{rawText}': {e.Message}");
-            return null;
+            return new ScoreVerdict(false, QcDefectCategory.Unknown, 0);
         }
         RecordLlmCall(timing, llmStopwatch);
 
         // Reuses DefectLineRegex/ParseDefectCategory - the SAME "DEFECT:" label call 1 already
         // produces reliably - rather than a distinct "VERDICT:" token, after a real production
         // response came back with "VERDICAT:" (a one-off model typo of a label it had never been
-        // asked to produce before) and silently fell back to call 1's own verdict. Introducing new
-        // output vocabulary for call 2 just gave the model one more way to drift; asking for the
-        // same familiar token it already handles well does not. DEFECT: NONE here means "the claim
-        // doesn't hold up" (this call's schema has no separate NONE-was-never-flagged case to
-        // confuse it with, since FinalizeVerdictAsync never invokes this for a column that was
-        // already NONE/Unknown).
+        // asked to produce before). DEFECT: NONE here means "the claim doesn't hold up" (this call's
+        // schema has no separate NONE-was-never-flagged case to confuse it with, since
+        // FinalizeVerdictAsync never invokes this for a column that was already NONE/Unknown).
         var scoreMatch = ScoreLineRegex.Match(llmResponse);
         var verificationDefect = ParseDefectCategory(llmResponse);
         if (!scoreMatch.Success || verificationDefect == QcDefectCategory.Unknown)
         {
-            Console.WriteLine($"Quality review: could not parse verification response for '{rawText}' - keeping call 1's verdict. Raw response: {llmResponse}");
-            return null;
+            Console.WriteLine($"Quality review: could not parse verification response for '{rawText}' - treating as unscored. Raw response: {llmResponse}");
+            return new ScoreVerdict(false, QcDefectCategory.Unknown, 0);
         }
 
-        var score = Math.Clamp(int.Parse(scoreMatch.Groups[1].Value), 0, 100);
+        // DEFECT: NONE's SCORE is irrelevant per this prompt's own instructions (FinalizeVerdictAsync
+        // always substitutes a fixed 100 for this case) - clamp anyway purely for defense in depth.
+        var score = verificationDefect == QcDefectCategory.None ? 100 : Math.Clamp(int.Parse(scoreMatch.Groups[1].Value), 0, 100);
+        return new ScoreVerdict(true, verificationDefect, score);
+    }
+
+    /// <summary>
+    /// Call 3 - only invoked from <see cref="FinalizeVerdictAsync"/>'s repair loop when call 2 scored
+    /// the current candidate below <see cref="QualityReviewConfig.MinAcceptableScore"/> and repair
+    /// attempts remain. Given the *confirmed* <paramref name="confirmedDefect"/> and the current
+    /// low-scoring <paramref name="previousAttemptMasked"/>, writes ONE improved correction targeting
+    /// only that defect - never re-derives DEFECT, never scores, single job. The loop always sends
+    /// its result back through <see cref="GetVerificationVerdictAsync"/> for a fresh score before
+    /// trusting it (this call never grades its own rewrite).
+    ///
+    /// Returns null - not a distinguishable "keep trying" signal - on a request error, an unparseable
+    /// response, leaked protocol text, or an explicit <c>CORRECTED: NONE</c> (call 3 couldn't improve
+    /// on the previous attempt). Any of these mean the same thing to the caller: stop repairing,
+    /// accept the last successfully-scored candidate.
+    /// </summary>
+    internal static async Task<string?> GetCorrectionRepairAsync(
+        LlmConfig config,
+        ModelExecutionConfig modelConfig,
+        HttpClient client,
+        string rawText,
+        string maskedRaw,
+        string maskedTranslated,
+        string glossaryPrompt,
+        QcDefectCategory confirmedDefect,
+        string previousAttemptMasked,
+        QcTimingStats? timing = null)
+    {
+        var defectToken = DefectCategoryToToken(confirmedDefect);
+        if (defectToken == null)
+            return null;
+
+        var userPrompt = new StringBuilder();
+        userPrompt.AppendLine($"SOURCE (Chinese): {maskedRaw}");
+        userPrompt.AppendLine($"CURRENT TRANSLATION (English): {maskedTranslated}");
+        userPrompt.AppendLine($"CONFIRMED DEFECT: {defectToken}");
+        userPrompt.AppendLine($"PREVIOUS ATTEMPT: {previousAttemptMasked}");
+        if (!string.IsNullOrEmpty(glossaryPrompt))
+        {
+            userPrompt.AppendLine("Relevant glossary terms (must be preserved if they appear in SOURCE):");
+            userPrompt.AppendLine(glossaryPrompt);
+        }
+
+        var messages = new List<object>
+        {
+            LlmHelpers.GenerateSystemPrompt(modelConfig.Prompts["BaseQualityReviewCorrectionRepairPrompt"]),
+            LlmHelpers.GenerateUserPrompt(userPrompt.ToString()),
+        };
+
+        string llmResponse;
+        var llmStopwatch = Stopwatch.StartNew();
+        try
+        {
+            llmResponse = await TranslationService.TranslateMessagesAsync(client, config, modelConfig, messages);
+        }
+        catch (Exception e) when (e is HttpRequestException or OperationCanceledException)
+        {
+            RecordLlmCall(timing, llmStopwatch);
+            Console.WriteLine($"Quality review repair request error for '{rawText}': {e.Message}");
+            return null;
+        }
+        RecordLlmCall(timing, llmStopwatch);
 
         var correctedMatch = CorrectedLineRegex.Match(llmResponse);
         var correctedRaw = correctedMatch.Success ? correctedMatch.Groups[1].Value.Trim() : string.Empty;
         if (ContainsLeakedProtocolText(correctedRaw))
         {
-            Console.WriteLine($"Quality review: verification correction for '{rawText}' contains leaked QC-protocol text - keeping call 1's verdict. Raw response: {llmResponse}");
+            Console.WriteLine($"Quality review: repair correction for '{rawText}' contains leaked QC-protocol text - keeping previous attempt. Raw response: {llmResponse}");
             return null;
         }
 
@@ -1113,13 +1246,7 @@ public static class QualityReviewWorkflow
             && !string.IsNullOrEmpty(correctedRaw)
             && !correctedRaw.Equals("NONE", StringComparison.OrdinalIgnoreCase);
 
-        // DEFECT: NONE - the claimed defect doesn't hold up. This is what "ups the score" for a
-        // line call 1 flagged wrongly, without a human needing to hand-validate every category to
-        // catch it (the automated version of the manual per-category triage this pass's
-        // autoAcceptDefectCategories mechanism otherwise requires). Any other value either repeats
-        // claimedDefect (confirmed) or names a different category (recategorized) - either way, only
-        // call 2's own narrowly-scoped correction is ever used, never call 1's freehand one.
-        return new LlmVerdict(true, score, verificationDefect == QcDefectCategory.None ? null : (hasCorrection ? correctedRaw : null), verificationDefect);
+        return hasCorrection ? correctedRaw : null;
     }
 
     /// <summary>
@@ -1257,7 +1384,7 @@ public static class QualityReviewWorkflow
 
             foreach (var line in fileLines)
             {
-                foreach (var columnGroup in line.Splits.GroupBy(s => s.Split))
+                foreach (var columnGroup in line.Splits.GroupBy(ColumnKey))
                 {
                     var fragments = columnGroup.OrderBy(s => s.SubIndex).ToList();
                     var anchor = fragments.FirstOrDefault(f => f.SubIndex == 0) ?? fragments[0];
@@ -1287,7 +1414,7 @@ public static class QualityReviewWorkflow
                     if (anchor.QcStatus == QcStatus.Corrected && string.IsNullOrEmpty(anchor.QcTranslated))
                         continue;
 
-                    var template = line.Templates.FirstOrDefault(t => t.Split == columnGroup.Key);
+                    var template = line.Templates.FirstOrDefault(t => ColumnKey(t) == columnGroup.Key);
                     var rawText = template != null
                         ? CompoundFieldSplitter.Reconstruct(template.Template, fragments.Select(f => f.Text).ToList())
                         : anchor.Text;
@@ -1480,7 +1607,7 @@ public static class QualityReviewWorkflow
         {
             foreach (var line in fileLines)
             {
-                foreach (var columnGroup in line.Splits.GroupBy(s => s.Split))
+                foreach (var columnGroup in line.Splits.GroupBy(ColumnKey))
                 {
                     var anchor = columnGroup.OrderBy(s => s.SubIndex).FirstOrDefault(f => f.SubIndex == 0) ?? columnGroup.First();
 
@@ -1619,7 +1746,7 @@ public static class QualityReviewWorkflow
 
             foreach (var line in fileLines)
             {
-                foreach (var columnGroup in line.Splits.GroupBy(s => s.Split))
+                foreach (var columnGroup in line.Splits.GroupBy(ColumnKey))
                 {
                     var anchor = columnGroup.OrderBy(s => s.SubIndex).FirstOrDefault(f => f.SubIndex == 0) ?? columnGroup.First();
 
@@ -1662,7 +1789,7 @@ public static class QualityReviewWorkflow
 
             foreach (var line in fileLines)
             {
-                foreach (var columnGroup in line.Splits.GroupBy(s => s.Split))
+                foreach (var columnGroup in line.Splits.GroupBy(ColumnKey))
                 {
                     var anchor = columnGroup.OrderBy(s => s.SubIndex).FirstOrDefault(f => f.SubIndex == 0) ?? columnGroup.First();
 
@@ -1710,7 +1837,7 @@ public static class QualityReviewWorkflow
 
             foreach (var line in fileLines)
             {
-                foreach (var columnGroup in line.Splits.GroupBy(s => s.Split))
+                foreach (var columnGroup in line.Splits.GroupBy(ColumnKey))
                 {
                     var anchor = columnGroup.OrderBy(s => s.SubIndex).FirstOrDefault(f => f.SubIndex == 0) ?? columnGroup.First();
 
@@ -1761,7 +1888,7 @@ public static class QualityReviewWorkflow
 
             foreach (var line in fileLines)
             {
-                foreach (var columnGroup in line.Splits.GroupBy(s => s.Split))
+                foreach (var columnGroup in line.Splits.GroupBy(ColumnKey))
                 {
                     if (!columnGroup.Any(f => StutterPatternRegex.IsMatch(f.Text)))
                         continue;
@@ -1809,7 +1936,7 @@ public static class QualityReviewWorkflow
                 // raw Splits directly - a templated column's Qc state lives only on its
                 // SubIndex == 0 fragment, but that fragment's OWN Text/Translated is just its own
                 // piece of the cell, not the whole reconstructed raw text QC actually reviewed.
-                foreach (var columnGroup in line.Splits.GroupBy(s => s.Split))
+                foreach (var columnGroup in line.Splits.GroupBy(ColumnKey))
                 {
                     var fragments = columnGroup.OrderBy(s => s.SubIndex).ToList();
                     var anchor = fragments.FirstOrDefault(f => f.SubIndex == 0) ?? fragments[0];
@@ -1817,7 +1944,7 @@ public static class QualityReviewWorkflow
                     if (!anchor.FlaggedForQcReview)
                         continue;
 
-                    var template = line.Templates.FirstOrDefault(t => t.Split == columnGroup.Key);
+                    var template = line.Templates.FirstOrDefault(t => ColumnKey(t) == columnGroup.Key);
                     var rawText = template != null
                         ? CompoundFieldSplitter.Reconstruct(template.Template, fragments.Select(f => f.Text).ToList())
                         : anchor.Text;

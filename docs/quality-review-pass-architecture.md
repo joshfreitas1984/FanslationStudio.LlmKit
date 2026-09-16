@@ -466,55 +466,59 @@ rather than merely waste a reviewer's time on a non-issue. That's a project-spec
 made when deciding what goes into `autoAcceptDefectCategories` - this library only provides the
 mechanism, not the policy.
 
-## Two-stage DEFECT verification (opt-in, `twoStageVerificationEnabled`)
+## Two-stage DEFECT verification and scoring (opt-in, `twoStageVerificationEnabled`)
 
-A single QC call asks one model to simultaneously detect a defect, name its category, judge
-severity, AND freehand-rewrite a fix - a lot to ask in one shot, and it shows: DragonHierOverLlm's
-full hand-validation of a `DroppedStutter`-flagged set (`qc-qualityscore-noise-investigation.md`)
-found the model routinely "fixing" a claimed stammer defect while silently breaking something
-unrelated in the same freehand rewrite (a correct name replaced with a wrong one, a translated
-idiom turned into raw pinyin, a meaning inverted) - and separately, flagging a line for that
-category just because SOURCE happens to contain a stammer, even when TRANSLATION already conveys it
-validly and the real defect (if any) is something else entirely.
+**As of the fix in postmortem #6, call 1 never scores at all** - it only drafts `DEFECT`/`CORRECTED`.
+Scoring, defect confirmation, and (when needed) repair are three separate, single-purpose calls, so
+that no call ever grades a fix it wrote itself:
 
-When `qualityReview.twoStageVerificationEnabled` is true, any column call 1
-(`GetLlmVerdictAsync`) flags with a named DEFECT (anything but `NONE`/`Unknown`) gets a second,
-narrower LLM call (`GetVerificationVerdictAsync`) before its verdict is finalized
-(`FinalizeVerdictAsync` is the single choke point both of call 1's return paths funnel through).
-Call 2 is shown SOURCE, the *original* TRANSLATION (never call 1's proposed correction), and the
-single claimed DEFECT token as `CLAIMED DEFECT` - not asked to rediscover a defect from scratch,
-only to judge one specific claim - and responds:
+1. **Call 1** (`GetLlmVerdictAsync`) - drafts `DEFECT` + `CORRECTED` only.
+2. **Call 2** (`GetVerificationVerdictAsync`) - only runs for a named DEFECT (never
+   `NONE`/`Unknown`). Shown SOURCE, the *original* TRANSLATION (never a repair attempt's own
+   reasoning), the claimed `DEFECT` token, and the current candidate as `PROPOSED CORRECTION` (call
+   1's draft, or a later repair attempt) - confirms/rejects/recategorizes the claim and grades
+   *that specific candidate*, never drafting one itself:
+   ```
+   DEFECT: <NONE if CLAIMED DEFECT doesn't hold up, the same token if it does, or a different DEFECT token if miscategorized>
+   SCORE: <0-100, irrelevant if DEFECT is NONE>
+   ```
+3. **Call 3** (`GetCorrectionRepairAsync`) - only runs when call 2's score is below
+   `minAcceptableScore` and repair attempts remain (bounded by `maxScoreRepairIterations`, default
+   2). Given the *confirmed* defect and the current low-scoring candidate, writes ONE improved
+   `CORRECTED` targeting only that defect - no score, no re-derivation:
+   ```
+   CORRECTED: <an improved fix, or NONE if it can't do better than the previous attempt>
+   ```
 
-```
-DEFECT: <NONE if CLAIMED DEFECT doesn't hold up, the same token if it does, or a different DEFECT token if call 1 miscategorized it>
-SCORE: <0-100>
-CORRECTED: <a fix touching ONLY the confirmed/recategorized defect, or NONE if DEFECT is NONE>
-```
+`FinalizeVerdictAsync` is the loop: score via call 2 → if `DEFECT: NONE`, done (fixed `Score = 100`,
+matching the same "nothing's wrong" convention used for call 1's own `NONE`); if the score clears
+`minAcceptableScore` or repair attempts are exhausted, accept the current candidate; otherwise repair
+via call 3 and **loop back to call 2 to re-score the new candidate - every iteration, not just the
+first**, so nothing ever grades its own rewrite, including across repairs. Deliberately reuses the
+exact `DEFECT:`/`SCORE:`/`CORRECTED:` vocabulary call 1 already produces reliably rather than
+distinct labels per call - an earlier version of this prompt invented a `VERDICT:` token for call 2,
+and a real production response came back `VERDICAT:` (a one-off model typo of a label it had never
+been asked to produce before), silently falling back to call 1's own verdict every time it happened.
 
-Deliberately reuses the exact `DEFECT:`/`SCORE:`/`CORRECTED:` vocabulary call 1 already produces
-reliably, rather than a distinct label like `VERDICT:` - an earlier version of this prompt invented
-one, and a real production response came back `VERDICAT:` (a one-off model typo of a label it had
-never been asked to produce before), silently falling back to call 1's own verdict every time it
-happened. Asking for the same familiar token the model already handles well doesn't give it a new
-way to drift.
+`GetLlmVerdictAsync`'s own `DEFECT: NONE` (nothing to correct at all) skips call 2 and call 3
+entirely, regardless of this flag - fixed `Score = 100`, no extra calls, since there's nothing to
+score or repair.
 
-- `DEFECT: NONE` → final `QcDefectCategory.None`, no correction - this is what "ups the score" back
-  to a passing range for a line call 1 flagged wrongly, without a human needing to hand-review every
-  category to catch it (this is the automated version of the manual per-category hand-validation the
-  DEFECT-categories section above describes).
-- `DEFECT: <same token as CLAIMED DEFECT>` → confirmed - keeps call 1's category, uses call 2's
-  SCORE/CORRECTED instead of call 1's.
-- `DEFECT: <a different token>` → recategorizes to that token instead, still using call 2's
-  SCORE/CORRECTED.
-- An unparseable/failed verification response returns `null` from `GetVerificationVerdictAsync`,
-  and `FinalizeVerdictAsync` falls back to call 1's own verdict unchanged - verification failing
-  once is "didn't help this time," never "discard call 1's answer."
+**When `twoStageVerificationEnabled` is false, or either `BaseQualityReviewVerificationPrompt` or
+`BaseQualityReviewCorrectionRepairPrompt` is missing for the model**, a column call 1 corrects is
+still accepted (the same validation gate applies either way) but with `Score = null` -
+`TranslationSplit.QcQualityScore` stays unset and `FlaggedForQcReview` is always `true`. There is no
+fallback self-score to use in this case, since call 1 was never asked to produce one - this is a
+real behavior change from before postmortem #6, where the flag being off meant call 1's own
+(self-graded, and as postmortems #4/#5/#6 found, unreliable) score was trusted directly.
 
-Cost: one extra LLM call, but only for columns call 1 already flagged (~10-15% of a corpus in
-practice), not every column. Prompt file: `BaseQualityReviewVerificationPrompt.txt`, one per model
-family (`BaseFiles/<preset>/Prompts/`), loaded/merged exactly like `BaseQualityReviewPrompt.txt` -
-see "Prompts: per-model-family, not a shared/generic file" below. Off by default (`false`) - a
-project that hasn't opted in sees no change in behavior or LLM call volume.
+Cost: up to `maxScoreRepairIterations + 1` calls to call 2, interleaved with up to
+`maxScoreRepairIterations` calls to call 3 - but only for columns call 1 flags with a named defect
+(~10-15% of a corpus in practice), and zero extra calls for everything else (call 1 no longer spends
+any reasoning on a score nobody will use for those either). Prompt files:
+`BaseQualityReviewVerificationPrompt.txt` and `BaseQualityReviewCorrectionRepairPrompt.txt`, one per
+model family (`BaseFiles/<preset>/Prompts/`), loaded/merged exactly like `BaseQualityReviewPrompt.txt`
+- see "Prompts: per-model-family, not a shared/generic file" below. Off by default (`false`).
 
 ## Configuration (`Configuration/QualityReviewConfig.cs`)
 
@@ -539,10 +543,15 @@ project that hasn't opted in sees no change in behavior or LLM call volume.
   hand-validated as low-precision enough that packaging should trust `QcTranslated` wholesale
   despite a low score, instead of holding the column back for human review. See "DEFECT categories
   and per-category policy" below.
-- `twoStageVerificationEnabled` (bool, default false) — adds a second, narrower LLM call for any
-  column call 1 flags with a named DEFECT, to confirm/reject/recategorize the claim and produce a
-  correction scoped to just that defect instead of trusting call 1's own freehand rewrite. See
-  "Two-stage DEFECT verification" above.
+- `twoStageVerificationEnabled` (bool, default false) — controls the entire scoring/repair pipeline
+  for any column call 1 flags with a named DEFECT: call 1 never self-scores, so this flag decides
+  whether call 2/3 run to produce a real score/repair, or whether the column is instead accepted
+  with `QcQualityScore: null` and always flagged. See "Two-stage DEFECT verification and scoring"
+  above.
+- `maxScoreRepairIterations` (int, default 2) — bounds how many times call 3
+  (`GetCorrectionRepairAsync`) attempts to improve a correction call 2 scored too low, re-scoring via
+  call 2 after each attempt. Only meaningful when `twoStageVerificationEnabled` is true. See
+  "Two-stage DEFECT verification and scoring" above.
 
 ## Inline rule-check retries (bad words only)
 
@@ -746,6 +755,74 @@ upward to 85-100 (all above `minAcceptableScore`), and widening the threshold en
 again (101) resets the entire corpus, `Passed` columns included, at full-re-review cost. This is
 exactly the gap `ResetCorrectedQcState` (see "Resetting Qc state" above) exists to close: it
 targets `QcStatus.Corrected` directly rather than inferring the affected set from score.
+
+### 5. `UNTRANSLATED_PINYIN` misapplied inside proper nouns, splitting names
+
+Even after postmortem #4's scoring fix, a downstream project's full run kept surfacing
+`UNTRANSLATED_PINYIN` corrections that partially translated one syllable of an otherwise-
+transliterated personal/place/faction name - e.g. SOURCE `风间隐夜月` (a character name) originally
+"Kazama Yin Ye Yue", "corrected" to "Kazama Yin Ye **Month**" (translating 月 in isolation), and several
+`Hengshan ...`/`Zou Jius ...` variants doing the same to place/personal names. `UNTRANSLATED_PINYIN`'s
+own definition already said "when it is **not** a proper noun," but the model wasn't reliably
+recognizing that a syllable *embedded inside* a multi-character proper noun is still part of that
+name, even when the syllable in isolation has an ordinary dictionary meaning (月 = moon/month). Worse,
+these corrections consistently scored 85+ under the postmortem #4 gradient - the model was
+"confident" in a fix that was objectively wrong, because from its perspective translating a
+common-meaning character *is* the mechanical, unambiguous case that scale anchors to 85-100. This
+is a precision bug in the DEFECT rule itself, not something scoring calibration alone can fix - a
+correction that shouldn't have been proposed at all doesn't become safe just because it's flagged
+with a lower score.
+
+Fix: `UNTRANSLATED_PINYIN`'s definition (all three model families, base + verification prompts)
+gained an explicit carve-out - it never applies to a syllable/character inside a personal, place, or
+faction name that's otherwise kept transliterated; a multi-character proper noun is rendered as a
+whole (fully transliterated or fully translated by convention/glossary), never split so only some
+syllables get literally translated; and when uncertain whether a term is part of a name versus a
+standalone common noun, treat it as part of the name and don't flag it. The verification prompt's
+copy specifically tells call 2 to answer `DEFECT: NONE` when `CLAIMED DEFECT` is
+`UNTRANSLATED_PINYIN` but the flagged term turns out to be inside a proper noun, so a call-1 false
+positive of this shape gets caught even before a human ever sees it.
+
+Every `Corrected` column already reviewed under the pre-fix rule needs a fresh review -
+`ResetCorrectedQcState` (added for postmortem #4) already covers this, since these are all
+`QcStatus.Corrected` regardless of category.
+
+### 6. Self-grading bias survived two rubric fixes - closed structurally, not with more wording
+
+Postmortems #4 and #5 both assumed the problem was *what the model was told* about scoring. Real
+corpus samples kept disproving that: a correction that broke a name outright (postmortem #5's
+"Kazama Yin Ye Month") and a correction that was genuinely clean (an unrelated hallucinated-name fix
+corrected to the right pinyin) scored within 10 points of each other (85 vs 95) under the postmortem
+#4 graduated scale - the score wasn't tracking correction quality at all, just clustering near the
+top of whichever band the current wording anchored toward. The same call that drafts `CORRECTED` was
+always the one scoring its own confidence in it (call 1 alone with the flag off; call 2 re-deriving
+and self-scoring its *own* freehand rewrite with the flag on) - a model grading text it just wrote is
+a well-documented self-preference bias, and no amount of rubric wording closes it, because the
+wording can only change what the model *says* about its confidence, not the fact that it's grading
+itself.
+
+Fix: restructure into three single-purpose calls instead of tuning a shared one's wording a third
+time - call 1 drafts and never scores at all (not even a value that gets discarded - the whole
+scoring reasoning burden is removed from its prompt, which also means zero wasted tokens/reasoning
+for the ~85-90% of a corpus that never gets a named defect); call 2 only grades a candidate it did
+not write (either call 1's draft or a call-3 repair) and decides if a repair is needed; call 3 only
+repairs, and its result always goes back through call 2 for a fresh score before being trusted -
+never accepted on call 3's own say-so. See "Two-stage DEFECT verification and scoring" above for the
+full mechanics. `LlmVerdict.Score` became nullable (`int?`) to support the "flag off, no fallback
+score" case cleanly - a real, deliberate behavior change (always-flagged, no score) rather than
+inventing a number nobody asked call 1 to produce.
+
+**Cross-repo note**: this is shared-library code. Any other consumer of `FanslationStudio.LlmKit`
+already running with `twoStageVerificationEnabled: true` picks up the new call-2/call-3 behavior
+automatically on upgrade, and any regression test calling `GetLlmVerdictAsync`/
+`GetVerificationVerdictAsync` directly and reading `.Score` as a non-nullable `int` will need
+updating for the nullable change (confirmed to affect DragonHierOverLlm's own
+`QcOmittedSubjectRegression` test as of this fix - not addressed here, since that's a change to a
+different repo's test file).
+
+Every `Corrected` column reviewed under any of the pre-#6 scoring behavior (self-scored call 1, or
+call 2 re-deriving its own fix) needs a fresh review under this pipeline - `ResetCorrectedQcState`
+(added for postmortem #4) already covers this.
 
 ### Regression coverage
 

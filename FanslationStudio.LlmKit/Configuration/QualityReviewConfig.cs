@@ -76,6 +76,17 @@ public class QualityReviewConfig
     public int InlineRuleCheckRetries { get; set; } = 0;
 
     /// <summary>
+    /// Only meaningful when <see cref="TwoStageVerificationEnabled"/> is true. Bounds how many
+    /// times <see cref="Workflow.QualityReviewWorkflow.GetCorrectionRepairAsync"/> ("call 3") will
+    /// attempt to improve a correction that call 2 (<see cref="Workflow.QualityReviewWorkflow.GetVerificationVerdictAsync"/>)
+    /// scored below <see cref="MinAcceptableScore"/>, re-scoring via call 2 after each attempt,
+    /// before accepting whatever the last attempt was (still flagged via
+    /// <see cref="Support.TranslationSplit.FlaggedForQcReview"/> if still below threshold - never
+    /// discarded, same "accept once validated" philosophy every other QC retry follows). Default 2.
+    /// </summary>
+    public int MaxScoreRepairIterations { get; set; } = 2;
+
+    /// <summary>
     /// DEFECT categories (see <see cref="QcDefectCategory"/>) a human has determined - by
     /// hand-validating a per-category sample from
     /// <see cref="Workflow.QualityReviewWorkflow.GetQcTriageAsync"/>'s <c>ByDefectCategory</c>
@@ -99,21 +110,27 @@ public class QualityReviewConfig
     public HashSet<QcDefectCategory> AutoAcceptDefectCategories { get; set; } = new();
 
     /// <summary>
-    /// When true, any column the main QC call (<see cref="Workflow.QualityReviewWorkflow.GetLlmVerdictAsync"/>)
-    /// flags with a named DEFECT (anything but <see cref="QcDefectCategory.None"/>/
-    /// <see cref="QcDefectCategory.Unknown"/>) gets a second, narrower LLM call
-    /// (<see cref="Workflow.QualityReviewWorkflow.GetVerificationVerdictAsync"/>) before its verdict
-    /// is finalized. That call is shown ONLY the claimed DEFECT (not asked to rediscover a defect
-    /// from scratch) and confirms it, rejects it as a false positive (raising the score back to a
-    /// passing range instead of trusting call 1's single-shot judgment), or recategorizes it - and
-    /// only its own narrowly-scoped correction is ever accepted, never call 1's freehand rewrite.
-    /// See docs/qc-qualityscore-noise-investigation.md's "Two-stage DEFECT verification" section
-    /// (DragonHierOverLlm repo) for why: hand-validating a flagged category found call 1 routinely
-    /// "fixing" a claimed defect while breaking something unrelated in the same freehand rewrite.
+    /// Controls the ENTIRE scoring/repair pipeline for any column the main QC call
+    /// (<see cref="Workflow.QualityReviewWorkflow.GetLlmVerdictAsync"/>, "call 1") flags with a
+    /// named DEFECT (anything but <see cref="QcDefectCategory.None"/>/<see cref="QcDefectCategory.Unknown"/>).
+    /// Call 1 never self-scores its own draft (see docs/quality-review-pass-architecture.md
+    /// postmortem #6 for why: a model grading its own freshly-authored text is a structural bias no
+    /// rubric wording fixes) - scoring only ever happens in
+    /// <see cref="Workflow.QualityReviewWorkflow.GetVerificationVerdictAsync"/> ("call 2"), which
+    /// grades call 1's candidate (or a repaired one) without ever drafting text itself, and decides
+    /// whether <see cref="Workflow.QualityReviewWorkflow.GetCorrectionRepairAsync"/> ("call 3") needs
+    /// to attempt an improved fix (bounded by <see cref="MaxScoreRepairIterations"/>, re-scored by
+    /// call 2 after every attempt).
     ///
-    /// False by default (additive - no behavior/call-volume change for a project that hasn't opted
-    /// in). Adds exactly one extra LLM call per column already flagged by call 1, never for a
-    /// column call 1 already passed - typically 10-15% of a corpus, not every column.
+    /// False by default. When false (or the model is missing either prompt), a column call 1
+    /// corrects is accepted as-is (same validation gate either way) but gets NO score
+    /// (<see cref="Support.TranslationSplit.QcQualityScore"/> stays null) and is always flagged via
+    /// <see cref="Support.TranslationSplit.FlaggedForQcReview"/> - there is no fallback self-score to
+    /// fall back to, since call 1 was never asked to produce one. A <see cref="QcDefectCategory.None"/>
+    /// outcome (nothing to correct) is entirely unaffected by this flag either way - fixed score 100,
+    /// no extra call, regardless of setting. Adds up to <c>MaxScoreRepairIterations + 1</c> calls to
+    /// call 2 and up to <see cref="MaxScoreRepairIterations"/> calls to call 3, but only for the
+    /// ~10-15% of a corpus call 1 flags with a named defect - never for a column call 1 passes.
     /// </summary>
     public bool TwoStageVerificationEnabled { get; set; } = false;
 }
