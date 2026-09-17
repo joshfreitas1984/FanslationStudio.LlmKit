@@ -165,4 +165,39 @@ public class QualityReviewConfig
     /// extra latency/tokens per call, but only for the already-flagged subset.
     /// </summary>
     public bool VerificationThinkingEnabled { get; set; } = false;
+
+    /// <summary>
+    /// Only meaningful when <see cref="TwoStageVerificationEnabled"/> is true (and either verification
+    /// prompt/repair prompt is present for the model). Sends a column call 1 (
+    /// <see cref="Workflow.QualityReviewWorkflow.GetLlmVerdictAsync"/>) passed with <c>DEFECT: NONE</c>
+    /// through call 2 (<see cref="Workflow.QualityReviewWorkflow.GetVerificationVerdictAsync"/>) too,
+    /// as a genuine independent second opinion, instead of accepting call 1's NONE outright at a fixed
+    /// score of 100 the way every other config does. Call 2 has no memory of call 1's own reasoning
+    /// and never drafted the translation itself, so it isn't subject to the same self-consistency
+    /// blind spot that let a genuine defect (e.g. a stitched-fragment seam glued directly to a markup
+    /// tag with no natural connector) come back <c>DEFECT: NONE</c> from call 1 every time, even after
+    /// the base prompt gained explicit wording for it - see
+    /// docs/quality-review-pass-architecture.md postmortem #6 for why wording alone doesn't reliably
+    /// close this kind of miss, and the tag-seam investigation this flag was added for.
+    ///
+    /// If call 2 also agrees nothing is wrong, the column is accepted exactly as before (fixed score
+    /// 100, <see cref="QcDefectCategory.None"/>) - this flag costs nothing extra in that case beyond
+    /// the one additional call. If call 2 instead names a real defect, call 2 itself never drafts
+    /// text (see <see cref="Workflow.QualityReviewWorkflow.ScoreVerdict"/>'s doc comment), so call 3
+    /// (<see cref="Workflow.QualityReviewWorkflow.GetCorrectionRepairAsync"/>) drafts the FIRST
+    /// candidate for the confirmed defect (there is no prior attempt to improve on yet), and that
+    /// candidate enters the SAME call-2 re-score/call-3 repair loop an ordinary call-1 correction
+    /// does - it can be accepted as a real <see cref="QcStatus.Corrected"/> column exactly like any
+    /// other. Only if the repair prompt is missing for this model, or call 3 can't draft anything at
+    /// all, does the column fall back to a below-threshold-score retry (via the normal
+    /// <see cref="Support.TranslationSplit.QcRuleCheckFailureCount"/>/<see cref="MaxRuleCheckRetries"/>
+    /// budget) with no correction, permanently <see cref="Support.TranslationSplit.FlaggedForQcReview"/>
+    /// once retries run out rather than force-corrected in code.
+    ///
+    /// False by default - doubles call 1's total LLM call count across the WHOLE corpus (every column,
+    /// not just the ~10-15% call 1 already names a defect on), unlike every other
+    /// <see cref="TwoStageVerificationEnabled"/> cost, which only applies to that flagged subset. Turn
+    /// on only if that cost is acceptable for the recall improvement on missed defects.
+    /// </summary>
+    public bool VerifyNoDefectClaims { get; set; } = false;
 }

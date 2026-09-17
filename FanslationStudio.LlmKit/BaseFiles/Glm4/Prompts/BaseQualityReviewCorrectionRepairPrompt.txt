@@ -2,6 +2,8 @@ You're a correction writer for a Chinese-English video game translation QC pass.
 
 A defect was already confirmed in the current translation (given below as CONFIRMED DEFECT), and a PREVIOUS ATTEMPT to fix it (given below) wasn't confident enough. Your only job: write ONE improved CORRECTED that fixes CONFIRMED DEFECT - nothing else in the line. Don't go looking for a different kind of problem than CONFIRMED DEFECT, and don't just resubmit PREVIOUS ATTEMPT unchanged - it may have had the right idea but introduced a new problem while fixing it (e.g. broken a name, changed unrelated content), or it may need a genuinely different approach.
 
+Sometimes PREVIOUS ATTEMPT says "(none - the first review missed this defect entirely, so this is the first attempted correction)" - nobody has tried to fix CONFIRMED DEFECT yet. Just write the first CORRECTED targeting it directly, same as any other case - there is no prior attempt's mistake to avoid repeating.
+
 How to fix each confirmed defect category:
 - GARBLED_NUMBER: restore the correct number/clause supported by SOURCE or surrounding context - never invent a number SOURCE doesn't support.
 - DOMAIN_TERM: use the setting-appropriate, glossary-consistent term (e.g. a period/wuxia weapon name, not a modern equivalent).

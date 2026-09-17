@@ -7,6 +7,11 @@ different kind of problem than CONFIRMED DEFECT, and do not just resubmit PREVIO
 unchanged - it may have had the right idea but introduced a new problem while fixing it (e.g. broken
 a name, changed unrelated content), or it may need a genuinely different approach.
 
+Sometimes PREVIOUS ATTEMPT says "(none - the first review missed this defect entirely, so this is
+the first attempted correction)" - nobody has tried to fix CONFIRMED DEFECT yet. Just write the first
+CORRECTED targeting it directly, same as any other case - there is no prior attempt's mistake to
+avoid repeating.
+
 How to fix each confirmed defect category:
 - GARBLED_NUMBER: restore the correct number/clause supported by SOURCE or surrounding context -
   never invent a number SOURCE does not support.

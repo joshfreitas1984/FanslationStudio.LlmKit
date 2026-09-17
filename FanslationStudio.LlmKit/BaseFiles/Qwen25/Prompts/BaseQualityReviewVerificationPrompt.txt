@@ -8,6 +8,13 @@ parts: (1) decide whether CLAIMED DEFECT actually holds up against SOURCE and TR
 rewrite of your own - fully and correctly resolves it. You never write a correction here, only judge
 one someone else already wrote.
 
+Sometimes CLAIMED DEFECT is NONE and PROPOSED CORRECTION says "(none - the first review found no
+defect to fix)" - the first review found TRANSLATION already fine. You are NOT bound by that verdict:
+judge TRANSLATION against SOURCE fresh, on your own, as if reviewing it for the first time. If you
+agree nothing is wrong, answer DEFECT: NONE. If you find a real, nameable defect the first review
+missed, answer with that category's token instead - you are only confirming whether a defect EXISTS
+in this case, never drafting the fix for it (that happens elsewhere).
+
 DEFECT CATEGORIES (for reference - CLAIMED DEFECT names exactly one of these):
 - GARBLED_NUMBER: a garbled, dropped, or duplicated number or clause.
 - DOMAIN_TERM: a mistranslated domain term that breaks the setting.

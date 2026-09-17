@@ -89,26 +89,6 @@ public class GameHooks
     public Func<TextFileToSplit, int?, string, bool>? CustomQcExclusionRule { get; set; }
 
     /// <summary>
-    /// Invoked once per split at the top of <see cref="Workflow.TranslationWorkflow.UpdateSplit"/>,
-    /// before any LLM-bound path (including <see cref="TryHandleDynamicStringExclusion"/> path) is
-    /// reached. Lets a game-specific project supply a fixed, hand-written translation for a raw
-    /// string that is structurally unsafe to ever send to an LLM or a QC model at all - e.g. a
-    /// template where a color tag's opening half is a runtime-computed placeholder (game code fills
-    /// in "&lt;color=...&gt;" for "{0}") but its closing "&lt;/color&gt;" is literal text in the raw
-    /// string. No mechanical rule can verify an LLM's rewritten sentence keeps that placeholder in
-    /// the right position relative to the literal close (word-order changes are otherwise a normal,
-    /// correct part of translation), so the only reliable fix is to never let the LLM touch it.
-    /// Receives (textFile, column, raw) - column has the same semantics as
-    /// <see cref="CustomQcExclusionRule"/>. Return the exact translated replacement text to use
-    /// unconditionally, or null to fall through to normal translation. When non-null, the caller
-    /// also sets <see cref="Support.TranslationSplit.SafeToTranslate"/> to false, which - as a side
-    /// effect of the same flag <see cref="Workflow.QualityReviewWorkflow"/> already checks - also
-    /// keeps the split out of the QC pass, with nothing further to wire up. Left null (no-op) unless
-    /// a caller opts in.
-    /// </summary>
-    public Func<TextFileToSplit, int?, string, string?>? CustomTranslationExclusionRule { get; set; }
-
-    /// <summary>
     /// Invoked once per packaged cell/line, at the end of <see cref="Utility.PackagingTextFixups.Apply"/>
     /// - i.e. after every standard, game-agnostic packaging-time fixup (hyphen-undo, literal-"\n"
     /// undo) has already run. Lets a game-specific project add its own deterministic packaging-time

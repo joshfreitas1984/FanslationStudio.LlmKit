@@ -160,7 +160,7 @@ time on the translated side). Fixed by using `split.Text` (the untouched raw) in
 `split.Translated` is already final text, not a still-in-flight LLM result that needs the same
 mangling applied to it for a fair comparison.
 
-## Postmortem: dropped closing tag in a runtime-color-placeholder template, and the new `CustomTranslationExclusionRule` hook (fixed 2026-09-17)
+## Postmortem: dropped closing tag in a runtime-color-placeholder template (fixed 2026-09-17)
 
 Reported symptom (from `DragonHierOverLlm`): the Enhance-UI raw string
 `"提升强化等级至+{6}\n{0}需要建筑等级 {1}级</color>\n{2}需要{5}技能 {3}</color>\n{4}"` shipped with its
@@ -193,26 +193,26 @@ close — ordinary, correct word-order changes during translation are indistingu
 corruption that silently detaches the color span. Fixing the tag-count blind spot (multiset instead
 of `SetEquals`) would catch a *dropped* tag but not a *misplaced* one.
 
-**Fix:** added `GameHooks.CustomTranslationExclusionRule` (`Configuration/GameHooks.cs`) — a
-`Func<TextFileToSplit, int?, string, string?>` checked once per split at the very top of
-`TranslationWorkflow.UpdateSplit` (`Workflow/TranslationWorkflow.cs`, in the new
-`TryHandleCustomTranslationExclusion`, before any LLM-bound path including
-`TryHandleDynamicStringExclusion`). When a downstream project's hook returns a non-null override for
-a raw string, the split is set `SafeToTranslate = false` and `Translated` is assigned the override
-text directly — the raw string never reaches the LLM or (as a side effect of the same
-`SafeToTranslate` flag `QualityReviewWorkflow.cs:656` already checks) the QC pass again. This is the
-first hook that can *supply* a replacement translation, not just validate or exclude one after the
-fact — modeled directly on `CustomQcExclusionRule`'s "check before any LLM call, once per split"
-shape, but for the translation pass rather than only QC.
+**First attempt (reverted): a new `GameHooks.CustomTranslationExclusionRule` hook.** Tried adding a
+`Func<TextFileToSplit, int?, string, string?>` checked once per split at the top of
+`TranslationWorkflow.UpdateSplit`, before any LLM-bound path — the idea being to supply a manual
+override and set `SafeToTranslate = false` before the raw string ever reached the LLM or QC, keeping
+both cost and corruption risk at zero. This turned out to be the wrong layer: `UpdateSplit` runs
+per-`TranslationSplit`, but `CompoundFieldSplitter` decomposes a raw string like the one above into
+multiple fragments plus a `templates:` reconstruction list — no single split's `Text` ever equals
+the *whole* raw template with its `{n}` tokens intact. A hook keyed on the full raw string therefore
+never matched anything and silently never fired (confirmed: a full `ApplyAllRulesToCurrentTranslation`
+run reported "Writing 0 records" for every file). Reverted entirely (`GameHooks.cs`,
+`TranslationWorkflow.cs`) rather than left in place unused, since nothing in this repo or any
+downstream repo needs a per-fragment translation-supplying hook right now.
 
-**Downstream usage:** `DragonHierOverLlm`'s `Tests/GameFileHandling.cs` registers
-`CustomTranslationExclusionRule = GetDanglingColorTagOverride`, backed by a 44-entry
-`DanglingColorTagOverrides` dictionary covering every raw string in `Files/Converted/dynamicStrings*.yaml`
-that has a `{n}` placeholder plus a literal closing tag with no matching literal opening tag in the
-same raw text (found by scanning raw text only — `Files/Converted/dumpedPrefabText*.yaml` had zero
-matches). Each override preserves the exact `{n}` order/position and literal-tag counts from its raw
-key (script-verified, not just reviewed by eye). See that repo's own docs for the full candidate list
-and the scan methodology.
+**Actual fix:** these raw strings need a **whole-raw → whole-result** override, applied *after*
+`CompoundFieldSplitter.Reconstruct` has already glued the translated fragments back together — the
+same shape as the existing packaging-time `DynamicStringResultOverrides` mechanism (see
+`DragonHierOverLlm/Tests/TranslationPackaging.cs`), which was built for an adjacent problem
+(fragments reconstructing without natural connective words) but operates at exactly the right level
+for this one too. `DragonHierOverLlm` added all 44 affected raw strings there instead. See that
+repo's own docs for the full candidate list and the scan methodology used to find them.
 
 ## Testing conventions
 

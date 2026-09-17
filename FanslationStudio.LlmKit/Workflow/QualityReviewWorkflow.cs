@@ -112,6 +112,10 @@ public static class QualityReviewWorkflow
     /// <see cref="QcDefectCategory.None"/> (nothing to verify or repair).</summary>
     private static string? DefectCategoryToToken(QcDefectCategory category) => category switch
     {
+        // Only ever sent to call 2 (never call 3 - GetCorrectionRepairAsync is never invoked with a
+        // confirmed None) via GetVerificationVerdictAsync when QualityReviewConfig.VerifyNoDefectClaims
+        // sends a call-1 NONE through for a genuine independent second opinion.
+        QcDefectCategory.None => "NONE",
         QcDefectCategory.GarbledNumber => "GARBLED_NUMBER",
         QcDefectCategory.DomainTerm => "DOMAIN_TERM",
         QcDefectCategory.LostIdiom => "LOST_IDIOM",
@@ -1063,13 +1067,16 @@ public static class QualityReviewWorkflow
     /// trusting call 3's own confidence in its own rewrite either).
     ///
     /// <paramref name="correctedRaw"/> null means call 1 said <c>DEFECT: NONE</c> - fixed
-    /// <c>Score = 100</c>, no correction, no call 2 ever, regardless of config (matches the existing
-    /// "nothing to fix" convention used elsewhere - see <see cref="ReviewColumnAsync"/>'s
-    /// <c>correctedResult == effectiveTranslated</c> branch). Otherwise: if
-    /// <see cref="QualityReviewConfig.TwoStageVerificationEnabled"/> is off, or either the
-    /// verification or repair prompt is missing for this model, the correction is still accepted
-    /// (same validation gate applies downstream either way) but with <c>Score = null</c> - there is
-    /// no fallback self-score to use since call 1 was never asked to produce one, so
+    /// <c>Score = 100</c>, no correction, no call 2, UNLESS <see cref="QualityReviewConfig.VerifyNoDefectClaims"/>
+    /// is on, in which case call 2 gets one independent look anyway before accepting: if it agrees
+    /// NONE, same fixed-100 accept; if it confirms a real defect call 1 missed entirely, call 3
+    /// drafts the FIRST candidate for it (there's no prior attempt yet) and that candidate enters the
+    /// SAME re-score/repair loop below as any normal correction - see
+    /// <see cref="QualityReviewConfig.VerifyNoDefectClaims"/>'s doc comment. Otherwise (call 1 DID
+    /// draft a correction): if <see cref="QualityReviewConfig.TwoStageVerificationEnabled"/> is off,
+    /// or either the verification or repair prompt is missing for this model, the correction is still
+    /// accepted (same validation gate applies downstream either way) but with <c>Score = null</c> -
+    /// there is no fallback self-score to use since call 1 was never asked to produce one, so
     /// <see cref="ReviewColumnAsync"/> always flags it for human review instead.
     /// </summary>
     private static async Task<LlmVerdict> FinalizeVerdictAsync(
@@ -1084,6 +1091,9 @@ public static class QualityReviewWorkflow
         string? correctedRaw,
         QcTimingStats? timing = null)
     {
+        string candidate;
+        QcDefectCategory currentDefect;
+
         if (correctedRaw == null)
         {
             // DEFECT: UNCERTAIN is not "nothing's wrong" - preserve it (and leave Score null, the
@@ -1093,16 +1103,54 @@ public static class QualityReviewWorkflow
             if (defect == QcDefectCategory.Uncertain)
                 return new LlmVerdict(true, null, null, QcDefectCategory.Uncertain);
 
-            return new LlmVerdict(true, 100, null, QcDefectCategory.None);
+            // VerifyNoDefectClaims: send call 1's NONE through call 2 anyway, as a genuine
+            // independent second opinion rather than accepting it outright - call 2 has no memory of
+            // call 1's own reasoning and never drafted this translation itself, so it isn't subject
+            // to the same self-consistency blind spot (see QualityReviewConfig.VerifyNoDefectClaims's
+            // doc comment for the tag-seam miss that motivated this).
+            if (!config.QualityReview.VerifyNoDefectClaims
+                || !modelConfig.Prompts.ContainsKey("BaseQualityReviewVerificationPrompt"))
+                return new LlmVerdict(true, 100, null, QcDefectCategory.None);
+
+            var secondOpinion = await GetVerificationVerdictAsync(config, modelConfig, client, rawText, maskedRaw, maskedTranslated, glossaryPrompt, QcDefectCategory.None, null, timing);
+
+            if (secondOpinion is not { Success: true, Defect: not QcDefectCategory.None })
+                // Call 2 failed to produce a trustworthy verdict, or agrees nothing is wrong -
+                // either way, fall through to the same fixed-100/None accept every other config gets.
+                return new LlmVerdict(true, 100, null, QcDefectCategory.None);
+
+            // Call 2 disagrees - a real defect signal from an independent model judgment, not a
+            // mechanical pattern match. Call 2 never drafts text, so hand the confirmed defect to
+            // call 3 to draft the FIRST candidate for it (never invoked with a real "previous
+            // attempt" here - see GetCorrectionRepairAsync's doc comment), then fall into the same
+            // re-score/repair loop below as an ordinary call-1 correction.
+            if (!modelConfig.Prompts.ContainsKey("BaseQualityReviewCorrectionRepairPrompt"))
+                // No repair prompt for this model - nothing can draft a candidate. Treat like a
+                // below-threshold score with no correction: retried via the normal retry budget (a
+                // fresh call-1 attempt next run might draft one), permanently flagged if retries run
+                // out (see ReviewColumnAsync's TryRetryForLowScore call for the no-correction path).
+                return new LlmVerdict(true, 0, null, secondOpinion.Defect);
+
+            var initialFix = await GetCorrectionRepairAsync(config, modelConfig, client, rawText, maskedRaw, maskedTranslated, glossaryPrompt, secondOpinion.Defect, null, timing);
+            if (initialFix == null)
+                // Call 3 couldn't draft anything either - same "nothing to validate, retry the
+                // normal way" fallback as the missing-prompt case above.
+                return new LlmVerdict(true, 0, null, secondOpinion.Defect);
+
+            candidate = initialFix;
+            currentDefect = secondOpinion.Defect;
+        }
+        else
+        {
+            if (!config.QualityReview.TwoStageVerificationEnabled
+                || !modelConfig.Prompts.ContainsKey("BaseQualityReviewVerificationPrompt")
+                || !modelConfig.Prompts.ContainsKey("BaseQualityReviewCorrectionRepairPrompt"))
+                return new LlmVerdict(true, null, correctedRaw, defect);
+
+            candidate = correctedRaw;
+            currentDefect = defect;
         }
 
-        if (!config.QualityReview.TwoStageVerificationEnabled
-            || !modelConfig.Prompts.ContainsKey("BaseQualityReviewVerificationPrompt")
-            || !modelConfig.Prompts.ContainsKey("BaseQualityReviewCorrectionRepairPrompt"))
-            return new LlmVerdict(true, null, correctedRaw, defect);
-
-        var candidate = correctedRaw;
-        var currentDefect = defect;
         var maxRepairAttempts = Math.Max(0, config.QualityReview.MaxScoreRepairIterations);
 
         for (var repairAttempt = 0; ; repairAttempt++)
@@ -1149,6 +1197,11 @@ public static class QualityReviewWorkflow
     /// doesn't parse, or `DEFECT` is unparseable - <see cref="FinalizeVerdictAsync"/> treats any of
     /// these as "can't produce a trustworthy verdict for this column at all this run," since there is
     /// no call-1 self-score left to fall back to.
+    ///
+    /// <paramref name="proposedCorrectionMasked"/> is null in exactly one case: <see
+    /// cref="Configuration.QualityReviewConfig.VerifyNoDefectClaims"/> sending a call-1 <c>DEFECT:
+    /// NONE</c> through for an independent second opinion, where there is no candidate to grade -
+    /// call 2 instead judges TRANSLATION itself fresh, still without drafting a fix if it disagrees.
     /// </summary>
     internal static async Task<ScoreVerdict> GetVerificationVerdictAsync(
         LlmConfig config,
@@ -1159,7 +1212,7 @@ public static class QualityReviewWorkflow
         string maskedTranslated,
         string glossaryPrompt,
         QcDefectCategory claimedDefect,
-        string proposedCorrectionMasked,
+        string? proposedCorrectionMasked,
         QcTimingStats? timing = null)
     {
         var claimedToken = DefectCategoryToToken(claimedDefect);
@@ -1170,7 +1223,12 @@ public static class QualityReviewWorkflow
         userPrompt.AppendLine($"SOURCE (Chinese): {maskedRaw}");
         userPrompt.AppendLine($"CURRENT TRANSLATION (English): {maskedTranslated}");
         userPrompt.AppendLine($"CLAIMED DEFECT: {claimedToken}");
-        userPrompt.AppendLine($"PROPOSED CORRECTION: {proposedCorrectionMasked}");
+        // Null only when QualityReviewConfig.VerifyNoDefectClaims sent a call-1 NONE through for an
+        // independent second opinion - there is no candidate to grade in that case, only a judgment
+        // of whether TRANSLATION itself is really clean.
+        userPrompt.AppendLine(proposedCorrectionMasked == null
+            ? "PROPOSED CORRECTION: (none - the first review found no defect to fix)"
+            : $"PROPOSED CORRECTION: {proposedCorrectionMasked}");
         if (!string.IsNullOrEmpty(glossaryPrompt))
         {
             userPrompt.AppendLine("Relevant glossary terms (must be preserved if they appear in SOURCE):");
@@ -1332,6 +1390,11 @@ public static class QualityReviewWorkflow
     /// response, leaked protocol text, or an explicit <c>CORRECTED: NONE</c> (call 3 couldn't improve
     /// on the previous attempt). Any of these mean the same thing to the caller: stop repairing,
     /// accept the last successfully-scored candidate.
+    ///
+    /// <paramref name="previousAttemptMasked"/> is null in exactly one case: <see
+    /// cref="Configuration.QualityReviewConfig.VerifyNoDefectClaims"/> confirmed a defect call 1
+    /// completely missed (never drafted any correction at all) - there is no prior attempt to
+    /// improve on yet, so this call drafts the FIRST one instead.
     /// </summary>
     internal static async Task<string?> GetCorrectionRepairAsync(
         LlmConfig config,
@@ -1342,7 +1405,7 @@ public static class QualityReviewWorkflow
         string maskedTranslated,
         string glossaryPrompt,
         QcDefectCategory confirmedDefect,
-        string previousAttemptMasked,
+        string? previousAttemptMasked,
         QcTimingStats? timing = null)
     {
         var defectToken = DefectCategoryToToken(confirmedDefect);
@@ -1353,7 +1416,9 @@ public static class QualityReviewWorkflow
         userPrompt.AppendLine($"SOURCE (Chinese): {maskedRaw}");
         userPrompt.AppendLine($"CURRENT TRANSLATION (English): {maskedTranslated}");
         userPrompt.AppendLine($"CONFIRMED DEFECT: {defectToken}");
-        userPrompt.AppendLine($"PREVIOUS ATTEMPT: {previousAttemptMasked}");
+        userPrompt.AppendLine(previousAttemptMasked == null
+            ? "PREVIOUS ATTEMPT: (none - the first review missed this defect entirely, so this is the first attempted correction)"
+            : $"PREVIOUS ATTEMPT: {previousAttemptMasked}");
         if (!string.IsNullOrEmpty(glossaryPrompt))
         {
             userPrompt.AppendLine("Relevant glossary terms (must be preserved if they appear in SOURCE):");
