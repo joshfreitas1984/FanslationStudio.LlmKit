@@ -741,6 +741,20 @@ public static class QualityReviewWorkflow
             // separate step (ApplyRulesToCurrentQcTranslated) that only runs as part of
             // RunBruteForce - a plain RunAsync call must leave QcStatus just as accurate as a
             // brute-forced one, not dependent on which caller happened to invoke this.
+            //
+            // NOTE: a mechanical override that force-retried/flagged a DEFECT: NONE verdict whenever
+            // the effective text matched a tag-seam regex (HasUnresolvedTagSeam) was tried and
+            // reverted here - it can't distinguish a genuinely dangling fragment (the defect it was
+            // meant to catch) from two complete, correctly-punctuated sentences that just happen to
+            // be glued together with no space (completely normal, not a defect) - that distinction
+            // needs actual grammatical understanding, which a regex can't provide. It also never
+            // produced a real fix even for a genuine miss (the model just repeats DEFECT: NONE on
+            // retry and the column ends up flagged with QcTranslated still empty, same as if nothing
+            // had been done), while forcing false retries/flags on fine translations elsewhere. A
+            // genuine model miss on this defect shape is inherent LLM noise (see
+            // docs/quality-review-pass-architecture.md's postmortems) - triage it like any other
+            // low-precision category (WriteTriageReportAsync/hand-review), don't try to force-correct
+            // it in code.
             if (TryRetryForLowScore(config, anchor, effectiveTranslated, verdict.Score ?? 100, item.File.TextFile))
                 return QcOutcome.Passed;
 
@@ -1977,6 +1991,96 @@ public static class QualityReviewWorkflow
                         continue;
 
                     Console.WriteLine($"Quality review cleanup: '{textFile.Path}' split {anchor.Split} defect {anchor.QcDefectCategory} not auto-accepted - resetting for re-review.");
+                    anchor.ResetQcState();
+                    resetCount++;
+                }
+            }
+
+            if (resetCount > 0)
+                await FileHelper.WriteAllTextWithRetryAsync(outputFile, serializer.Serialize(fileLines));
+        });
+    }
+
+    /// <summary>
+    /// Half of the tag-seam signature (see <see cref="TagSeamCapitalAfterRegex"/> for the other half,
+    /// and <see cref="ResetTagSeamAffectedQcState"/> for why both must match): a sentence-terminal
+    /// punctuation mark directly touching a tag opener with no whitespace between them, e.g. the
+    /// "e.&lt;" in "...here.&lt;b&gt;#PosText#&lt;/b&gt;Inside". Normal prose always has a space (or
+    /// nothing at all) between a sentence-ending mark and a following inline tag - this glued-together
+    /// shape only happens when two independently-translated fragments were stitched with a tag between
+    /// them and nothing else.
+    /// </summary>
+    private static readonly Regex TagSeamPunctBeforeRegex = new(@"[.!?]<", RegexOptions.Compiled);
+
+    /// <summary>
+    /// Other half of the tag-seam signature (see <see cref="TagSeamPunctBeforeRegex"/>): a tag closer
+    /// directly touching a capitalized word with no whitespace between them, e.g. the "&gt;I" in
+    /// "...&lt;/b&gt;Inside". On its own this is too common a false positive (an opening tag directly
+    /// wrapping its own capitalized content, e.g. "&lt;b&gt;Wan&lt;/b&gt;", is completely normal) -
+    /// <see cref="ResetTagSeamAffectedQcState"/> only treats a column as a tag-seam candidate when
+    /// BOTH this and <see cref="TagSeamPunctBeforeRegex"/> match somewhere in the same effective text,
+    /// which the "Wan" example alone never satisfies.
+    /// </summary>
+    private static readonly Regex TagSeamCapitalAfterRegex = new(@">[A-Z]", RegexOptions.Compiled);
+
+    /// <summary>
+    /// True if <paramref name="effectiveTranslated"/> matches BOTH <see cref="TagSeamPunctBeforeRegex"/>
+    /// and <see cref="TagSeamCapitalAfterRegex"/> - the full tag-seam signature. Used as a mechanical
+    /// override in <see cref="ReviewColumnAsync"/>'s no-correction path (a model returning DEFECT: NONE
+    /// for a genuine instance of this shape can't be trusted on wording alone - see that call site's
+    /// comment) and by <see cref="ResetTagSeamAffectedQcState"/> to find candidates for re-review.
+    /// </summary>
+    private static bool HasUnresolvedTagSeam(string effectiveTranslated) =>
+        TagSeamPunctBeforeRegex.IsMatch(effectiveTranslated) && TagSeamCapitalAfterRegex.IsMatch(effectiveTranslated);
+
+    /// <summary>
+    /// Resets every templated column CURRENTLY at <see cref="QcStatus.Passed"/> (never one already
+    /// <see cref="QcStatus.Corrected"/>/<see cref="QcStatus.FailedValidation"/>) whose effective
+    /// (reconstructed) translated text matches <see cref="HasUnresolvedTagSeam"/> back to
+    /// <see cref="QcStatus.NotReviewed"/> for a fresh review. Deliberately excludes
+    /// <see cref="QcStatus.Corrected"/> columns even though the scan (built from each fragment's raw,
+    /// pre-QC <see cref="TranslationSplit.Translated"/> via <c>ComputeEffectiveTranslatedText</c>)
+    /// would match them too - <c>Translated</c> itself never changes once a column is QC-corrected, so
+    /// EVERY <c>Corrected</c> column that ever fixed a tag seam would match this scan forever,
+    /// pointlessly re-rolling an already-accepted, already-validated fix on every run for nothing
+    /// (worse: risking losing it to model non-determinism on the fresh review - see the
+    /// /investigate-qc-issue writeup that found several genuinely-fixed PlotData.csv lines reset this
+    /// way before this exclusion was added). Only a <c>Passed</c> column - the shape this whole
+    /// mechanism exists to catch, where the model silently missed the defect entirely - has anything to
+    /// gain from a fresh look. `ReviewColumnAsync`'s own <see cref="HasUnresolvedTagSeam"/> guardrail
+    /// (above) is now the primary defense for new reviews going forward; this reset is only for
+    /// already-recorded `Passed` verdicts from before that guardrail existed. Cheap: a plain regex scan
+    /// against the already-reconstructed effective text, no LLM call of its own, same shape as
+    /// <see cref="ResetStutterAffectedQcState"/>.
+    /// </summary>
+    public static async Task ResetTagSeamAffectedQcState(string workingDirectory, TextFileToSplit[] textFiles)
+    {
+        var serializer = YamlHelper.CreateSerializer();
+
+        await FileIteration.IterateTranslatedFilesInParallelAsync(workingDirectory, textFiles, async (outputFile, textFile, fileLines) =>
+        {
+            var resetCount = 0;
+
+            foreach (var line in fileLines)
+            {
+                foreach (var columnGroup in line.Splits.GroupBy(ColumnKey))
+                {
+                    var fragments = columnGroup.OrderBy(s => s.SubIndex).ToList();
+                    var anchor = fragments.FirstOrDefault(f => f.SubIndex == 0) ?? fragments[0];
+
+                    // Corrected/FailedValidation columns already went through a considered
+                    // verdict - see this method's doc comment for why only Passed (a silent miss)
+                    // is worth resetting here.
+                    if (anchor.QcStatus != QcStatus.Passed)
+                        continue;
+
+                    var template = line.Templates.FirstOrDefault(t => ColumnKey(t) == columnGroup.Key);
+                    var effectiveTranslated = QualityReviewHelpers.ComputeEffectiveTranslatedText(anchor, template, fragments);
+
+                    if (!HasUnresolvedTagSeam(effectiveTranslated))
+                        continue;
+
+                    Console.WriteLine($"Quality review cleanup: '{textFile.Path}' split {anchor.Split} effective text contains a tag seam - resetting for re-review.");
                     anchor.ResetQcState();
                     resetCount++;
                 }

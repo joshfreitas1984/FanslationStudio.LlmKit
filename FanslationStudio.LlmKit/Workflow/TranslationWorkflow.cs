@@ -150,6 +150,9 @@ public static class TranslationWorkflow
         if (!split.SafeToTranslate)
             return false;
 
+        if (TryHandleCustomTranslationExclusion(logLines, split, textFile, config))
+            return true;
+
         if (TryHandleGameObjectReference(split, textFile) is bool gameObjResult)
             return gameObjResult;
 
@@ -235,6 +238,31 @@ public static class TranslationWorkflow
         }
 
         return null;
+    }
+
+    private static bool TryHandleCustomTranslationExclusion(
+        ConcurrentBag<string> logLines,
+        TranslationSplit split,
+        TextFileToSplit textFile,
+        LlmConfig config)
+    {
+        if (config.Hooks?.CustomTranslationExclusionRule == null)
+            return false;
+
+        var overrideResult = config.Hooks.CustomTranslationExclusionRule(textFile, split.Split, split.Text);
+        if (overrideResult == null)
+            return false;
+
+        split.SafeToTranslate = false;
+
+        if (split.Translated != overrideResult)
+        {
+            logLines.Add($"Custom Translation Exclusion {textFile.Path} \n{split.Translated}\n->\n{overrideResult}");
+            split.Translated = overrideResult;
+            split.ResetFlags();
+        }
+
+        return true;
     }
 
     private static bool? TryHandleGameObjectReference(TranslationSplit split, TextFileToSplit textFile)

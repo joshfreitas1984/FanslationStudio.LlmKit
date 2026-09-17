@@ -160,6 +160,60 @@ time on the translated side). Fixed by using `split.Text` (the untouched raw) in
 `split.Translated` is already final text, not a still-in-flight LLM result that needs the same
 mangling applied to it for a fair comparison.
 
+## Postmortem: dropped closing tag in a runtime-color-placeholder template, and the new `CustomTranslationExclusionRule` hook (fixed 2026-09-17)
+
+Reported symptom (from `DragonHierOverLlm`): the Enhance-UI raw string
+`"提升强化等级至+{6}\n{0}需要建筑等级 {1}级</color>\n{2}需要{5}技能 {3}</color>\n{4}"` shipped with its
+first-line color span unclosed. Traced via the game's decompiled `EnhanceUIController.cs` (built
+into `plVar7`, a 7-arg array passed to `String.Format`): `{0}`/`{2}` are **runtime-computed**
+`<color=...>` opening tags (game code picks red/green depending on whether a level requirement is
+met) paired with a **literal** `</color>` baked into the raw template text a few tokens later. QC's
+correction dropped the literal `级</color>` off the end of the first line entirely — confirmed by
+diffing `Files/Converted/dynamicStrings.txt.yaml`'s `qcTranslated` against
+`Files/Mod/dynamicStrings.txt.yaml`'s packaged `result` for that raw string.
+
+**Why the existing validation gate didn't catch it:** `LineValidation.CheckTransalationSuccessful`
+(`LineValidation.cs`) calls `HtmlTagHelpers.ValidateTags`, which extracts each side's tags into a
+`HashSet<string>` and compares via `SetEquals` (`HtmlTagHelpers.cs:14`). A `HashSet` collapses
+repeats — raw had **two** literal `</color>` occurrences, the correction had **one**, and
+`{"</color>"}.SetEquals({"</color>"})` is still `true`. The check verifies tag *presence*, not
+*count*, so a whole occurrence can silently vanish. (`TextFileToSplit.AllowMissingColorTags`
+defaulting to `true` is a separate, deliberate escape hatch for legitimately-dropped color tags
+elsewhere — not the cause here, but worth knowing it exists before tightening this check, since a
+naive stricter rule would be silently neutralized by it for any file/column that sets it.)
+
+**Why a mechanical fix can't fully close this gap:** unlike `ColorTagHelpers.StartsWithHalfColorTag`
+(used in `TranslationService.cs`'s `TranslateSplitAsync` to deterministically split off a **literal**
+`<color=...>` opening tag with no closing tag in the same string, translate only the remainder, and
+reattach the tag untouched), this game's `{0}`/`{2}` placeholders are the **mirror image**: the
+*opening* half is invisible to the pipeline (a runtime value, not literal text) and only the
+*closing* half is literal. No regex/count-based rule run against `raw` can ever know where in a
+freely-reworded English sentence the LLM will have moved the placeholder relative to that literal
+close — ordinary, correct word-order changes during translation are indistinguishable from a
+corruption that silently detaches the color span. Fixing the tag-count blind spot (multiset instead
+of `SetEquals`) would catch a *dropped* tag but not a *misplaced* one.
+
+**Fix:** added `GameHooks.CustomTranslationExclusionRule` (`Configuration/GameHooks.cs`) — a
+`Func<TextFileToSplit, int?, string, string?>` checked once per split at the very top of
+`TranslationWorkflow.UpdateSplit` (`Workflow/TranslationWorkflow.cs`, in the new
+`TryHandleCustomTranslationExclusion`, before any LLM-bound path including
+`TryHandleDynamicStringExclusion`). When a downstream project's hook returns a non-null override for
+a raw string, the split is set `SafeToTranslate = false` and `Translated` is assigned the override
+text directly — the raw string never reaches the LLM or (as a side effect of the same
+`SafeToTranslate` flag `QualityReviewWorkflow.cs:656` already checks) the QC pass again. This is the
+first hook that can *supply* a replacement translation, not just validate or exclude one after the
+fact — modeled directly on `CustomQcExclusionRule`'s "check before any LLM call, once per split"
+shape, but for the translation pass rather than only QC.
+
+**Downstream usage:** `DragonHierOverLlm`'s `Tests/GameFileHandling.cs` registers
+`CustomTranslationExclusionRule = GetDanglingColorTagOverride`, backed by a 44-entry
+`DanglingColorTagOverrides` dictionary covering every raw string in `Files/Converted/dynamicStrings*.yaml`
+that has a `{n}` placeholder plus a literal closing tag with no matching literal opening tag in the
+same raw text (found by scanning raw text only — `Files/Converted/dumpedPrefabText*.yaml` had zero
+matches). Each override preserves the exact `{n}` order/position and literal-tag counts from its raw
+key (script-verified, not just reviewed by eye). See that repo's own docs for the full candidate list
+and the scan methodology.
+
 ## Testing conventions
 
 - Prefer pure, fast unit tests against static utility methods (e.g. `CompoundFieldSplitter`) over

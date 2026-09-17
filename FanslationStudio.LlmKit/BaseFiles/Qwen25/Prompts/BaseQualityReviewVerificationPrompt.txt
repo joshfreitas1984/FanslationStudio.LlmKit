@@ -27,7 +27,11 @@ DEFECT CATEGORIES (for reference - CLAIMED DEFECT names exactly one of these):
   never confirm this claim just because one form was used instead of the other; that is a style
   preference, not a defect.
 - HARD_TO_PARSE_SEAM: a stitched-fragment seam that is genuinely hard to parse, ambiguous, or
-  changes meaning - not just less fluent than an alternative.
+  changes meaning - not just less fluent than an alternative. A markup/formatting tag or placeholder
+  (e.g. <b>, </b>, <color=...>) sitting between two fragments is NOT itself a sentence boundary - a
+  sentence-terminal mark (.!?) immediately before the tag followed by a capitalized word immediately
+  after it (e.g. "...here.<b>#PosText#</b>Inside") is a genuine instance of this category, not a
+  stylistic quibble; do not answer NONE for it just because the tag is preserved correctly.
 - OTHER_NAMED_DEFECT: something else concrete and nameable. Never covers replacing an already-
   translated proper noun/title with a Pinyin transliteration - answer NONE if CLAIMED DEFECT is
   OTHER_NAMED_DEFECT (or any other category) but PROPOSED CORRECTION does this; a translated name is

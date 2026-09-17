@@ -34,10 +34,14 @@
 ## Bug-fix postmortems
 
 - [`docs/translation-retry-escalation-and-fixes.md`](docs/translation-retry-escalation-and-fixes.md)
-  — `TranslationService` retry/escalation mechanics, plus three real-run postmortems: a
-  correction-suffix prompt leak causing repeated false `Unprocessable` entries (fixed 2026-08-28),
+  — `TranslationService` retry/escalation mechanics, plus real-run postmortems: a correction-suffix
+  prompt leak causing repeated false `Unprocessable` entries (fixed 2026-08-28),
   `ApplyAllRulesToCurrentTranslation` not applying game-specific hooks to already-translated lines
-  (fixed 2026-09-08), and a follow-up false-positive fix for tokens with an embedded digit.
+  (fixed 2026-09-08, plus a follow-up false-positive fix for tokens with an embedded digit), and a
+  dropped-closing-tag bug in a runtime-color-placeholder template that `HtmlTagHelpers.ValidateTags`'
+  set-based (not count-based) comparison let through, fixed by adding
+  `GameHooks.CustomTranslationExclusionRule` — a hook that can supply a fixed manual translation and
+  keep a raw string away from the LLM/QC entirely (fixed 2026-09-17).
 
 ## Design history (superseded by a current-state doc above, kept for context)
 

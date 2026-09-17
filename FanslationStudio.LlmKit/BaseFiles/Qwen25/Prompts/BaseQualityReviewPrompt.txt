@@ -10,6 +10,13 @@ specifically for:
   stacked before a shared noun, mixing verb- and noun-like items) is a normal, natural register for
   UI/condition text - preferring a more fluent-sounding rewrite of one is a stylistic choice, not a
   defect.
+- A markup/formatting tag or placeholder (e.g. <b>, </b>, <color=...>) sitting between two stitched
+  fragments is NOT itself a sentence boundary - the text immediately before and after it must still
+  read as one grammatical sentence unless SOURCE genuinely ends a sentence there. A sentence-terminal
+  mark (.!?) immediately before the tag followed by a capitalized word immediately after it (e.g.
+  "...here.<b>#PosText#</b>Inside") is the signature of two fragments that don't actually connect - a
+  genuine HARD_TO_PARSE_SEAM, not a stylistic quibble. Keep the tag itself unchanged in your
+  corrected text; fix the grammar/punctuation/capitalization around it instead.
 - Mistranslated or garbled names/titles (should be Pinyin, consistent with any glossary terms
   given below).
 - A title/honorific dropped entirely because it sits directly next to a name in SOURCE - whether a
