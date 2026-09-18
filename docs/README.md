@@ -71,12 +71,13 @@ and [`.github/copilot-instructions.md`](../.github/copilot-instructions.md).
 
 | Topic | File |
 | --- | --- |
+| Create and run a new downstream translation project | [`features/translation-project-setup/translation-project-setup.md`](features/translation-project-setup/translation-project-setup.md) |
 | Full current-state architecture reference | [`architecture/ARCHITECTURE.md`](architecture/ARCHITECTURE.md) |
 | `CompoundFieldSplitter` feature behavior | [`features/compound-field-splitting/compound-field-splitting.md`](features/compound-field-splitting/compound-field-splitting.md) |
 | `TranslationService` retry/escalation mechanics and postmortems | [`investigations/translation-retry-escalation-and-fixes.md`](investigations/translation-retry-escalation-and-fixes.md) |
 | Text handling: CSV/JSON, PrefabText, dynamic strings, and LocalTextString | [`features/text-handling/csv-json-workflows.md`](features/text-handling/csv-json-workflows.md), [`features/text-handling/`](features/text-handling/) |
 | Translation pipeline: glossary, workflows, GameHooks, and quality review | [`features/translation-pipeline/`](features/translation-pipeline/) |
-| Post-translation quality review pass — original design plan/history (spans this repo + `DragonHierOverLlm`) | [`../../DragonHierOverLlm/docs/plans/quality-review-pass.md`](../../DragonHierOverLlm/docs/plans/quality-review-pass.md) |
+| Post-translation quality review pass — current behavior and local postmortems | [`features/translation-pipeline/quality-review-pass.md`](features/translation-pipeline/quality-review-pass.md), [`investigations/quality-review-postmortems.md`](investigations/quality-review-postmortems.md) |
 | Packaging workflows and file types | [`features/packaging/packaging-workflows.md`](features/packaging/packaging-workflows.md) |
 | Downstream translation-project structure and sub-project layout | [`architecture/downstream-project-structure/downstream-project-structure.md`](architecture/downstream-project-structure/downstream-project-structure.md) |
 | Downstream translation-project test organization | [`architecture/downstream-project-structure/downstream-test-organization.md`](architecture/downstream-project-structure/downstream-test-organization.md) |
@@ -85,8 +86,8 @@ and [`.github/copilot-instructions.md`](../.github/copilot-instructions.md).
 | Downstream repository docs taxonomy | [`architecture/downstream-project-structure/downstream-repository-docs-taxonomy.md`](architecture/downstream-project-structure/downstream-repository-docs-taxonomy.md) |
 | Architectural decisions | [`architecture/decisions/`](architecture/decisions/) |
 
-See [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) for the full issue index (mirrors this table with
-one-line summaries).
+See [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) for the issue and postmortem index. It is intentionally
+separate from this navigation table and contains one-line pointers only.
 
 ## Where should I look?
 
@@ -95,8 +96,9 @@ one-line summaries).
 | Understand the core `Line`/`Split`/`Template` data model or config loading | [`.github/copilot-instructions.md`](../.github/copilot-instructions.md), [`architecture/ARCHITECTURE.md`](architecture/ARCHITECTURE.md) |
 | Debug/extend `CompoundFieldSplitter.Decompose`/`Reconstruct` | [`.github/copilot-instructions.md`](../.github/copilot-instructions.md) (current-state rules), [`features/compound-field-splitting/compound-field-splitting.md`](features/compound-field-splitting/compound-field-splitting.md) |
 | Investigate a translation retry/validation/escalation issue | [`investigations/translation-retry-escalation-and-fixes.md`](investigations/translation-retry-escalation-and-fixes.md) |
-| Add or integrate prefab, dynamic, or local-text strings | [`features/text-handling/`](features/text-handling/) |
+| Add or integrate prefab, dynamic, or local-text strings | [`features/text-handling/`](features/text-handling/), [`features/text-handling/dynamic-strings.md`](features/text-handling/dynamic-strings.md), [`features/text-handling/local-text-string.md`](features/text-handling/local-text-string.md) |
 | Configure terminology, workflows, hooks, or quality review | [`features/translation-pipeline/`](features/translation-pipeline/) |
+| Create a new translation project or run the translation workflow | [`features/translation-project-setup/translation-project-setup.md`](features/translation-project-setup/translation-project-setup.md) |
 | Investigate a packaging issue | [`features/packaging/packaging-workflows.md`](features/packaging/packaging-workflows.md) |
-| See how a downstream game project consumes this library | `DragonHierOverLlm/.github/instructions/tests-translation-workflow.instructions.md` (sibling repo) |
+| See how a downstream game project consumes this library | Check the consuming repository's own `AGENTS.md` and `docs/README.md`; this repo documents the shared library contract. |
 | Check/reconcile a downstream translation project's structure | [`architecture/downstream-project-structure/downstream-project-structure.md`](architecture/downstream-project-structure/downstream-project-structure.md) (and its sibling topic docs) |

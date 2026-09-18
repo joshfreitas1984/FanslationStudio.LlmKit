@@ -9,8 +9,7 @@ This skill runs from `FanslationStudio.LlmKit`'s own working directory and creat
 repo** next to it (same convention as `DragonHierOverLlm`, `LegendOfMortalOverLlm`, `WanXiangOverLlm`).
 It gets a project off the ground; it does not write the game-specific dumper/patch logic. The
 baseline layout comes from the canonical downstream translation-project structure documentation —
-don't reinvent it. **`docs/architecture/downstream-project-structure/downstream-project-structure.md`** (and its
-the required baseline is separate `Translate/` and `Tests/` projects; do not
+don't reinvent it. The required baseline is separate `Translate/` and `Tests/` projects; do not
 scaffold a combined tooling/test project. **`docs/architecture/downstream-project-structure/downstream-project-structure.md`** (and its
 `downstream-test-organization.md`/`downstream-config-shape.md`/`downstream-plugin-project-layout.md`/
 `downstream-repository-docs-taxonomy.md`

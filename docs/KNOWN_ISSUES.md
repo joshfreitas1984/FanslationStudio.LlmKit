@@ -1,7 +1,7 @@
 # FanslationStudio.LlmKit — known-issue index
 
 > This file is an **index only**. It is not auto-loaded into agent context (unlike
-> `.github/copilot-instructions.md`, which has `applyTo: "**"`). Detailed investigation narratives
+> `.github/copilot-instructions.md`, which has `applyTo: "**"`).
 > Detailed investigation narratives and postmortems live under `docs/investigations/` — read only
 > the specific document relevant to your current task. When a new issue investigation is written,
 > add a one-line pointer here; keep plans, design history, architecture, and feature documentation
@@ -9,7 +9,7 @@
 
 ## Investigations and postmortems
 
-- [`docs/investigations/translation-retry-escalation-and-fixes.md`](docs/investigations/translation-retry-escalation-and-fixes.md)
+- [`investigations/translation-retry-escalation-and-fixes.md`](investigations/translation-retry-escalation-and-fixes.md)
   — `TranslationService` retry/escalation mechanics, plus real-run postmortems: a correction-suffix
   prompt leak causing repeated false `Unprocessable` entries (fixed 2026-08-28),
   `ApplyAllRulesToCurrentTranslation` not applying game-specific hooks to already-translated lines

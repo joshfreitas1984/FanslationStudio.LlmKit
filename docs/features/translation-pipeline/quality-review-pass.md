@@ -233,7 +233,7 @@ that was deliberately left as Chinese, re-triggering whatever that check does on
 replace-and-recheck cycle that can loop. Omitting the entry instead means no substitution happens at
 all: visually identical to a raw-Chinese entry (the original text is untouched either way), but with
 no re-match risk. See
-`DragonHierOverLlm/docs/investigations/qc-run-startup-crash-investigation-2026-09-15.md` for the real
+the [local quality-review postmortems](../../investigations/quality-review-postmortems.md) for the real
 incident this generalizes from.
 
 **Known limitation** (`DynamicStringWorkflow`): a single-fragment template's "bare label" dictionary

@@ -54,7 +54,7 @@ reconstruction is never written.
 
 Every packaging path applies the same two checks per column, both gated on
 `Utility.QualityReviewHelpers.IsQcReviewFresh` — see
-[`quality-review-pass.md`](quality-review-pass.md#packaging-score-gating--freshness)
+[`../translation-pipeline/quality-review-pass.md`](../translation-pipeline/quality-review-pass.md#packaging-score-gating--freshness)
 for the full mechanism (this section only covers what packaging itself does with the result):
 
 1. If fresh and `QualityReviewHelpers.PassesQcScoreGate(QcQualityScore, QcDefectCategory,
@@ -184,7 +184,7 @@ JSON-field entry with no column context.
 
 After the standard fixups, `Apply` invokes `config.Hooks.CustomPackagingFixup` (`Func<TextFileToSplit?,
 int?, string, string, string>?`, on `GameHooks` — see
-[`quality-review-pass.md`](quality-review-pass.md) for the sibling
+[`../translation-pipeline/quality-review-pass.md`](../translation-pipeline/quality-review-pass.md) for the sibling
 QC-side hooks on the same `GameHooks` instance) if the consuming project has registered one, passing
 its return value through as the final result. This is the extension point for a game-specific
 packaging-time repair — register it once on `LlmConfig.Hooks` and it runs everywhere packaging

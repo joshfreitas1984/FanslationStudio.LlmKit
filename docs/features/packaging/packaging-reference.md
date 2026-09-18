@@ -3,10 +3,10 @@
 > Current-state feature reference for how translated `Line → Splits → (Templates)` data gets reassembled
 > back into the shape a downstream game actually consumes — describes **what the code does
 > today**, not the design process. For the QC pass that packaging shares a score-gate/freshness
-> mechanism with, see [`quality-review-pass-architecture.md`](quality-review-pass-architecture.md)
+> mechanism with, see [`quality-review-pass-architecture.md`](../quality-review/quality-review-pass-architecture.md)
 > (this file links to it rather than re-explaining QC internals). For the real incident that
 > shaped the current raw-fallback rules, see
-> [`../../DragonHierOverLlm/docs/investigations/qc-run-startup-crash-investigation-2026-09-15.md`](../../DragonHierOverLlm/docs/investigations/qc-run-startup-crash-investigation-2026-09-15.md).
+> the [packaging/QC raw-fallback investigation](../../investigations/packaging-qc-raw-fallback.md).
 
 ## What it is
 
@@ -54,7 +54,7 @@ reconstruction is never written.
 
 Every packaging path applies the same two checks per column, both gated on
 `Utility.QualityReviewHelpers.IsQcReviewFresh` — see
-[`quality-review-pass-architecture.md`](quality-review-pass-architecture.md#packaging-score-gating--freshness)
+[`../quality-review/quality-review-pass-architecture.md`](../quality-review/quality-review-pass-architecture.md#packaging-score-gating--freshness)
 for the full mechanism (this section only covers what packaging itself does with the result):
 
 1. If fresh and `QualityReviewHelpers.PassesQcScoreGate(QcQualityScore, QcDefectCategory,
@@ -182,7 +182,7 @@ JSON-field entry with no column context.
 
 After the standard fixups, `Apply` invokes `config.Hooks.CustomPackagingFixup` (`Func<TextFileToSplit?,
 int?, string, string, string>?`, on `GameHooks` — see
-[`quality-review-pass-architecture.md`](quality-review-pass-architecture.md) for the sibling
+[`../quality-review/quality-review-pass-architecture.md`](../quality-review/quality-review-pass-architecture.md) for the sibling
 QC-side hooks on the same `GameHooks` instance) if the consuming project has registered one, passing
 its return value through as the final result. This is the extension point for a game-specific
 packaging-time repair — register it once on `LlmConfig.Hooks` and it runs everywhere packaging

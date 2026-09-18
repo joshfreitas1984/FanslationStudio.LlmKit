@@ -7,7 +7,7 @@
 ## What this library is
 
 A reusable "over LLM" game-translation kit. It takes structured game text (CSV rows, dynamic
-strings, etc.) from a downstream project (e.g. `DragonHeirOverLlm`, `LegendOfMortalOverLlm`),
+strings, etc.) from a downstream project (e.g. `DragonHierOverLlm`, `LegendOfMortalOverLlm`),
 extracts translatable fragments, sends them to an LLM (local Ollama-style HTTP endpoint or hosted
 API), validates/repairs the result, and reassembles it back into the original file shape.
 

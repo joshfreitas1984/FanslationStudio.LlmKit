@@ -3,9 +3,8 @@
 > Current-state reference for the post-translation quality review (QC) feature — describes **what
 > the code does today**, not the design process. For the original design rationale, the open
 > questions that were resolved along the way, and the model-selection sample-run methodology, see
-> [`../../DragonHierOverLlm/docs/plans/quality-review-pass.md`](../../DragonHierOverLlm/docs/plans/quality-review-pass.md)
-> (that document predates most of this being built and is kept as historical planning context, not as the
-> ongoing technical reference — this file is).
+> the downstream project's own planning history when that repository is available. This file is the
+> maintained technical reference.
 
 ## What it is
 
@@ -206,7 +205,7 @@ Every packaging path — `CsvGameDataWorkflow.PackageAsync`, `JsonGameDataWorkfl
    `CsvGameDataWorkflow`/`JsonGameDataWorkflow` never had this bug; they always fell back to
    `Translated` correctly. The bug shipped raw Chinese UI text — including an age-rating splash
    notice shown on the very first boot screen — into a real build and broke game startup. See
-  `DragonHierOverLlm/docs/investigations/qc-run-startup-crash-investigation-2026-09-15.md` for the full
+  [the local quality-review postmortems](../../investigations/quality-review-postmortems.md) for the full
    diagnosis. Fixed by scoping the score-gate check to only skip the `QcTranslated` shortcut in step
    2 below, never the ordinary fragment/`Translated` reconstruction in step 3.
 2. Else if fresh and `QcTranslated` is non-empty → use it in place of `Translated` (for a templated
@@ -222,7 +221,7 @@ if QC had never touched it — plain pre-QC `Translated` text everywhere, with
 `minAcceptableScore`/`autoAcceptDefectCategories` never consulted, even for columns that already
 have a stored `QcTranslated`/`QcQualityScore` from a prior run. This is the intended way to isolate
 "did QC's correction introduce this defect" from "was it already there before QC touched it" — see
-`DragonHierOverLlm/docs/investigations/qc-run-startup-crash-investigation-2026-09-15.md` for a worked example.
+[the local quality-review postmortems](../../investigations/quality-review-postmortems.md) for a worked example.
 Re-enabling restores the stored Qc data exactly as it was; nothing is deleted or reset by toggling
 this flag.
 
@@ -246,7 +245,7 @@ that was deliberately left as Chinese, re-triggering whatever that check does on
 replace-and-recheck cycle that can loop. Omitting the entry instead means no substitution happens at
 all: visually identical to a raw-Chinese entry (the original text is untouched either way), but with
 no re-match risk. See
-`DragonHierOverLlm/docs/investigations/qc-run-startup-crash-investigation-2026-09-15.md` for the real
+[the local quality-review postmortems](../../investigations/quality-review-postmortems.md) for the real
 incident this generalizes from.
 
 **Known limitation** (`DynamicStringWorkflow`): a single-fragment template's "bare label" dictionary

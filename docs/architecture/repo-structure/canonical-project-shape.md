@@ -21,10 +21,10 @@ This is an index. The detailed shape lives in four sibling docs, one per researc
 
 | Area | Doc |
 | --- | --- |
-| Test file organization, naming, and numbering conventions | [`canonical-test-organization.md`](canonical-test-organization.md) |
-| `Config.yaml` structure | [`canonical-config-shape.md`](canonical-config-shape.md) |
-| BepInEx plugin project layout (IL2CPP vs. Mono) | [`canonical-plugin-project-layout.md`](canonical-plugin-project-layout.md) |
-| Root-level docs taxonomy (`AGENTS.md`, `CLAUDE.md`, `docs/README.md`, `docs/KNOWN_ISSUES.md`) | [`canonical-repo-docs-taxonomy.md`](canonical-repo-docs-taxonomy.md) |
+| Test file organization, naming, and numbering conventions | [`../downstream-project-structure/downstream-test-organization.md`](../downstream-project-structure/downstream-test-organization.md) |
+| `Config.yaml` structure | [`../downstream-project-structure/downstream-config-shape.md`](../downstream-project-structure/downstream-config-shape.md) |
+| BepInEx plugin project layout (IL2CPP vs. Mono) | [`../downstream-project-structure/downstream-plugin-project-layout.md`](../downstream-project-structure/downstream-plugin-project-layout.md) |
+| Root-level docs taxonomy (`AGENTS.md`, `CLAUDE.md`, `docs/README.md`, `docs/KNOWN_ISSUES.md`) | [`../downstream-project-structure/downstream-repository-docs-taxonomy.md`](../downstream-project-structure/downstream-repository-docs-taxonomy.md) |
 
 ## Sub-project layout pattern
 
@@ -54,7 +54,7 @@ Notes on what's canonical vs. per-repo:
   plus a separate `Tests/` project referencing it. Since DragonHeir is this doc's source of truth,
   **the single-`Tests/`-project shape is the canonical default** for a new repo scaffolded from
   scratch; the two-project split is a documented, acceptable variant (see
-  `canonical-test-organization.md`) — don't treat a repo using the split as drift on that basis
+  `downstream-test-organization.md`) — don't treat a repo using the split as drift on that basis
   alone.
 - `SharedAssembly/` is only needed when the plugin and the tooling project must share compiled
   types across the IL2CPP/.NET boundary. DragonHeir doesn't have one; that's a legitimate

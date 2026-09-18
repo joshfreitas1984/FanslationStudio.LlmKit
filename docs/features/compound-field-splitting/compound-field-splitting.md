@@ -194,7 +194,7 @@ in `CompoundFieldSplitter.cs`) — a placeholder token immediately adjacent to C
 side becomes part of the *same* regex match/fragment as that text, rather than a separate literal
 gap that has to be merged back in after the fact. Omitting `options` (or using
 `CompoundFieldSplitterOptions.Default`) preserves the original game-agnostic behavior where every
-ASCII character between two Chinese runs is a hard boundary. See `DragonHeirOverLlm`'s
+ASCII character between two Chinese runs is a hard boundary. See `DragonHierOverLlm`'s
 `Tests/GameFileHandling.cs` for the concrete `#PlayerName#` configuration for that game.
 
 **A remaining post-pass only handles the sign/digit-restart empty-gap case** (`MergeAdjacentFragments`
