@@ -59,8 +59,8 @@ public class LlmConfig
     /// one" barrier and the "translate one file fully before starting the next" barrier - workers
     /// pull the next unique string to translate as soon as they finish one, across every file in
     /// this run, bounded only by <see cref="MaxConcurrency"/>. Both schedulers are kept side by
-    /// side (see docs/OPTIMIZATION_PLAN.md in the FanslationStudio.LlmKit repo) so real translation
-    /// runs can be compared before fully retiring the old path. Defaults to false (old behavior)
+    /// side so existing projects can compare runs before changing their scheduler choice.
+    /// Defaults to false (old behavior)
     /// until validated on a real run.
     /// </summary>
     public bool UseContinuousWorkerPool { get; set; }

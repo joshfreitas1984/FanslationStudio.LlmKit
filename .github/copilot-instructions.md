@@ -11,16 +11,16 @@ without corrupting structure. Consumed by downstream "over LLM" translation proj
 `DragonHierOverLlm`) via a **project reference**, not a NuGet package.
 
 > See [`docs/README.md`](../docs/README.md) for the full documentation hub, and
-> [`KNOWN_ISSUES.md`](../KNOWN_ISSUES.md) for the design-history/bug-fix index. This file is
+> [`docs/KNOWN_ISSUES.md`](../docs/KNOWN_ISSUES.md) for the issue/postmortem index. This file is
 > deliberately short — current-state operational rules only. Long rationale and investigation
-> narratives belong in a linked `docs/*.md` file, not here.
+> narratives belong in a linked document under `docs/`, not here.
 >
 > **Workflow rule:** after any significant feature or fix, update this file (only if a current-state
-> rule actually changed) and add/extend a `docs/*.md` topic file for the narrative, indexed from
-> `KNOWN_ISSUES.md`. Don't update either as a side effect of an unrelated change.
+> rule actually changed) and add/extend a categorized document under `docs/` for the narrative, indexed from
+> `docs/KNOWN_ISSUES.md`. Don't update either as a side effect of an unrelated change.
 >
 > **Reverse-engineering rule:** when you investigate how existing code here works, write down what
-> you learned in a `docs/*.md` topic file before finishing the task, even if not explicitly asked —
+> you learned in a categorized `docs/` topic file before finishing the task, even if not explicitly asked —
 > findings that only exist in chat history are lost for future sessions. This applies even when
 > investigating LlmKit-internal behavior from a downstream repo's session — record it here, not in
 > the downstream repo's own notes, since this is the sibling repo the logic actually belongs to.
@@ -31,7 +31,7 @@ The `Line → Splits → (Templates)` hierarchy (`Support/TranslationLine.cs`,
 `Support/TranslationSplit.cs`, `Support/FieldTemplate.cs`) is the contract every downstream project
 depends on. **Extend it with new optional fields (safe defaults), never change its shape** — old
 serialized YAML in a downstream repo's `Files/Converted/*.yaml` must keep deserializing correctly.
-See [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) for the full current data model, config
+See [`docs/architecture/ARCHITECTURE.md`](../docs/architecture/ARCHITECTURE.md) for the full current data model, config
 loading, and workflow entry points.
 
 ## Core data model summary (`Support/`)
@@ -54,7 +54,7 @@ loading, and workflow entry points.
 
 Route all row parsing/rebuilding through `CompoundFieldSplitter.ParseCsvRow`/`RebuildCsvRow`
 (never `line.Split(',')`) and cell decomposition through `CompoundFieldSplitter.Decompose`/
-`Reconstruct`. See [`docs/compoundfieldsplitter-design.md`](../docs/compoundfieldsplitter-design.md)
+`Reconstruct`. See [`docs/features/compound-field-splitting/compound-field-splitting.md`](../docs/features/compound-field-splitting/compound-field-splitting.md)
 for the full regex rules (what's absorbed as natural text vs. a fragment boundary) and the
 per-game `CompoundFieldSplitterOptions.PlaceholderPatterns` extension point for dynamic tokens like
 `#PlayerName#`.
@@ -72,13 +72,13 @@ per-game `CompoundFieldSplitterOptions.PlaceholderPatterns` extension point for 
   attempt needs a retry (banned phrases, placeholder/tag preservation, length/format sanity,
   leftover Chinese, per-game `CustomColumnValidator` hook). It only checks structural/format
   correctness, not translation quality/fluency.
-- See [`docs/translation-retry-escalation-and-fixes.md`](../docs/translation-retry-escalation-and-fixes.md)
+- See [`docs/investigations/translation-retry-escalation-and-fixes.md`](../docs/investigations/translation-retry-escalation-and-fixes.md)
   for full retry/escalation mechanics and real-run bug-fix postmortems.
 
 ## `TextFileType.PrefabText` — flat, row/column-less files
 
 Game-agnostic handling for a dumped list of hardcoded UI/prefab text (one string per line, no CSV
-structure). See [`docs/prefabtext-workflow.md`](../docs/prefabtext-workflow.md) for the full
+structure). See [`docs/features/text-handling/prefab-text-workflow.md`](../docs/features/text-handling/prefab-text-workflow.md) for the full
 design; a consuming project's packaging step must filter `PrefabText` entries out of its CSV
 reconstruction loop and call `PrefabTextWorkflow.PackagePrefabTextAsync` instead.
 
@@ -97,7 +97,7 @@ per-model-family like `BaseSystemPrompt`, not a shared/generic file. `GameHooks.
 CustomQcExclusionRule` lets a per-game rule keep a column out of the pass entirely (before any LLM
 call) when it looks like prose but is actually a machine-readable record (e.g. a dialogue-choice
 entry with an embedded function-routing suffix) - see
-[`docs/quality-review-pass-architecture.md`](../docs/quality-review-pass-architecture.md) for the
+[`docs/features/translation-pipeline/quality-review-pass.md`](../docs/features/translation-pipeline/quality-review-pass.md) for the
 full design, including guidance for writing a new exclusion rule.
 
 ## Testing conventions
@@ -124,4 +124,4 @@ full design, including guidance for writing a new exclusion rule.
   rules pass (`Workflow/TranslationWorkflow.cs`'s `ApplyAllRulesToCurrentTranslation`).
 - `GameHooks.CustomQcExclusionRule` — per-game rule deciding whether a column should be kept out of
   the quality review pass entirely, checked once per column before any QC LLM call (see
-  `docs/quality-review-pass-architecture.md`).
+  `docs/features/translation-pipeline/quality-review-pass.md`).

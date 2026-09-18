@@ -366,7 +366,7 @@ public static class TranslationService
     /// <summary>
     /// Entry point used by <see cref="Workflow.TranslationWorkflow"/> - dispatches to whichever
     /// scheduler is selected by <see cref="LlmConfig.UseContinuousWorkerPool"/>. See
-    /// docs/OPTIMIZATION_PLAN.md (FanslationStudio.LlmKit repo) for why both schedulers exist
+    /// Both schedulers remain supported so projects can choose the scheduling behavior appropriate
     /// side by side during the transition.
     /// </summary>
     public static async Task TranslateViaLlmAsync(string workingDirectory, bool forceRetranslation,
@@ -384,9 +384,8 @@ public static class TranslationService
     /// Original scheduler: files are processed one at a time, and within a file, fixed-size
     /// batches (<see cref="LlmConfig.BatchSize"/>) are processed one at a time with a hard
     /// barrier - the next batch cannot start until every unique split in the current batch
-    /// (including any retries/corrections) has finished. See docs/OPTIMIZATION_PLAN.md item #1
-    /// for the tail-latency problem this causes and why <see cref="TranslateViaLlmAsyncPooled"/>
-    /// exists as an alternative.
+    /// (including any retries/corrections) has finished. The pooled scheduler is available when
+    /// to their backend.
     /// </summary>
     public static async Task TranslateViaLlmAsyncBatched(string workingDirectory, bool forceRetranslation,
         TextFileToSplit[] textFiles, GameHooks? hooks = null)
@@ -581,8 +580,7 @@ public static class TranslationService
 
     /// <summary>
     /// Continuous worker-pool scheduler - the alternative to <see cref="TranslateViaLlmAsyncBatched"/>
-    /// described in docs/OPTIMIZATION_PLAN.md item #1 (FanslationStudio.LlmKit repo). Instead of
-    /// "one file at a time, one fixed-size batch at a time with a hard barrier", every unique split
+    /// Instead of "one file at a time, one fixed-size batch at a time with a hard barrier", every unique split
     /// across every file in this run is flattened into a single work list and processed by a fixed
     /// number of concurrent workers (<see cref="LlmConfig.MaxConcurrency"/>) that each pull the next
     /// item as soon as they finish one - a slow item (retry/correction/sub-split) only holds up its

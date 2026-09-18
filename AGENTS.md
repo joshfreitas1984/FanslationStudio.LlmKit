@@ -8,7 +8,8 @@ downstream consuming repos (e.g. `DragonHierOverLlm`).
 ## Start here
 
 - [`docs/README.md`](docs/README.md) is the canonical documentation hub — what this repo is,
-  documentation taxonomy, source-of-truth rules, and a "where should I look?" task table.
+  the `plans`/`investigations`/`features` taxonomy, source-of-truth rules, and a "where should I
+  look?" task table.
 - [`.github/copilot-instructions.md`](.github/copilot-instructions.md) is the current-state source
   of truth for rules and safety invariants (`applyTo: "**"` — this repo has no sub-projects to
   scope by path). Read it before making changes.
@@ -23,17 +24,17 @@ downstream consuming repos (e.g. `DragonHierOverLlm`).
   downstream project depends on. Extend it with new optional fields (safe defaults), never change
   its shape — old serialized YAML in a downstream repo's `Files/Converted/*.yaml` must keep
   deserializing correctly.
-- Do not update instructions files, `KNOWN_ISSUES.md`, or `docs/` topic files as a side effect of a
+- Do not update instructions files, `docs/KNOWN_ISSUES.md`, or `docs/` topic files as a side effect of a
   fix or feature. Only write documentation when explicitly asked to.
 - **Reverse-engineering rule:** when you investigate/reverse-engineer how existing code in this
   repo works, write down what you learned in this repo's own `docs/` (a new or extended topic
-  file, indexed from `KNOWN_ISSUES.md`) before finishing the task, even if not explicitly asked —
+  file, indexed from `docs/KNOWN_ISSUES.md`) before finishing the task, even if not explicitly asked —
   findings that only exist in chat history are lost for future sessions. This applies even when
   you're investigating LlmKit-internal behavior from a downstream repo's session — record it here,
   not in the downstream repo's own notes, since this is the sibling repo the logic actually
   belongs to.
 - Keep auto-loaded instructions files short and operational. Long rationale, design-history, and
-  bug-fix postmortems belong in a linked `docs/*.md` file, not the instructions file itself.
+  bug-fix postmortems belong in a linked document under `docs/`, not the instructions file itself.
 - Prefer fast, pure xUnit unit tests against static utilities (`CompoundFieldSplitter`,
   `TranslationServiceTests`'s `ScriptedLlmHandler`-mocked-HTTP tests) over anything that would
   require a live LLM/Ollama call — this repo's own `Tests/` is a genuine CI-safe regression suite,

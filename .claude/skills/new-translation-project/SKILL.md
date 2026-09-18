@@ -8,9 +8,10 @@ description: Scaffolds a brand-new sibling "OverLlm" game-translation repo (e.g.
 This skill runs from `FanslationStudio.LlmKit`'s own working directory and creates a **new sibling
 repo** next to it (same convention as `DragonHierOverLlm`, `LegendOfMortalOverLlm`, `WanXiangOverLlm`).
 It gets a project off the ground; it does not write the game-specific dumper/patch logic. The
-baseline layout comes from `docs/OPTIMIZATION_PLAN.md`'s "Reuse / setup-time reduction" section —
-don't reinvent it. **`docs/canonical-project-shape.md`** (and its `canonical-test-organization.md`/
-`canonical-config-shape.md`/`canonical-plugin-project-layout.md`/`canonical-repo-docs-taxonomy.md`
+baseline layout comes from the canonical project-shape documentation —
+don't reinvent it. **`docs/features/repo-structure/canonical-project-shape.md`** (and its
+`canonical-test-organization.md`/`canonical-config-shape.md`/`canonical-plugin-project-layout.md`/
+`canonical-repo-docs-taxonomy.md`
 siblings) is now the primary source for what to scaffold — it's a deliberately-maintained target
 shape, not a snapshot of whatever `DragonHierOverLlm`/`WanXiangOverLlm` currently look like. Read
 those docs first; cross-check `WanXiangOverLlm` (Mono) or `DragonHierOverLlm` (IL2CPP) only where
@@ -35,7 +36,7 @@ pin.
    Do not commit yet — later steps still need to populate it.
 
 3. **Scaffold the working-directory data layout** under the new repo's `Files/`, per
-   `docs/canonical-project-shape.md`'s sub-project layout section (cross-check
+   `docs/features/repo-structure/canonical-project-shape.md`'s sub-project layout section (cross-check
    `WanXiangOverLlm/Files/`'s real layout for exact folder names if the doc is ambiguous):
    `Raw/Dumped/` (raw game-dumped files land here),
    `Raw/Export/` (per-file `.yaml` export of the split lines), `Converted/` (translated `.yaml`
@@ -46,7 +47,7 @@ pin.
    is a buildable/browsable project like the templates, with `<Folder Include="Mod\..." />` entries
    for the otherwise-empty output folders so git/VS keep them.
 
-4. **Create a starter `Files/Config.yaml`** based on `docs/canonical-config-shape.md`'s documented
+4. **Create a starter `Files/Config.yaml`** based on `docs/features/repo-structure/canonical-config-shape.md`'s documented
    shape (cross-check `WanXiangOverLlm/Files/Config.yaml` only for a field the doc doesn't pin): a
    `models:` list (at least one entry pointing at whatever local model preset this project
    will use — leave `modelPreset`/`model` as placeholders the user fills in), a `qualityReview:`
@@ -60,7 +61,7 @@ pin.
    `GameTextFiles.cs` with an empty `TextFilesToSplit` array for the user to fill in once dumping
    is wired up.
 
-5. **Scaffold the BepInEx plugin project**, per `docs/canonical-plugin-project-layout.md`'s IL2CPP/
+5. **Scaffold the BepInEx plugin project**, per `docs/features/repo-structure/canonical-plugin-project-layout.md`'s IL2CPP/
    Mono branches (cross-check `WanXiangOverLlm`/`DragonHierOverLlm` only for an exact package
    version pin the doc doesn't specify). Create `<GameName>Plugin/<GameName>Plugin.csproj` (or
    `EnglishPatch/`, following WanXiang's naming) with a `ProjectReference` to LlmKit at the exact
@@ -95,14 +96,14 @@ pin.
    the new repo's own `docs/README.md` as the documentation hub. `CLAUDE.md` stays a thin pointer to
    `AGENTS.md` + `docs/README.md`, same as every existing repo.
 
-7. **Create the new repo's `docs/README.md`**, per `docs/canonical-repo-docs-taxonomy.md`'s file
+7. **Create the new repo's `docs/README.md`**, per `docs/features/repo-structure/canonical-repo-docs-taxonomy.md`'s file
    list/shape (cross-check `WanXiangOverLlm/docs/README.md`'s structure for wording/formatting
    details the taxonomy doc doesn't spell out): repository overview table of sub-projects,
    documentation taxonomy, "Where should I look?" table. From day one, include rows pointing at
    LlmKit's canonical docs so this repo doesn't accumulate the cross-referencing debt older repos
-   had before this restructuring: `../FanslationStudio.LlmKit/docs/quality-review-pass-architecture.md`
-   for QC questions, `../FanslationStudio.LlmKit/docs/packaging-reference.md` for packaging
-   questions, and `../FanslationStudio.LlmKit/docs/canonical-project-shape.md` for future
+   had before this restructuring: `../FanslationStudio.LlmKit/docs/features/translation-pipeline/quality-review-pass.md`
+   for QC questions, `../FanslationStudio.LlmKit/docs/features/packaging/packaging-workflows.md` for packaging
+   questions, and `../FanslationStudio.LlmKit/docs/features/repo-structure/canonical-project-shape.md` for future
    structure reconciliation.
 
 8. **Copy this repo's `.claude/skills/`** (`investigate-qc-issue`, `investigate-packaging-issue`,
