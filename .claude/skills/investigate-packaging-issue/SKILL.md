@@ -45,9 +45,7 @@ workflow actually owns the reported line.
 
 5. **Read `../FanslationStudio.LlmKit/docs/features/packaging/packaging-workflows.md` in full** as the canonical
    current-state reference — it covers the shared `(Passed, QcRejected, RawFallback)` return shape,
-   the templated-vs-plain reconstruction logic, and the raw-fallback rules (including the
-   2026-09-16 startup-crash postmortem where `PrefabTextWorkflow`/`DynamicStringWorkflow` used to
-   collapse a `QcRejected` into a full raw-Chinese `RawFallback`).
+   the templated-vs-plain reconstruction logic, and the raw-fallback rules.
 
 6. **Check the downstream repo's own `docs/KNOWN_ISSUES.md` and topic docs** (e.g. a
    startup-crash or packaging-specific postmortem under `docs/investigations/`) before assuming a newly

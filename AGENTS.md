@@ -24,15 +24,26 @@ downstream consuming repos (e.g. `DragonHierOverLlm`).
   downstream project depends on. Extend it with new optional fields (safe defaults), never change
   its shape — old serialized YAML in a downstream repo's `Files/Converted/*.yaml` must keep
   deserializing correctly.
-- Do not update instructions files, `docs/KNOWN_ISSUES.md`, or `docs/` topic files as a side effect of a
-  fix or feature. Only write documentation when explicitly asked to.
-- **Reverse-engineering rule:** when you investigate/reverse-engineer how existing code in this
-  repo works, write down what you learned in this repo's own `docs/` (a new or extended topic
-  file, indexed from `docs/KNOWN_ISSUES.md`) before finishing the task, even if not explicitly asked —
-  findings that only exist in chat history are lost for future sessions. This applies even when
-  you're investigating LlmKit-internal behavior from a downstream repo's session — record it here,
-  not in the downstream repo's own notes, since this is the sibling repo the logic actually
-  belongs to.
+- Do not update instructions files, `docs/KNOWN_ISSUES.md`, or `docs/` topic files during every
+  exploratory edit or intermediate fix attempt. Inspect existing docs first, then consolidate one
+  documentation update when a substantial task is complete and its behavior is settled. Update
+  instructions only when a current-state rule changes, and update indexes when links or durable topic
+  coverage require it.
+- **Documentation source-of-truth rule:** put feature behavior, architecture, rationale, and history
+  in the appropriate `docs/` topic. Keep source comments focused on local invariants and non-obvious
+  implementation constraints; do not embed design history or extensive rationale inline. Link to the
+  relevant doc when additional context is useful.
+- **Reverse-engineering rule:** when a substantial investigation produces reusable knowledge, capture
+  the settled finding in this repo's own `docs/` (a new or extended topic file, indexed when needed)
+  before finishing the task. Do this once at task completion, not after every read or hypothesis. This
+  applies even when investigating LlmKit-internal behavior from a downstream repo's session — record
+  it here, not in the downstream repo's own notes, since this is the sibling repo the logic belongs to.
+- If it is unclear whether a finding belongs in a feature guide, architecture note, plan, or
+  investigation, ask the user before creating or expanding documentation.
+- **Documentation placement:** put current feature behavior in `docs/features/`, durable design or
+  implementation plans in `docs/plans/`, and investigations, incident analysis, and postmortems in
+  `docs/investigations/`. Keep `docs/KNOWN_ISSUES.md` as an index only; do not put the investigation
+  narrative there.
 - Keep auto-loaded instructions files short and operational. Long rationale, design-history, and
   bug-fix postmortems belong in a linked document under `docs/`, not the instructions file itself.
 - Prefer fast, pure xUnit unit tests against static utilities (`CompoundFieldSplitter`,

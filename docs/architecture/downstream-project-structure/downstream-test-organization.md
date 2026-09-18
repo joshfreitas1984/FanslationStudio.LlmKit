@@ -1,6 +1,6 @@
-# Canonical test file organization
+# Downstream translation-project test organization
 
-Part of the [canonical downstream project shape](canonical-project-shape.md). Source of truth:
+Part of the [downstream translation-project structure](downstream-project-structure.md). Source of truth:
 `DragonHierOverLlm/Tests/*.cs` as of 2026-09-16 (17 `.cs` files, skimmed for class names, `[Fact]`/
 `[Theory]` `DisplayName`s, and one-line purpose — bodies not fully digested except where the
 numbering scheme needed the surrounding comment to make sense).
@@ -84,11 +84,9 @@ a QC test file should check for exactly these two things:
 2. Does it have a `"0."`-numbered fact that brute-forces **both** translation and QC state and
    re-packages, not just a QC-only brute-force?
 
-## Two-project split variant
+## Project boundary
 
-`WanXiangOverLlm`/`LegendOfMortalOverLlm` split the tooling logic into a `Translate/` library
-project with a separate `Tests/` project referencing it, instead of DragonHeir's single combined
-`Tests/` project. The file/class/numbering conventions above apply the same way regardless of which
-project the files physically live in — this doc's numbering guidance is about the `[Fact]`
-`DisplayName`s, not the project split (see `canonical-project-shape.md`'s sub-project layout
-section for that split).
+The required downstream layout keeps reusable workflow/configuration code in `Translate/` and
+numbered pipeline facts plus regression tests in `Tests/`. The file/class/numbering conventions
+above apply to `Tests/`; `Translate/` should not become a second test-runner or a place for numbered
+operational facts.

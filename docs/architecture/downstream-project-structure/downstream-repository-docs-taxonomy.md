@@ -1,6 +1,6 @@
-# Canonical root-level docs taxonomy for a downstream repo
+# Downstream repository documentation taxonomy
 
-Part of the [canonical downstream project shape](canonical-project-shape.md). This mirrors the
+Part of the [downstream translation-project structure](downstream-project-structure.md). This mirrors the
 documentation taxonomy defined in `FanslationStudio.LlmKit/docs/README.md`. Every child repo has
 exactly one root `docs/` folder, with `plans`, `investigations`, and `features` beneath it. This
 doc describes the **file/folder shape** a downstream repo should use; the LlmKit documentation hub

@@ -1,6 +1,6 @@
-# Canonical plugin project layout (IL2CPP vs. Mono)
+# Downstream BepInEx plugin project layout (IL2CPP vs. Mono)
 
-Part of the [canonical downstream project shape](canonical-project-shape.md). A downstream repo's
+Part of the [downstream translation-project structure](downstream-project-structure.md). A downstream repo's
 plugin project shape depends entirely on whether the target game is IL2CPP or Mono-backed Unity —
 this is a hard fork in the `.csproj` shape, not a minor variation. Both branches are documented
 here because a canonical shape doc must cover both, not just DragonHeir's case.
@@ -79,7 +79,7 @@ pattern to copy verbatim:
 - **PostBuild target.** WanXiang's just XCOPYs to `$(GameDir)`. LegendOfMortal's also copies to a
   `$(ReleaseFolder)` staging path and gates the whole target on `Condition="'$(CI)' != 'true'"` so
   it's skipped in CI. Both are reasonable; pick based on whether the new repo needs a release-zip
-  workflow (see `FileOutputWorkflowTests.ZipRelease` pattern in `canonical-test-organization.md`)
+  workflow (see `FileOutputWorkflowTests.ZipRelease` pattern in `downstream-test-organization.md`)
   and/or has a CI pipeline that shouldn't try to XCOPY into a local game install.
 
 ## Deciding which branch a new repo needs

@@ -1,0 +1,227 @@
+# Compound-field splitting
+
+> Use this page when configuring compound-field extraction, interpreting templates, or debugging a
+> fragment/reconstruction result. It describes the current feature contract and integration points.
+
+## Use this feature when
+
+Use `CompoundFieldSplitter` when one source cell contains translatable text mixed with structural
+separators, metadata, numeric values, or game-specific placeholder tokens. Keep ordinary single-value
+cells on the normal one-split path.
+
+The standard flow is:
+
+1. Call `ParseCsvRow`/`Decompose` during export.
+2. Persist the returned fragments and non-trivial `FieldTemplate`.
+3. Translate each fragment through the normal translation workflow.
+4. Call `Reconstruct` during packaging; do not rebuild compound cells with `string.Split`.
+
+For a new game, start with the defaults, inspect representative raw data, then add only verified
+game-specific `AdditionalAbsorbedCharacters` or `PlaceholderPatterns` options.
+
+## Character-run matching
+
+`CompoundFieldSplitter.Decompose(cell)` extracts translatable fragments from a single cell:
+
+- Matches runs via `(?:[+\-](?=[0-9]))?[<CjkTextChars>]+(?:%[<CjkTextChars>]*)*` where
+  `<CjkTextChars>` =
+  `\p{IsCJKUnifiedIdeographs}0-9.\p{IsCJKSymbolsandPunctuation}\p{IsHalfwidthandFullwidthForms}‘’“”…—-[：]`
+  (the trailing `-[：]` is .NET regex character-class subtraction, carving the fullwidth colon
+  `：` back OUT of `\p{IsHalfwidthandFullwidthForms}` — see the colon bullet below), then
+  **discards** any matched run that turns out to be pure digits/sign/percent/punctuation with no
+  actual Chinese character (that's just a number/format string and is left as literal template
+  text, e.g. `1000-12-0-0/1/2/3/4/5`, or `威望+10` where `+10` has nothing following it to glue to).
+- **Digits/decimal points glued directly to Chinese with no separator stay in the same fragment** —
+  e.g. `累计在战斗中亲手击败500人` must decompose to **one** fragment
+  (`累计在战斗中亲手击败500人`), not `{0}500{1}`. Splitting a sentence around an embedded number
+  produces worse LLM translations because the model loses sentence context.
+- **A leading sign (`+`/`-`) directly before a digit is absorbed into the fragment when that
+  number is itself glued onward into more Chinese** — e.g. the `-99` in `占领门派（-99表示自动）`
+  must never be left stranded outside a fragment (i.e. never `{0}（-{1}）` with only `99表示自动`
+  sent to the LLM) — a bare number can be reordered/dropped by the LLM and silently break a
+  sentinel value. The sign is only absorbed when immediately followed by a digit
+  (`(?=[0-9])` lookahead) — it does **not** trigger on non-numeric text.
+- **A trailing `%` is absorbed the same way, and matching then keeps extending through further
+  CJK/digit text after it** — e.g. `同盟区域50%后进入门派/自宅` decomposes to fragments
+  `同盟区域50%后进入门派` and `自宅` (template `{0}/{1}`), not split at the `%`.
+- **Any full-width/CJK punctuation (`，` `。` `？` `！` `；` `、` `（）` `～` etc. — i.e. the
+  Unicode "CJK Symbols and Punctuation" and "Halfwidth and Fullwidth Forms" blocks) is absorbed
+  into the run and never acts as a fragment boundary — EXCEPT the fullwidth colon `：` (U+FF1A),
+  fixed Aug 2026 (see `FullwidthColonActsAsFragmentBoundary` in
+  `Tests/CompoundFieldSplitterTests.cs`): unlike other CJK punctuation, a colon consistently
+  introduces a specific named/enumerated payload (e.g. `正是于巴蜀一带小有名气的门派：仙霞派。`
+  naming a sect, or `<b>仙霞</b>：所有经验获取+5%。` naming an effect) where the text after it
+  benefits from being its own fragment/template boundary (`{0}：{1}`) rather than being folded into
+  one whole-sentence fragment every time — so it's carved out of `CjkTextChars` via character-class
+  subtraction instead of being absorbed like every other CJK punctuation mark. Curly Chinese
+  quotation marks `“` `”` `‘` `’` (`U+201C`/`U+201D`/`U+2018`/`U+2019`) are **also** explicitly
+  absorbed even though they live in the Unicode "General Punctuation" block, not the two CJK blocks
+  above — this game uses them as ordinary in-sentence quotation marks (e.g.
+  `...摊开，都翻到小数字为"一"的那一页）`), and without the explicit addition they acted as a
+  spurious boundary, splitting a quoted word out into its own fragment mid-sentence (a real bug
+  fixed Aug 2026 — see the `CurlyChineseQuotationMarksStayGluedIntoSurroundingSentence` test in
+  `Tests/CompoundFieldSplitterTests.cs`). **Ellipsis `…` (U+2026) and em dash `—` (U+2014), both
+  always doubled in this game's text (`……`/`——`), are absorbed for the same reason** — fixed
+  Sep 2026 after a real bad-translation report: `呃……学武功有很多好处的，...` ("uh...learning
+  martial arts has many benefits, ...") was decomposing into a bare one-character fragment `呃`, a
+  fixed literal `……`, and a second fragment starting mid-sentence, so the LLM only ever saw the
+  stutter and the rest of the sentence as two disconnected halves — see
+  `EllipsisAndEmDashStayGluedIntoSurroundingSentence`/`EmDashInterruptionStaysGluedIntoSurroundingSentence`
+  in `Tests/CompoundFieldSplitterTests.cs`. **Comparison operators `≤`/`≥` (U+2264/U+2265, "Mathematical
+  Operators" block) are absorbed for the same reason**, fixed Sep 2026 after a WanXiangOverLlm QC
+  report: `赌术高手（≥120）解锁，...` was decomposing with `≥` stranded as a literal between the `（`
+  glued onto the preceding fragment and the number+`）`+rest-of-sentence forming a second fragment —
+  splitting one inequality condition into two independently-translated halves — see
+  `ComparisonOperatorsStayGluedIntoSurroundingCondition` in `Tests/CompoundFieldSplitterTests.cs`. An
+  LLM is free to reposition, merge, or drop punctuation
+  during translation (move a clause, reorder a parenthetical, change a comma to a full stop), so
+  splitting a sentence into separate fragments around its own internal punctuation and reassembling
+  with a fixed literal mark in between risks an ungrammatical or nonsensical result. **Plain ASCII
+  punctuation (`,`, `?`, `!`, `-` not before a digit, etc.) is intentionally NOT absorbed** — in
+  this game's data ASCII punctuation only ever appears as a genuine structural/game-syntax
+  separator (list items via `;`, role logic via `&`/`|`, method calls via `--MethodName`), never as
+  natural Chinese sentence punctuation, so it must keep acting as a boundary. Do not extend the
+  absorbed set to ASCII punctuation without first confirming a concrete case where ASCII
+  punctuation is genuinely natural-language (not game syntax).
+- **After matching, adjacent placeholders that end up directly touching in the template with zero
+  characters between them are merged back into one fragment** (see `MergeAdjacentFragments`). This
+  only happens when the leading-sign lookahead restarts a match immediately where the previous one
+  ended (e.g. CJK punctuation absorbed into one run, then a sign+digit immediately following it,
+  such as `占领门派（` + `-99表示自动）`) — there was never a real structural separator there, so
+  the two runs must be sent to the LLM as a single continuous piece of text, not as two fragments
+  each holding half of an unbalanced bracket. This makes `占领门派（-99表示自动）` decompose to a
+  single fragment identical to the whole cell (template `{0}`).
+- Everything else (delimiters, ids, method names, standalone numeric fields, role tokens `|`/`&`)
+  is left untouched in the template string.
+- Returns an empty fragment list when there is no Chinese at all — caller should skip creating any
+  split/template for that column (nothing to translate).
+
+`CompoundFieldSplitter.Reconstruct(template, translatedFragments)` rebuilds the cell by
+substituting `{0}`, `{1}`, ... in order — never rebuild compound cells by hand.
+
+**`Reconstruct`'s word-boundary spacing treats a literal `&` as a natural-language conjunction, not
+just a game-syntax separator** (fixed Sep 2026 after a WanXiangOverLlm QC report): a `Desc`-style
+column like `娄德旺&娄七姑` (two related names) decomposes to template `{0}&{1}`, and once both
+fragments are translated (`Lou Dewang`/`Auntie Lou Qi`) the reconstructed English needs to read
+`Lou Dewang & Auntie Lou Qi`, not `Lou Dewang&Auntie Lou Qi` — English always spaces a conjunction,
+even though the source Chinese never needed a space around `&` at all. This spacing rule only fires
+when the fragment side is genuinely translated Latin-script text (`char.IsLetterOrDigit` and NOT a
+CJK ideograph) — an untranslated role token still glued to `&` (e.g. `我&长老`, never sent through
+translation because it round-trips as `{0}&{1}` with identity fragments) must keep reconstructing
+byte-for-byte identical, so the AND/OR role-requirement usage below is unaffected. See
+`ReconstructInsertsWordBoundarySpaceAroundAmpersand`/`CompoundCellWithRoleSeparatorsStillSplits` in
+`Tests/CompoundFieldSplitterTests.cs` and `NeedsWordBoundarySpace` in `CompoundFieldSplitter.cs`.
+
+Known game-data compound patterns worth recognizing when reasoning about `Decompose` output:
+- `;` — separates a list of items within one cell (e.g. multiple building actions).
+- `-` — separates role/method metadata from the action payload within one item, **except** when
+  it appears inside a plain numeric field (leave those as literal, e.g. `1000-12-0-0`) or directly
+  before a digit glued to surrounding Chinese (a negative number, e.g. `-99表示自动`).
+- `&` — "AND" role requirement (multiple required roles).
+- `|` — "OR" role requirement (alternative roles).
+- `/` — list of numeric values inside a compound numeric sub-field, or a genuine ASCII clause
+  boundary between two otherwise-unrelated sentences (e.g. `.../自宅`).
+- Full-width/CJK punctuation (`，。？！；、（）` etc.) — never a boundary; always part of natural
+  sentence text and stays glued to whichever fragment it's adjacent to. **Exception: the fullwidth
+  colon `：` IS a boundary** (see above) — it always splits into a `{0}：{1}`-shaped template.
+
+## Portability and defaults
+
+None of the Unicode-punctuation absorption rules above need per-game configuration — they're
+properties of the *Chinese script itself*, not this one game's data format. Any game whose source
+text is Chinese will use `，。？！、…—` etc. as natural sentence punctuation the same way, so
+`CjkTextChars`'s default set (CJK Symbols and Punctuation, Halfwidth and Fullwidth Forms, curly
+quotes, ellipsis, em dash, and the fullwidth-colon exception) is safe to reuse unchanged.
+
+The one rule that IS a per-game assumption is **"ASCII punctuation is always game-syntax, never
+natural language"** (the `,`/`?`/`!`/`.`/`-` etc. boundary behavior). This is NOT a property of
+Chinese script — it's an empirical observation about *this specific game's data format*
+(`BuildingData`-style columns using `;`/`-`/`&`/`|` as structural separators), verified against this
+game's actual `Files/Converted/*.yaml` (no ASCII `,`/`?`/`!` found sitting directly between two
+Chinese characters — every occurrence is either a genuine ASCII clause boundary or one of the
+documented structural separators above). A future game could easily use halfwidth/ASCII punctuation
+as real dialogue punctuation instead (e.g. if its source text was authored or exported with
+fullwidth auto-conversion disabled), in which case this default would wrongly keep splitting real
+sentences apart the same way ellipsis did before that fix.
+
+This is now a per-game option rather than a hardcoded assumption:
+`CompoundFieldSplitterOptions.AdditionalAbsorbedCharacters` lists extra characters to fold into a
+translatable run on top of the built-in defaults. It defaults to empty, so every existing game
+(with no options, or with `CompoundFieldSplitterOptions.Default`) keeps today's verified behavior
+unchanged.
+
+```csharp
+var options = new CompoundFieldSplitterOptions
+{
+    AdditionalAbsorbedCharacters = [','], // this game's data genuinely uses ASCII ',' as a comma
+};
+var (template, fragments) = CompoundFieldSplitter.Decompose(cell, options);
+```
+
+**Before configuring this for a new game, verify it the same way the current default was
+verified** — grep that game's converted/raw text for the character sitting directly between two
+Chinese characters — rather than assuming ASCII punctuation is safe to absorb just because another
+game needed it. Combines freely with `PlaceholderPatterns` (see below); the fullwidth colon `：`
+stays a fragment boundary regardless of what's configured here, since the subtraction that carves
+it out of `\p{IsHalfwidthandFullwidthForms}` is applied after any per-game additions
+(`BuildRunRegexForOptions` in `CompoundFieldSplitter.cs`).
+
+## Placeholder tokens (`CompoundFieldSplitterOptions`)
+
+**The shared library has no hardcoded knowledge of any one game's placeholder syntax.** Games
+commonly wrap a dynamic value (player name, item name, etc.) in a marker token — e.g.
+`#PlayerName#` — whose *position* can legitimately move during translation (the name might need to
+shift to the front/back of the sentence in the target language). If such a token is left as fixed
+literal template text sitting between two independently-translated fragments, that position is
+pinned and can produce an ungrammatical result — this is exactly the same class of problem that
+full-width punctuation absorption solves for natural punctuation, just for a game-specific token.
+
+Rather than baking in a rule like "`#...#` is always a placeholder" (another game could just as
+legitimately use `#` as a genuine structural separator instead), this is opted into **per game** by
+passing a `CompoundFieldSplitterOptions` to `Decompose(cell, options)`:
+
+```csharp
+var options = new CompoundFieldSplitterOptions
+{
+    PlaceholderPatterns = [new Regex(@"#\w+#", RegexOptions.Compiled)]
+};
+var (template, fragments) = CompoundFieldSplitter.Decompose(cell, options);
+```
+
+Any regex in `PlaceholderPatterns` is folded directly into the run-matching regex itself as just
+another alternative a run can extend through (see `GetTranslatableRunRegex`/`BuildRunRegexForOptions`
+in `CompoundFieldSplitter.cs`) — a placeholder token immediately adjacent to Chinese text on either
+side becomes part of the *same* regex match/fragment as that text, rather than a separate literal
+gap that has to be merged back in after the fact. Omitting `options` (or using
+`CompoundFieldSplitterOptions.Default`) preserves the original game-agnostic behavior where every
+ASCII character between two Chinese runs is a hard boundary. See `DragonHeirOverLlm`'s
+`Tests/GameFileHandling.cs` for the concrete `#PlayerName#` configuration for that game.
+
+**A remaining post-pass only handles the sign/digit-restart empty-gap case** (`MergeAdjacentFragments`
+in `CompoundFieldSplitter.cs`): `TranslatableRunRegex`'s leading `(?:[+\-](?=[0-9]))?` can restart a
+new match immediately where a previous one ended (e.g. `占领门派（` ends one match right before `-`,
+`-99表示自动）` begins the next), leaving an empty literal gap between the two `{n}` fragments —
+those get fused into one fragment. This is unrelated to placeholders and still applies with or
+without `CompoundFieldSplitterOptions`.
+
+## Merging translations across re-exports
+
+When re-exporting after a game update, splits must be matched between the old `Converted/*.yaml`
+and the freshly exported `Raw/Export/*.yaml` so existing translations aren't lost. Matching order
+matters now that one column can produce several fragments:
+
+1. Try `(Split, SubIndex, Text)` match first — most precise, handles compound columns correctly.
+2. Fall back to `Text`-only match — preserves backward compatibility with older exports that predate
+   `SubIndex`/multi-fragment columns, and still works for plain single-fragment columns.
+
+Do not regress to `Text`-only matching as the primary key — with multi-fragment columns this risks
+cross-matching unrelated fragments that happen to share the same Chinese text (e.g. a common `我`
+or `交易` fragment appearing in many different lines/columns).
+
+## Known migration cost
+
+Splitting a compound column into multiple fragments changes `TranslationSplit.Text` for that
+column (whole-cell text → per-fragment text), so previously translated compound cells will not
+auto-match on export/merge and will need re-translation once. This is expected and acceptable —
+it only affects columns that actually contain multiple fragments (compound columns), not plain
+single-value columns.

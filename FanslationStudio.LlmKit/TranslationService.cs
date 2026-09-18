@@ -365,9 +365,8 @@ public static class TranslationService
 
     /// <summary>
     /// Entry point used by <see cref="Workflow.TranslationWorkflow"/> - dispatches to whichever
-    /// scheduler is selected by <see cref="LlmConfig.UseContinuousWorkerPool"/>. See
-    /// Both schedulers remain supported so projects can choose the scheduling behavior appropriate
-    /// side by side during the transition.
+    /// scheduler is selected by <see cref="LlmConfig.UseContinuousWorkerPool"/>. Both schedulers
+    /// remain supported so projects can choose the scheduling behavior appropriate to their backend.
     /// </summary>
     public static async Task TranslateViaLlmAsync(string workingDirectory, bool forceRetranslation,
         TextFileToSplit[] textFiles, GameHooks? hooks = null)
@@ -385,7 +384,7 @@ public static class TranslationService
     /// batches (<see cref="LlmConfig.BatchSize"/>) are processed one at a time with a hard
     /// barrier - the next batch cannot start until every unique split in the current batch
     /// (including any retries/corrections) has finished. The pooled scheduler is available when
-    /// to their backend.
+    /// avoiding this synchronization barrier is more suitable for the backend.
     /// </summary>
     public static async Task TranslateViaLlmAsyncBatched(string workingDirectory, bool forceRetranslation,
         TextFileToSplit[] textFiles, GameHooks? hooks = null)
@@ -704,100 +703,100 @@ public static class TranslationService
             try
             {
 
-            if (string.IsNullOrEmpty(split.Text) || !split.SafeToTranslate)
-                return;
+                if (string.IsNullOrEmpty(split.Text) || !split.SafeToTranslate)
+                    return;
 
-            var isFragment = IsCompoundFragment(line, split);
+                var isFragment = IsCompoundFragment(line, split);
 
-            // File-restricted glossary/manual entries (only:/exclude:) must never be read from or
-            // written into this shared cache - see IsFileRestrictedText.
-            var isFileRestricted = IsFileRestrictedText(split.Text, config);
+                // File-restricted glossary/manual entries (only:/exclude:) must never be read from or
+                // written into this shared cache - see IsFileRestrictedText.
+                var isFileRestricted = IsFileRestrictedText(split.Text, config);
 
-            var cachedTranslation = string.Empty;
-            var cacheHit = !isFileRestricted
-                && TryGetCachedTranslation(split, isFragment, translationCache, fragmentCache, overrideKeys, out cachedTranslation)
-                // We use this for name files etc which will be in cache
-                && file.TextFile.EnableGlossary;
+                var cachedTranslation = string.Empty;
+                var cacheHit = !isFileRestricted
+                    && TryGetCachedTranslation(split, isFragment, translationCache, fragmentCache, overrideKeys, out cachedTranslation)
+                    // We use this for name files etc which will be in cache
+                    && file.TextFile.EnableGlossary;
 
-            if (string.IsNullOrEmpty(split.Translated)
-                || forceRetranslation
-                || (config.TranslateFlagged && split.FlaggedForRetranslation))
-            {
-                var original = split.Translated;
-
-                if (cacheHit)
-                    split.Translated = cachedTranslation;
-                else if (TryGetOnlyFileDirectTranslation(split.Text, file.TextFile.Path, config, out var directResult))
-                    // Exact "only" match for this file - use it directly, no LLM call.
-                    split.Translated = directResult;
-                else
+                if (string.IsNullOrEmpty(split.Translated)
+                    || forceRetranslation
+                    || (config.TranslateFlagged && split.FlaggedForRetranslation))
                 {
-                    var result = await TranslateSplitAsync(config, split.Text, client, file.TextFile, column: split.Split);
-                    split.Translated = result.Valid ? result.Result : string.Empty;
+                    var original = split.Translated;
 
-                    if (!result.Valid)
+                    if (cacheHit)
+                        split.Translated = cachedTranslation;
+                    else if (TryGetOnlyFileDirectTranslation(split.Text, file.TextFile.Path, config, out var directResult))
+                        // Exact "only" match for this file - use it directly, no LLM call.
+                        split.Translated = directResult;
+                    else
                     {
-                        var reason = string.IsNullOrEmpty(result.CorrectionPrompt)
-                            ? "(no correction prompt captured - likely an HttpRequestException/connection failure, see console for 'Request error' lines)"
-                            : result.CorrectionPrompt;
-                        var escalationNote = result.EscalationAttempted ? " [escalation attempted: yes]" : " [escalation attempted: no]";
-                        unprocessableItems.Add((file.TextFile.Path, split.Text, result.Result, reason + escalationNote));
-                    }
-                }
+                        var result = await TranslateSplitAsync(config, split.Text, client, file.TextFile, column: split.Split);
+                        split.Translated = result.Valid ? result.Result : string.Empty;
 
-                split.ResetFlags(split.Translated != original);
-                Interlocked.Increment(ref file.RecordsProcessed);
-                var totalProcessed = Interlocked.Increment(ref totalRecordsProcessed);
-                var buffered = Interlocked.Increment(ref file.BufferedRecords);
-
-                if (totalProcessed % BatchlessLog == 0)
-                {
-                    lock (progressLogLock)
-                    {
-                        var elapsedNow = runStopwatch.ElapsedMilliseconds;
-                        var intervalMs = elapsedNow - lastLogElapsedMs;
-                        var currentRetryCount = Volatile.Read(ref _retryAttemptCounter);
-                        var intervalRetries = currentRetryCount - lastLogRetryCount;
-                        var currentEscalationCount = Volatile.Read(ref _escalationAttemptCounter);
-                        var intervalEscalations = currentEscalationCount - lastLogEscalationCount;
-                        var itemsPerSecond = intervalMs > 0 ? BatchlessLog * 1000.0 / intervalMs : 0;
-
-                        Console.WriteLine($"Processed: {totalProcessed} of {pendingCount} pending ({workItems.Count} total) Unprocessable: {incorrectLineCount} | {BatchlessLog} took {intervalMs}ms (~{itemsPerSecond:F1}/s),\n   retries: {intervalRetries} (total: {currentRetryCount}), escalations: {intervalEscalations} (total: {currentEscalationCount}), elapsed: {elapsedNow}ms");
-
-                        lastLogElapsedMs = elapsedNow;
-                        lastLogRetryCount = currentRetryCount;
-                        lastLogEscalationCount = currentEscalationCount;
-
-                        WriteUnprocessableItemsLog(unprocessableLogPath, unprocessableItems);
-                    }
-                }
-
-                if (buffered > BatchlessBuffer)
-                {
-                    lock (file.WriteLock)
-                    {
-                        // Re-check under the lock - another worker may have already flushed.
-                        if (file.BufferedRecords > BatchlessBuffer)
+                        if (!result.Valid)
                         {
-                            Console.WriteLine($"Writing Buffer.... ({file.TextFile.Path})");
-                            // Opportunistic duplicate propagation before every flush (not just at the
-                            // end of the whole file) so a cancelled/killed run loses at most the
-                            // in-flight duplicates since the last flush, not every duplicate in the
-                            // file. Safe to call repeatedly - it only copies over translations that
-                            // already exist on the first occurrence of each duplicate group.
-                            PropagateDuplicates(file, forceRetranslation, config, ref totalRecordsProcessed);
-                            FileHelper.WriteAllTextWithRetry(file.OutputFile, file.Serializer.Serialize(file.FileLines));
-                            file.BufferedRecords = 0;
+                            var reason = string.IsNullOrEmpty(result.CorrectionPrompt)
+                                ? "(no correction prompt captured - likely an HttpRequestException/connection failure, see console for 'Request error' lines)"
+                                : result.CorrectionPrompt;
+                            var escalationNote = result.EscalationAttempted ? " [escalation attempted: yes]" : " [escalation attempted: no]";
+                            unprocessableItems.Add((file.TextFile.Path, split.Text, result.Result, reason + escalationNote));
+                        }
+                    }
+
+                    split.ResetFlags(split.Translated != original);
+                    Interlocked.Increment(ref file.RecordsProcessed);
+                    var totalProcessed = Interlocked.Increment(ref totalRecordsProcessed);
+                    var buffered = Interlocked.Increment(ref file.BufferedRecords);
+
+                    if (totalProcessed % BatchlessLog == 0)
+                    {
+                        lock (progressLogLock)
+                        {
+                            var elapsedNow = runStopwatch.ElapsedMilliseconds;
+                            var intervalMs = elapsedNow - lastLogElapsedMs;
+                            var currentRetryCount = Volatile.Read(ref _retryAttemptCounter);
+                            var intervalRetries = currentRetryCount - lastLogRetryCount;
+                            var currentEscalationCount = Volatile.Read(ref _escalationAttemptCounter);
+                            var intervalEscalations = currentEscalationCount - lastLogEscalationCount;
+                            var itemsPerSecond = intervalMs > 0 ? BatchlessLog * 1000.0 / intervalMs : 0;
+
+                            Console.WriteLine($"Processed: {totalProcessed} of {pendingCount} pending ({workItems.Count} total) Unprocessable: {incorrectLineCount} | {BatchlessLog} took {intervalMs}ms (~{itemsPerSecond:F1}/s),\n   retries: {intervalRetries} (total: {currentRetryCount}), escalations: {intervalEscalations} (total: {currentEscalationCount}), elapsed: {elapsedNow}ms");
+
+                            lastLogElapsedMs = elapsedNow;
+                            lastLogRetryCount = currentRetryCount;
+                            lastLogEscalationCount = currentEscalationCount;
+
+                            WriteUnprocessableItemsLog(unprocessableLogPath, unprocessableItems);
+                        }
+                    }
+
+                    if (buffered > BatchlessBuffer)
+                    {
+                        lock (file.WriteLock)
+                        {
+                            // Re-check under the lock - another worker may have already flushed.
+                            if (file.BufferedRecords > BatchlessBuffer)
+                            {
+                                Console.WriteLine($"Writing Buffer.... ({file.TextFile.Path})");
+                                // Opportunistic duplicate propagation before every flush (not just at the
+                                // end of the whole file) so a cancelled/killed run loses at most the
+                                // in-flight duplicates since the last flush, not every duplicate in the
+                                // file. Safe to call repeatedly - it only copies over translations that
+                                // already exist on the first occurrence of each duplicate group.
+                                PropagateDuplicates(file, forceRetranslation, config, ref totalRecordsProcessed);
+                                FileHelper.WriteAllTextWithRetry(file.OutputFile, file.Serializer.Serialize(file.FileLines));
+                                file.BufferedRecords = 0;
+                            }
                         }
                     }
                 }
-            }
 
-            if (string.IsNullOrEmpty(split.Translated))
-                Interlocked.Increment(ref incorrectLineCount);
-            else if (!cacheHit && !isFileRestricted && split.Text.Length <= TranslationCacheMaxChars)
-                //Two translations could be doing this at the same time
-                CacheTranslation(split, isFragment, translationCache, fragmentCache);
+                if (string.IsNullOrEmpty(split.Translated))
+                    Interlocked.Increment(ref incorrectLineCount);
+                else if (!cacheHit && !isFileRestricted && split.Text.Length <= TranslationCacheMaxChars)
+                    //Two translations could be doing this at the same time
+                    CacheTranslation(split, isFragment, translationCache, fragmentCache);
 
             }
             finally

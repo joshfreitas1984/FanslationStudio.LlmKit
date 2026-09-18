@@ -1,6 +1,6 @@
-# Canonical `Config.yaml` shape
+# Downstream translation-project `Config.yaml` shape
 
-Part of the [canonical downstream project shape](canonical-project-shape.md). Source of truth:
+Part of the [downstream translation-project structure](downstream-project-structure.md). Source of truth:
 `DragonHierOverLlm/Files/Config.yaml` as of 2026-09-16 (reproduced below with per-field notes).
 Field *semantics* (what each one actually does at runtime) are owned by
 `FanslationStudio.LlmKit`'s config-loading code and `ARCHITECTURE.md`/
@@ -76,7 +76,7 @@ qualityReview:
 | `minAcceptableScore` | Yes | Project-tuned threshold (DragonHeir: `60`); `new-translation-project`'s current starter default of `70` is a reasonable placeholder but is **not** derived from DragonHeir's real value — a new repo should expect to re-tune this from real hand-triage, not treat either number as gospel. |
 | `maxConcurrency` | Yes | QC-pass-specific concurrency, independent of the top-level `maxConcurrency`. |
 | `inlineRuleCheckRetries` | Yes | |
-| `autoAcceptDefectCategories` | Yes as a field, but **must start empty/placeholder in a new repo** | DragonHeir's populated list (`HardToParseSeam, OtherNamedDefect, DroppedContent, DroppedStutter`) is the product of real hand-triage over that game's corpus (see `canonical-test-organization.md`'s QC triage facts, `"5. Triage Flagged Quality Review Items"` / `"6. Generate Quality Review Fix Prompts"`). A new repo must not copy DragonHeir's list — it should start empty/commented and be populated per-project from that repo's own triage output. |
+| `autoAcceptDefectCategories` | Yes as a field, but **must start empty/placeholder in a new repo** | DragonHeir's populated list (`HardToParseSeam, OtherNamedDefect, DroppedContent, DroppedStutter`) is the product of real hand-triage over that game's corpus (see `downstream-test-organization.md`'s QC triage facts, `"5. Triage Flagged Quality Review Items"` / `"6. Generate Quality Review Fix Prompts"`). A new repo must not copy DragonHeir's list — it should start empty/commented and be populated per-project from that repo's own triage output. |
 | `twoStageVerificationEnabled` | Yes | |
 
 ## Required vs. game-specific, summarized

@@ -15,15 +15,27 @@ without corrupting structure. Consumed by downstream "over LLM" translation proj
 > deliberately short — current-state operational rules only. Long rationale and investigation
 > narratives belong in a linked document under `docs/`, not here.
 >
-> **Workflow rule:** after any significant feature or fix, update this file (only if a current-state
-> rule actually changed) and add/extend a categorized document under `docs/` for the narrative, indexed from
-> `docs/KNOWN_ISSUES.md`. Don't update either as a side effect of an unrelated change.
+> **Documentation workflow:** treat `docs/` as the durable source for feature behavior, architecture,
+> rationale, investigations, and history. Do not put design history, postmortem narrative, or extensive
+> rationale in source comments or auto-loaded instruction files. Keep comments for local invariants and
+> non-obvious implementation constraints, and link to the relevant `docs/` topic when more context is
+> useful. Do not rewrite docs during every exploratory edit or intermediate fix attempt: inspect existing
+> docs first, then consolidate one documentation update when a substantial task is complete and its
+> behavior is settled. Update this file only when a current-state agent rule changes, and update
+> `docs/README.md`/`docs/KNOWN_ISSUES.md` indexes when links or durable topic coverage require it.
+> If it is unclear whether a finding deserves a feature guide, architecture note, plan, or investigation,
+> ask the user before creating or expanding documentation.
+> **Documentation placement:** put current feature behavior in `docs/features/`, durable design or
+> implementation plans in `docs/plans/`, and investigations, incident analysis, and postmortems in
+> `docs/investigations/`. Keep `docs/KNOWN_ISSUES.md` as an index only; do not put the investigation
+> narrative there.
 >
-> **Reverse-engineering rule:** when you investigate how existing code here works, write down what
-> you learned in a categorized `docs/` topic file before finishing the task, even if not explicitly asked —
-> findings that only exist in chat history are lost for future sessions. This applies even when
-> investigating LlmKit-internal behavior from a downstream repo's session — record it here, not in
-> the downstream repo's own notes, since this is the sibling repo the logic actually belongs to.
+> **Reverse-engineering rule:** when a substantial investigation produces reusable knowledge, capture
+> the settled finding in the appropriate `docs/` topic before finishing the task, even if not explicitly
+> requested. Do this once at task completion, not after every read or hypothesis. Findings that only
+> exist in chat history are lost for future sessions. This applies even when investigating LlmKit-internal
+> behavior from a downstream repo's session — record it here, not in the downstream repo's own notes,
+> since this is the sibling repo the logic actually belongs to.
 
 ## The golden rule
 

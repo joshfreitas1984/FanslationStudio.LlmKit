@@ -52,14 +52,22 @@ The agent-facing entry points remain outside `docs/`; the issue index lives at `
   with the instructions file, the instructions file wins for current behavior — the topic file may
   still hold accurate historical narrative.
 - `docs/KNOWN_ISSUES.md` is an index only; never treat it as the full explanation of an issue.
-- Do not update instructions files, `docs/KNOWN_ISSUES.md`, or `docs/` topic files as a side effect of a
-  fix or feature. Only write documentation when explicitly asked to.
+- Do not update instructions files, `docs/KNOWN_ISSUES.md`, or `docs/` topic files during every
+  exploratory edit or intermediate fix attempt. Inspect existing docs first, then consolidate one
+  documentation update when a substantial task is complete and its behavior is settled. Update
+  instructions only when a current-state rule changes, and update indexes when links or durable topic
+  coverage require it.
 - **Downstream repos record LlmKit-internal findings here, not in their own repo notes** — if
   you're reverse-engineering how something in this library works while sitting in a consuming
   repo's session (e.g. `DragonHierOverLlm`), the finding belongs in this repo's `docs/`, since this
   is the sibling repo the logic actually belongs to.
 
 ## Docs index
+
+The structure references below are for **downstream game-translation repositories**, not for the
+`FanslationStudio.LlmKit` repository itself. For this kit's own architecture and repository rules,
+start with [`architecture/ARCHITECTURE.md`](architecture/ARCHITECTURE.md), [`AGENTS.md`](../AGENTS.md),
+and [`.github/copilot-instructions.md`](../.github/copilot-instructions.md).
 
 | Topic | File |
 | --- | --- |
@@ -70,11 +78,11 @@ The agent-facing entry points remain outside `docs/`; the issue index lives at `
 | Translation pipeline: glossary, workflows, GameHooks, and quality review | [`features/translation-pipeline/`](features/translation-pipeline/) |
 | Post-translation quality review pass — original design plan/history (spans this repo + `DragonHierOverLlm`) | [`../../DragonHierOverLlm/docs/plans/quality-review-pass.md`](../../DragonHierOverLlm/docs/plans/quality-review-pass.md) |
 | Packaging workflows and file types | [`features/packaging/packaging-workflows.md`](features/packaging/packaging-workflows.md) |
-| Canonical downstream repo shape and sub-project layout | [`architecture/repo-structure/canonical-project-shape.md`](architecture/repo-structure/canonical-project-shape.md) |
-| Canonical test file organization | [`architecture/repo-structure/canonical-test-organization.md`](architecture/repo-structure/canonical-test-organization.md) |
-| Canonical `Config.yaml` shape | [`architecture/repo-structure/canonical-config-shape.md`](architecture/repo-structure/canonical-config-shape.md) |
-| Canonical BepInEx plugin project layout | [`architecture/repo-structure/canonical-plugin-project-layout.md`](architecture/repo-structure/canonical-plugin-project-layout.md) |
-| Canonical root-level docs taxonomy for downstream repos | [`architecture/repo-structure/canonical-repo-docs-taxonomy.md`](architecture/repo-structure/canonical-repo-docs-taxonomy.md) |
+| Downstream translation-project structure and sub-project layout | [`architecture/downstream-project-structure/downstream-project-structure.md`](architecture/downstream-project-structure/downstream-project-structure.md) |
+| Downstream translation-project test organization | [`architecture/downstream-project-structure/downstream-test-organization.md`](architecture/downstream-project-structure/downstream-test-organization.md) |
+| Downstream translation-project `Config.yaml` shape | [`architecture/downstream-project-structure/downstream-config-shape.md`](architecture/downstream-project-structure/downstream-config-shape.md) |
+| Downstream BepInEx plugin project layout | [`architecture/downstream-project-structure/downstream-plugin-project-layout.md`](architecture/downstream-project-structure/downstream-plugin-project-layout.md) |
+| Downstream repository docs taxonomy | [`architecture/downstream-project-structure/downstream-repository-docs-taxonomy.md`](architecture/downstream-project-structure/downstream-repository-docs-taxonomy.md) |
 | Architectural decisions | [`architecture/decisions/`](architecture/decisions/) |
 
 See [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) for the full issue index (mirrors this table with
@@ -91,4 +99,4 @@ one-line summaries).
 | Configure terminology, workflows, hooks, or quality review | [`features/translation-pipeline/`](features/translation-pipeline/) |
 | Investigate a packaging issue | [`features/packaging/packaging-workflows.md`](features/packaging/packaging-workflows.md) |
 | See how a downstream game project consumes this library | `DragonHierOverLlm/.github/instructions/tests-translation-workflow.instructions.md` (sibling repo) |
-| Check/reconcile a downstream repo's structure against the canonical shape | [`architecture/repo-structure/canonical-project-shape.md`](architecture/repo-structure/canonical-project-shape.md) (and its sibling docs) |
+| Check/reconcile a downstream translation project's structure | [`architecture/downstream-project-structure/downstream-project-structure.md`](architecture/downstream-project-structure/downstream-project-structure.md) (and its sibling topic docs) |
