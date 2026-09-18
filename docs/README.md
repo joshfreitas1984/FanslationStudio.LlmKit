@@ -1,5 +1,8 @@
 # FanslationStudio.LlmKit — Documentation Hub
 
+# Contacting us
+You can join us here: [Discord](https://discord.gg/sqXd5ceBWT)
+
 Canonical navigation entry point for this repository — so a human or an AI agent (Copilot, Claude
 Code, or otherwise) can find the right source of truth without relying on vendor-specific memory.
 
