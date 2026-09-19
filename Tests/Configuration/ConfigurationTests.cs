@@ -24,7 +24,7 @@ public class ConfigurationTests
         Assert.Single(llmConfig.Runtime.ManualTranslations);
         Assert.Equal("Overriden Prompt 1", llmConfig.Runtime.Models["Standard"].Prompts["BaseSystemSuffixPrompt"]);
         Assert.Equal("Overriden Prompt 2", llmConfig.Runtime.Models["Structured"].Prompts["BaseCorrectionSuffixPrompt"]);
-        
+
         // Custom Glossary
         Assert.NotNull(llmConfig.Runtime.GlossaryLines.Where(g => g.Raw == "風雷神腳").Single());
 
@@ -37,5 +37,17 @@ public class ConfigurationTests
 
         var overriden2 = llmConfig.Runtime.GlossaryLines.Where(g => g.Raw == "防御力").Single();
         Assert.Equal("Guard", overriden2.Result);
+    }
+
+    [Fact]
+    public void HyMt2PresetsEnableThinkingWithExpectedDefaultModels()
+    {
+        var sevenB = ConfigurationExtensions.GetPresetModelConfig(ModelPreset.HyMT2, ModelPresetType.Standard);
+        var moe = ConfigurationExtensions.GetPresetModelConfig(ModelPreset.HyMT2Moe, ModelPresetType.Standard);
+
+        Assert.True(sevenB.EnableThinking);
+        Assert.Equal("hf.co/unsloth/Hy-MT2-7B-GGUF:UD-Q6_K_XL", sevenB.Model);
+        Assert.True(moe.EnableThinking);
+        Assert.Equal("hf.co/mradermacher/Hy-MT2-30B-A3B-i1-GGUF:i1-IQ3_XS", moe.Model);
     }
 }

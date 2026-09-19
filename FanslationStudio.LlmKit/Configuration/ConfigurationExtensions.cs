@@ -52,6 +52,7 @@ public static class ConfigurationExtensions
                 Model = model.Model,
                 Url = model.Url,
                 ApiKeyRequired = model.ApiKeyRequired,
+                EnableThinking = model.EnableThinking,
                 ModelParams = model.ModelParams,
                 Prompts = new Dictionary<string, string>()
             };
@@ -67,7 +68,7 @@ public static class ConfigurationExtensions
                 runtimeConfig = MergeModelConfig(GetHyMT2MoePreset(deserializer, model), runtimeConfig);
             else if (model.ModelPreset == ModelPreset.Glm4)
                 runtimeConfig = MergeModelConfig(GetGlm4Preset(deserializer, model), runtimeConfig);
-      
+
 
             // Set the merged config to runtime
             response.Runtime.Models[model.Name] = runtimeConfig;
@@ -181,6 +182,7 @@ public static class ConfigurationExtensions
             Model = presetConfig.Model,
             Url = presetConfig.Url,
             ApiKeyRequired = presetConfig.ApiKeyRequired,
+            EnableThinking = presetConfig.EnableThinking,
             ModelParams = presetType == ModelPresetType.Standard ?
                 presetConfig.ModelParams
                 : presetConfig.StructuredTextModelParams,
@@ -193,7 +195,8 @@ public static class ConfigurationExtensions
         var assembly = typeof(ConfigurationExtensions).Assembly;
         var prompts = new Dictionary<string, string>();
         var resourceNames = assembly.GetManifestResourceNames()
-            .Where(name => name.StartsWith(resourcePrefix) && name.EndsWith(".txt"));
+            .Where(name => name.StartsWith(resourcePrefix + ".", StringComparison.Ordinal)
+                && name.EndsWith(".txt", StringComparison.Ordinal));
 
         foreach (var resourceName in resourceNames)
         {
@@ -283,6 +286,9 @@ public static class ConfigurationExtensions
 
         if (overrideConfig.ApiKeyRequired ?? false)
             baseConfig.ApiKeyRequired = true;
+
+        if (overrideConfig.EnableThinking.HasValue)
+            baseConfig.EnableThinking = overrideConfig.EnableThinking;
 
         // Override all model parameters if any are provided in the override config
         if (overrideConfig.ModelParams != null)

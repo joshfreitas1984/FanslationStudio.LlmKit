@@ -25,7 +25,7 @@ public static class TranslationAssessmentWorkflow
             throw new InvalidOperationException("TranslationAssessment.ModelNames must contain at least one configured model.");
 
         var (samples, totalCorpusCharacters) = LoadSamples(workingDirectory, textFiles, settings.SampleSize,
-            settings.FullCellSampleRatio, settings.SampleSeed);
+            settings.FullCellSampleRatio, settings.SampleSeed, settings.PinnedSampleSources);
         if (samples.Count == 0)
             throw new InvalidOperationException("The translation assessment found no translatable samples under Raw/Export.");
 
@@ -175,7 +175,7 @@ public static class TranslationAssessmentWorkflow
     }
 
     private static (List<AssessmentSample> Samples, long TotalCorpusCharacters) LoadSamples(string workingDirectory, TextFileToSplit[] textFiles,
-        int sampleSize, double fullCellSampleRatio, int seed)
+        int sampleSize, double fullCellSampleRatio, int seed, IReadOnlyList<string> pinnedSampleSources)
     {
         var deserializer = YamlHelper.CreateDeserializer();
         var candidates = new List<AssessmentSample>();
@@ -213,8 +213,11 @@ public static class TranslationAssessmentWorkflow
         }
 
         var random = new Random(seed);
-        var fullCellSamples = candidates.Where(x => x.SampleKind == "fullCell").OrderBy(_ => random.Next()).ToList();
-        var splitSamples = candidates.Where(x => x.SampleKind == "split").OrderBy(_ => random.Next()).ToList();
+        var pinned = ResolvePinnedSamples(candidates, pinnedSampleSources);
+        var pinnedIds = pinned.Select(x => x.SampleId).ToHashSet();
+
+        var fullCellSamples = candidates.Where(x => x.SampleKind == "fullCell" && !pinnedIds.Contains(x.SampleId)).OrderBy(_ => random.Next()).ToList();
+        var splitSamples = candidates.Where(x => x.SampleKind == "split" && !pinnedIds.Contains(x.SampleId)).OrderBy(_ => random.Next()).ToList();
         var fullCellCount = Math.Clamp((int)Math.Round(sampleSize * fullCellSampleRatio), 0, sampleSize);
         var selected = fullCellSamples.Take(fullCellCount)
             .Concat(splitSamples.Take(Math.Max(0, sampleSize - fullCellCount)))
@@ -224,12 +227,35 @@ public static class TranslationAssessmentWorkflow
         {
             var selectedIds = selected.Select(x => x.SampleId).ToHashSet();
             selected.AddRange(candidates
-                .Where(x => !selectedIds.Contains(x.SampleId))
+                .Where(x => !selectedIds.Contains(x.SampleId) && !pinnedIds.Contains(x.SampleId))
                 .OrderBy(_ => random.Next())
                 .Take(sampleSize - selected.Count));
         }
 
+        selected.InsertRange(0, pinned);
         return (selected, totalCorpusCharacters);
+    }
+
+    private static List<AssessmentSample> ResolvePinnedSamples(List<AssessmentSample> candidates, IReadOnlyList<string> pinnedSampleSources)
+    {
+        var pinned = new List<AssessmentSample>();
+        var seen = new HashSet<string>();
+        foreach (var pinnedSource in pinnedSampleSources)
+        {
+            if (!seen.Add(pinnedSource))
+                continue;
+
+            var match = candidates.FirstOrDefault(x => x.Source == pinnedSource);
+            if (match == null)
+            {
+                Console.WriteLine($"  Warning: pinned assessment sample not found in corpus (skipped): {pinnedSource[..Math.Min(40, pinnedSource.Length)]}...");
+                continue;
+            }
+
+            pinned.Add(match);
+        }
+
+        return pinned;
     }
 
     private static void AddFullCellSamples(List<AssessmentSample> candidates, TextFileToSplit textFile,

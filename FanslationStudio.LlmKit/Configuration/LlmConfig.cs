@@ -34,6 +34,8 @@ public class LlmConfig
 
     public TranslationAssessmentConfig TranslationAssessment { get; set; } = new();
 
+    public QualityEvaluatorAssessmentConfig QualityEvaluatorAssessment { get; set; } = new();
+
     /// <summary>
     /// Name of a model (matching a <see cref="ModelConfig.Name"/> entry in <see cref="Models"/>) to
     /// escalate a split to once it has exhausted its normal <see cref="RetryCount"/> budget against
@@ -101,6 +103,24 @@ public class TranslationAssessmentConfig
     public int SampleSeed { get; set; } = 20260919;
     public double FullCellSampleRatio { get; set; } = 0.5;
     public string OutputPath { get; set; } = "TestResults/ModelAssessment";
+
+    /// <summary>
+    /// Exact source cell/split text (matched verbatim against the Raw/Export candidates built by
+    /// <see cref="TranslationAssessmentWorkflow"/>) always included in the sample regardless of
+    /// <see cref="SampleSeed"/>/<see cref="SampleSize"/> random selection - e.g. known regression
+    /// cases worth tracking on every run. Added on top of <see cref="SampleSize"/>, not counted
+    /// against it. A pinned entry with no matching candidate in the current corpus is skipped with
+    /// a console warning rather than failing the run.
+    /// </summary>
+    public List<string> PinnedSampleSources { get; set; } = [];
+}
+
+public class QualityEvaluatorAssessmentConfig
+{
+    public bool Enabled { get; set; }
+    public List<string> ModelNames { get; set; } = [];
+    public string GoldSetPath { get; set; } = "TestResults/QcEvaluatorAssessment/GoldSet.yaml";
+    public string OutputPath { get; set; } = "TestResults/QcEvaluatorAssessment";
 }
 
 // Convert this further
@@ -139,6 +159,7 @@ public class ModelUrlConfig
 {
     public string? ApiKey { get; set; }
     public bool? ApiKeyRequired { get; set; }
+    public bool? EnableThinking { get; set; }
     public string? Url { get; set; }
     public string? Model { get; set; }
 

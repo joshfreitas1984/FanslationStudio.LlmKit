@@ -1200,7 +1200,7 @@ public static class TranslationService
                         Interlocked.Increment(ref _retryAttemptCounter);
                 }
 
-                var llmResult = await TranslateMessagesAsync(client, config, executingModel, messages);
+                var llmResult = await TranslateMessagesAsync(client, config, executingModel, messages, executingModel.EnableThinking ?? false);
                 preparedResult = LineValidation.PrepareResult(preparedRaw, llmResult, config.Hooks, textFile, column);
                 validationResult = LineValidation.CheckTransalationSuccessful(executingModel, preparedRaw, preparedResult, textFile, config.Hooks, column);
                 validationResult.Result = LineValidation.CleanupLineBeforeSaving(validationResult.Result, preparedRaw, textFile, tokenReplacer);
@@ -1302,7 +1302,7 @@ public static class TranslationService
                     LlmHelpers.GenerateUserPrompt("Translate all Chinese characters in this sentence to English. " + executingModel.Prompts["BaseCorrectionSuffixPrompt"])
                 };
 
-                var correctedSentence = (await TranslateMessagesAsync(client, config, executingModel, messages)).Trim();
+                var correctedSentence = (await TranslateMessagesAsync(client, config, executingModel, messages, executingModel.EnableThinking ?? false)).Trim();
 
                 // NOTE: deliberately no internal per-sentence retry loop here - the caller
                 // (TranslateSplitAsync) already re-invokes this whole method again if any sentence

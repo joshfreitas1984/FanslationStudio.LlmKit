@@ -29,6 +29,17 @@ public class PromptOptimisationWorkflowTests
     //    await PromptOptimisationWorkflow.RunAsync(ModelPreset.Qwen38, ModelPresetType.Standard, BaseFilesSourceRoot);
     //}
 
+    //[Fact(DisplayName = "Optimise HyMT2's own prompt set")]
+    //public async Task OptimiseMT2PromptSet()
+    //{
+    //    await PromptOptimisationWorkflow.RunAsync(ModelPreset.HyMT2, ModelPresetType.Standard, BaseFilesSourceRoot);
+    //}
+
+    //[Fact(DisplayName = "Optimise HyMT2's own prompt set")]
+    //public async Task OptimiseMT2MoePromptSet()
+    //{
+    //    await PromptOptimisationWorkflow.RunAsync(ModelPreset.HyMT2Moe, ModelPresetType.Standard, BaseFilesSourceRoot);
+    //}
 
     //[Fact(DisplayName = "Optimise Glm4's own prompt set")]
     //public async Task OptimiseGlm4PromptSet()

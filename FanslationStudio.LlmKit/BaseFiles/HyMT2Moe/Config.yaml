@@ -1,6 +1,9 @@
 apiKeyRequired: false
 url: "http://localhost:11434/api/chat"
-model: "hf.co/mradermacher/Hy-MT2-30B-A3B-GGUF:Q3_K_S"
+#model: "hf.co/mradermacher/Hy-MT2-30B-A3B-GGUF:Q3_K_S"
+#model: "hf.co/mradermacher/Hy-MT2-30B-A3B-i1-GGUF:i1-IQ3_XS"
+#model: "hf.co/mradermacher/Hy-MT2-30B-A3B-i1-GGUF:i1-IQ3_XXS"
+model: "hf.co/mradermacher/Hy-MT2-30B-A3B-i1-GGUF:i1-Q4_K_S"
 modelParams:
   temperature: 0.15
   top_p: 0.92
@@ -8,11 +11,8 @@ modelParams:
   repeat_penalty: 1.05
   frequency_penalty: 0
   presence_penalty: 0
-  num_ctx: 8192
-  num_predict: 4096
-  stop:
-    - "\nDEFECT:"
-    - "\nCORRECTED:"
+  num_ctx: 4096
+  num_predict: 2048
 structuredTextModelParams:
   temperature: 0
   top_p: 0.95
