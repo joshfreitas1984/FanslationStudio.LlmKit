@@ -1,0 +1,5 @@
+GLOSSARY RULES:
+Use glossary translations only on exact match.
+For multiple listed translations, select any.
+
+GLOSSARY ITEMS:

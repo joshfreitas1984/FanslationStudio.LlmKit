@@ -1,0 +1,1 @@
+Restore `{0}` to the translation, as it was incorrectly removed.

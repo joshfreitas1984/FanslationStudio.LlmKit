@@ -1,0 +1,1 @@
+Source begins with comma; fragment continues previous sentence/cell. Translate starting with ", " (comma + space) as first characters. Do not relocate comma to sentence middle.

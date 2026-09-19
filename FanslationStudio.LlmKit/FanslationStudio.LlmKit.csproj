@@ -20,6 +20,16 @@
     <EmbeddedResource Include="BaseFiles\Qwen38\Corrections\*.txt" />
     <EmbeddedResource Include="BaseFiles\Qwen38\Dynamics\*.txt" />
 
+    <EmbeddedResource Include="BaseFiles\HyMT2\Config.yaml" />
+    <EmbeddedResource Include="BaseFiles\HyMT2\Prompts\*.txt" />
+    <EmbeddedResource Include="BaseFiles\HyMT2\Corrections\*.txt" />
+    <EmbeddedResource Include="BaseFiles\HyMT2\Dynamics\*.txt" />
+
+    <EmbeddedResource Include="BaseFiles\HyMT2Moe\Config.yaml" />
+    <EmbeddedResource Include="BaseFiles\HyMT2Moe\Prompts\*.txt" />
+    <EmbeddedResource Include="BaseFiles\HyMT2Moe\Corrections\*.txt" />
+    <EmbeddedResource Include="BaseFiles\HyMT2Moe\Dynamics\*.txt" />
+
     <EmbeddedResource Include="BaseFiles\Glm4\Config.yaml" />
     <EmbeddedResource Include="BaseFiles\Glm4\Prompts\*.txt" />
     <EmbeddedResource Include="BaseFiles\Glm4\Corrections\*.txt" />

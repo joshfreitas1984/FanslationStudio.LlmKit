@@ -58,4 +58,35 @@ public class QualityReviewHelpersTests
         var disabledFresh = QualityReviewHelpers.IsQcReviewFresh(split, null, [split], new QualityReviewConfig { Enabled = false });
         Assert.False(disabledFresh);
     }
+
+    [Fact(DisplayName = "ResetQcState clears stored QC outcome but preserves the retry counter")]
+    public void ResetQcStateClearsReviewState()
+    {
+        var split = new TranslationSplit
+        {
+            QcTranslated = "A corrected translation",
+            QcStatus = QcStatus.Corrected,
+            QcReviewedText = "An older translation",
+            FlaggedForQcReview = true,
+            QcRejectedCorrection = "A rejected correction",
+            QcFailureReason = "failed validation",
+            QcQualityScore = 42,
+            QcDefectCategory = QcDefectCategory.DomainTerm,
+            QcRuleCheckFailureCount = 2,
+            QcRuleCheckFailureBaseline = "An older translation",
+        };
+
+        split.ResetQcState();
+
+        Assert.Equal(string.Empty, split.QcTranslated);
+        Assert.Equal(QcStatus.NotReviewed, split.QcStatus);
+        Assert.Equal(string.Empty, split.QcReviewedText);
+        Assert.False(split.FlaggedForQcReview);
+        Assert.Equal(string.Empty, split.QcRejectedCorrection);
+        Assert.Equal(string.Empty, split.QcFailureReason);
+        Assert.Null(split.QcQualityScore);
+        Assert.Equal(QcDefectCategory.Unknown, split.QcDefectCategory);
+        Assert.Equal(2, split.QcRuleCheckFailureCount);
+        Assert.Equal("An older translation", split.QcRuleCheckFailureBaseline);
+    }
 }

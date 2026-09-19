@@ -61,6 +61,10 @@ public static class ConfigurationExtensions
                 runtimeConfig = MergeModelConfig(GetQwen25Preset(deserializer, model), runtimeConfig);
             else if (model.ModelPreset == ModelPreset.Qwen38)
                 runtimeConfig = MergeModelConfig(GetQwen38Preset(deserializer, model), runtimeConfig);
+            else if (model.ModelPreset == ModelPreset.HyMT2)
+                runtimeConfig = MergeModelConfig(GetHyMT2Preset(deserializer, model), runtimeConfig);
+            else if (model.ModelPreset == ModelPreset.HyMT2Moe)
+                runtimeConfig = MergeModelConfig(GetHyMT2MoePreset(deserializer, model), runtimeConfig);
             else if (model.ModelPreset == ModelPreset.Glm4)
                 runtimeConfig = MergeModelConfig(GetGlm4Preset(deserializer, model), runtimeConfig);
       
@@ -130,6 +134,12 @@ public static class ConfigurationExtensions
     private static ModelExecutionConfig GetQwen38Preset(IDeserializer deserializer, ModelConfig model) =>
         GetPresetModelConfig(ModelPreset.Qwen38, model.ModelPresetType);
 
+    private static ModelExecutionConfig GetHyMT2Preset(IDeserializer deserializer, ModelConfig model) =>
+        GetPresetModelConfig(ModelPreset.HyMT2, model.ModelPresetType);
+
+    private static ModelExecutionConfig GetHyMT2MoePreset(IDeserializer deserializer, ModelConfig model) =>
+        GetPresetModelConfig(ModelPreset.HyMT2Moe, model.ModelPresetType);
+
     /// <summary>
     /// GLM-4 preset - ships the full Qwen25-equivalent prompt set (BaseSystemPrompt, Corrections,
     /// Dynamics) under BaseFiles/Glm4/ so it can be used as a drop-in swap. Its
@@ -152,6 +162,8 @@ public static class ConfigurationExtensions
         {
             ModelPreset.Qwen25 => "Qwen25",
             ModelPreset.Qwen38 => "Qwen38",
+            ModelPreset.HyMT2 => "HyMT2",
+            ModelPreset.HyMT2Moe => "HyMT2Moe",
             ModelPreset.Glm4 => "Glm4",
             _ => throw new InvalidOperationException($"No preset configuration available for '{preset}'."),
         };

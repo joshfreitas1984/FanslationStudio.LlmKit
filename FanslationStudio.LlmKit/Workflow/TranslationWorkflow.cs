@@ -147,6 +147,23 @@ public static class TranslationWorkflow
         Regex chineseCharRegex,
         StringTokenReplacer tokenReplacer)
     {
+        var translatedBeforeRules = split.Translated;
+        var modified = UpdateSplitCore(logLines, split, textFile, config, chineseCharRegex, tokenReplacer);
+
+        if (!string.Equals(translatedBeforeRules, split.Translated, StringComparison.Ordinal))
+            split.ResetQcState();
+
+        return modified;
+    }
+
+    private static bool UpdateSplitCore(
+        ConcurrentBag<string> logLines,
+        TranslationSplit split,
+        TextFileToSplit textFile,
+        LlmConfig config,
+        Regex chineseCharRegex,
+        StringTokenReplacer tokenReplacer)
+    {
         if (!split.SafeToTranslate)
             return false;
 

@@ -21,6 +21,8 @@ public enum ModelPreset
     None,
     Qwen25,
     Qwen38,
+    HyMT2,
+    HyMT2Moe,
     Glm4,
 }
 

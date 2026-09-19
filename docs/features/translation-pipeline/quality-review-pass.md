@@ -45,8 +45,9 @@ already-serialized YAML:
   response that predates the DEFECT-first prompt — same "not yet reviewed" convention as
   `QcQualityScore` being `null`. Exists specifically so a large flagged set can be triaged/policed
   *by category* instead of only by score — see "DEFECT categories and per-category policy" below.
-- `ResetQcState()` — clears all of the above back to `NotReviewed`. Only ever called from inside
-  `QualityReviewWorkflow.ReviewColumnAsync`, right before recording a fresh outcome.
+- `ResetQcState()` — clears all of the above back to `NotReviewed`. It is called by
+  `QualityReviewWorkflow.ReviewColumnAsync` right before recording a fresh outcome, and by the
+  translation-rule pass when `UpdateSplit` actually changes `Translated`.
   **`TranslationSplit.ResetFlags()` deliberately does NOT call this** — Qc state tracks an
   independent review axis from `FlaggedForRetranslation`/`FlaggedMistranslation`/`FlaggedHallucination`,
   which track the primary translation attempt.
@@ -155,11 +156,15 @@ since-changed `Translated`, see below).
 
 ## Staleness / freshness (`Utility/QualityReviewHelpers.cs`)
 
-Nothing else in the pipeline calls `ResetQcState()` — in particular, a retranslation triggered by
-an unrelated cause (a glossary change flags a column via
-`Workflow.TranslationWorkflow.ApplyAllRulesToCurrentTranslation`, then it gets retranslated) changes
-`Translated` but leaves `Qc*` fields describing the *old* translation, since `ResetFlags()`
-deliberately doesn't touch them. Every place that would otherwise trust `QcTranslated`/
+`Workflow.TranslationWorkflow.UpdateSplit` snapshots `Translated` before applying the ordinary
+translation rules. If any rule, manual translation, game-specific repair, or normalization changes
+the value, it calls `ResetQcState()` immediately. This prevents a corrected or retranslated split
+from carrying visible QC results for the previous text. Flag-only outcomes still preserve QC state,
+and `ResetQcState()` deliberately leaves `QcRuleCheckFailureCount`/`QcRuleCheckFailureBaseline`
+intact so the QC rule-retry budget remains meaningful.
+
+The freshness check remains a defense in depth for changes made by other workflows or external
+editing: every place that would otherwise trust `QcTranslated`/
 `QcQualityScore` must first check **`QualityReviewHelpers.IsQcReviewFresh(anchor, template,
 fragments, qualityReview)`** — recomputes the current effective text and compares it against
 `QcReviewedText`. `false` means treat the column exactly as if it had never been reviewed (fall

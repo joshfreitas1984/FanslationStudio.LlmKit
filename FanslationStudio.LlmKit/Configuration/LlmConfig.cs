@@ -32,6 +32,8 @@ public class LlmConfig
     /// </summary>
     public QualityReviewConfig QualityReview { get; set; } = new();
 
+    public TranslationAssessmentConfig TranslationAssessment { get; set; } = new();
+
     /// <summary>
     /// Name of a model (matching a <see cref="ModelConfig.Name"/> entry in <see cref="Models"/>) to
     /// escalate a split to once it has exhausted its normal <see cref="RetryCount"/> budget against
@@ -89,6 +91,16 @@ public class LlmConfig
     /// </summary>
     [YamlIgnore]
     public GameHooks Hooks { get; set; } = new();
+}
+
+public class TranslationAssessmentConfig
+{
+    public bool Enabled { get; set; }
+    public List<string> ModelNames { get; set; } = [];
+    public int SampleSize { get; set; } = 500;
+    public int SampleSeed { get; set; } = 20260919;
+    public double FullCellSampleRatio { get; set; } = 0.5;
+    public string OutputPath { get; set; } = "TestResults/ModelAssessment";
 }
 
 // Convert this further

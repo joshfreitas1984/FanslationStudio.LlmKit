@@ -1,0 +1,1 @@
+Preserve single quotes wrapping pre-translated proper nouns (e.g. 'Example Term') exactly as in source; these act as placeholders for bracket notation (e.g. 《》 or 【】).
