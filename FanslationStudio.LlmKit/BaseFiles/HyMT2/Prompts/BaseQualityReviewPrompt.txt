@@ -23,6 +23,16 @@ Given Chinese SOURCE and CURRENT English TRANSLATION, judge accuracy and natural
   English word.
 - Meaning mismatch with SOURCE, even if fluent.
 - Omitted subject/object translated by mechanically carrying forward the subject of a preceding sentence, or defaulted to "I"/"me"/"we"/"you" solely because it's dialogue, when SOURCE/context (who's addressed, observed, examined, described, or acted upon) establish a different speaker/subject/object - can span multiple consecutive dialogue lines. E.g. "莫慌，让为师看看……\n还好还好，只是精疲力竭昏厥过去了。" - second line means roughly "Thank goodness, thank goodness. She only passed out from exhaustion.", not "No need to worry, I just fainted from exhaustion." (wrongly inherits the speaker as subject).
+- Internal formatting inconsistency within TRANSLATION itself, independent of SOURCE - check this
+  even when SOURCE gives no explicit signal, by comparing TRANSLATION only against its own other
+  parts:
+  - Parallel entries in a semicolon- or comma-delimited stat/label string (e.g. "Blade Technique
+    1;1 will;Acupoint 1") where one entry's number-before-label vs. label-before-number order, or
+    spacing before a number, doesn't match the pattern the other entries on the same line use -
+    even though each entry in isolation reads fine.
+  - A proper name or word rendered with an unexpected internal capitalization pattern (e.g.
+    "Wang TIANyi" instead of "Wang Tianyi") that doesn't match how the same word is capitalized
+    elsewhere.
 - A SOURCE stammer/stutter (a word's leading syllable(s) repeated right before the full word,
   separated by 、 or , - e.g. "思、思阁主" stammering on 思, "你、你、你……" stammering on 你 three
   times) that TRANSLATION drops entirely (no repetition of the corresponding word at all) or
@@ -82,8 +92,11 @@ at the first, and do not force a single category when more than one genuinely ap
   present in SOURCE and not required by English grammar - punctuation (a colon, dash, or terminal
   mark) inserted into a terse label/stat string that has none in SOURCE, or stray/duplicated
   whitespace (an extra blank line, trailing spaces) around a real newline or separator that SOURCE
-  does not have. Never covers an already-translated proper noun/title that also has a Pinyin
-  transliteration available - see the DO NOT flag rule above.
+  does not have. Also covers an internal formatting inconsistency within TRANSLATION itself (see
+  the internal-consistency rule above) - a delimited stat/label entry whose number/label order or
+  spacing breaks the pattern its sibling entries use, or a name/word with an anomalous internal
+  capitalization pattern. Never covers an already-translated proper noun/title that also has a
+  Pinyin transliteration available - see the DO NOT flag rule above.
 - UNCERTAIN: something about TRANSLATION feels potentially wrong, but you cannot confidently pin it
   to one of the named defects above. Never guess a named category (especially OTHER_NAMED_DEFECT)
   just to have something concrete to write - use UNCERTAIN instead so a human looks at it. Never
@@ -92,12 +105,18 @@ at the first, and do not force a single category when more than one genuinely ap
   pinned down.
 - NONE: nothing above applies. This is the answer for most translations, including short UI/stat labels, long literary prose, and terse list-style constructions - do not pick a category just to justify a hunch.
 
-Before finalizing, silently run two checks and revise your answer if either surfaces something not
+Before finalizing, silently run three checks and revise your answer if any surfaces something not
 already named (do not output the checks, only the final DEFECTS line):
 1. NAMES: every personal/place/faction proper name in SOURCE is kept as a name in TRANSLATION
    (transliterated, or the glossary's given term) - not a descriptive gloss of its literal meaning.
 2. OVER-TRANSLATION: TRANSLATION has not added an alternative/synonym pair for a concept SOURCE
    states only one way.
+3. INTERNAL CONSISTENCY: if TRANSLATION contains 2+ semicolon- or comma-delimited entries (a
+   stat/label list) or the same proper name/word appearing more than once, explicitly compare each
+   entry or occurrence against every other one, one pair at a time - do not just read each in
+   isolation. Number-before-label vs. label-before-number order, spacing before a number, and a
+   name/word's capitalization must be identical across every entry/occurrence; if even one differs
+   from the rest, that is a defect even though it reads fine on its own.
 
 OUTPUT FORMAT - respond with EXACTLY this line and nothing else:
 DEFECTS: <NONE, UNCERTAIN, or a comma-separated list of one or more of GARBLED_NUMBER / DOMAIN_TERM / LOST_IDIOM / UNTRANSLATED_PINYIN / DROPPED_CONTENT / DROPPED_STUTTER / HARD_TO_PARSE_SEAM / OTHER_NAMED_DEFECT - every category that genuinely applies, not just one>
