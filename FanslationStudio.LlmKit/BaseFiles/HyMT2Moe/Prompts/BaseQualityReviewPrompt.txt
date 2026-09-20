@@ -10,7 +10,14 @@ Given Chinese SOURCE and CURRENT English TRANSLATION, judge accuracy and natural
   missing) - the title must still be translated and kept, e.g. "Great Hero Wan," or "Young Hero
   #PlayerName#,". Only a title that is literally present in SOURCE next to the name/placeholder
   counts - never flag a name/placeholder that has no adjacent title in SOURCE.
-- Wrong language, leftover Chinese, gibberish.
+- A personal, place, or faction name rendered as a descriptive English gloss of its literal meaning
+  (e.g. 白云子 translated as "White Cloud") instead of being transliterated/kept as a name - a
+  fluent-sounding gloss is still wrong if SOURCE intends a proper noun, the same way a name must
+  never be split between transliteration and translation (see UNTRANSLATED_PINYIN below).
+- Wrong language, leftover Chinese, gibberish, or TRANSLATION being a literal placeholder/null value
+  (e.g. "None", "null", "N/A", an empty string) where SOURCE has real content - a leaked
+  non-translation, not a stylistic issue, even though the placeholder itself reads as a normal
+  English word.
 - Meaning mismatch with SOURCE, even if fluent.
 - Omitted subject/object translated by mechanically carrying forward the subject of a preceding sentence, or defaulted to "I"/"me"/"we"/"you" solely because it's dialogue, when SOURCE/context (who's addressed, observed, examined, described, or acted upon) establish a different speaker/subject/object - can span multiple consecutive dialogue lines. E.g. "莫慌，让为师看看……\n还好还好，只是精疲力竭昏厥过去了。" - second line means roughly "Thank goodness, thank goodness. She only passed out from exhaustion.", not "No need to worry, I just fainted from exhaustion." (wrongly inherits the speaker as subject).
 - A SOURCE stammer/stutter (a word's leading syllable(s) repeated right before the full word,
@@ -64,9 +71,10 @@ at the first, and do not force a single category when more than one genuinely ap
 - DROPPED_CONTENT: an omitted subject/object/clause, or a dropped title/honorific next to a name (literal or placeholder), per the rules above.
 - DROPPED_STUTTER: a SOURCE stammer/stutter (repeated leading syllable(s) before a word) that TRANSLATION drops entirely or renders as gibberish unconnected to the stammered word. Do NOT use this just because SOURCE contains a stammer - a stammer TRANSLATION already conveys (hyphenated or as a full repeated word - both valid) is not a defect. If another defect is also present on the line, name that instead - it takes priority over a stammer-formatting quibble.
 - HARD_TO_PARSE_SEAM: a stitched-fragment seam that is genuinely hard to parse, ambiguous, or changes meaning - not just less fluent than an alternative.
-- OTHER_NAMED_DEFECT: something else concrete and nameable, not covered above. Never covers
-  an already-translated proper noun/title that also has a Pinyin transliteration available - see the
-  DO NOT flag rule above.
+- OTHER_NAMED_DEFECT: something else concrete and nameable, not covered above - e.g. a leaked
+  placeholder/null value in place of a translation, or a proper name replaced with a descriptive
+  English gloss instead of being transliterated. Never covers an already-translated proper
+  noun/title that also has a Pinyin transliteration available - see the DO NOT flag rule above.
 - UNCERTAIN: something about TRANSLATION feels potentially wrong, but you cannot confidently pin it
   to one of the named defects above. Never guess a named category (especially OTHER_NAMED_DEFECT)
   just to have something concrete to write - use UNCERTAIN instead so a human looks at it. Never
