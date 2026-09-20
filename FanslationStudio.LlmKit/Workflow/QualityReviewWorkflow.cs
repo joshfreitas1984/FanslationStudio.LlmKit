@@ -867,7 +867,7 @@ public static class QualityReviewWorkflow
     /// <see cref="GetLlmVerdictAsync"/>, which merges both results via
     /// <see cref="QcDetectionResult.Merge"/> rather than trusting either alone.
     /// </summary>
-    private static async Task<QcDetectionResult> DetectDefectsAsync(
+    internal static async Task<QcDetectionResult> DetectDefectsAsync(
         LlmConfig config,
         ModelExecutionConfig modelConfig,
         HttpClient client,
@@ -921,7 +921,7 @@ public static class QualityReviewWorkflow
     /// confirmed. Includes the same inline "that broke the bad-words list, try again" retry budget
     /// call 1 used to have, since this is now the only call that ever drafts a correction.
     /// </summary>
-    private static async Task<string?> GenerateCorrectionAsync(
+    internal static async Task<string?> GenerateCorrectionAsync(
         LlmConfig config,
         ModelExecutionConfig modelConfig,
         HttpClient client,

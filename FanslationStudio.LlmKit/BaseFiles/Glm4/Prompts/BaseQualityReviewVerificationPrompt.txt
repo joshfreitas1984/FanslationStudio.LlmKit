@@ -11,6 +11,15 @@ or anything else concrete and nameable; (3) grade your genuine confidence that P
 taken as a whole, is a good replacement for TRANSLATION. You never write a correction here, only
 judge one someone else already wrote.
 
+Two specific mechanical checks belong under part (2) every time, regardless of what CONFIRMED
+DEFECTS names: (a) count every placeholder token in TRANSLATION (e.g. {0}, #PlayerName#,
+<b>...</b>) and confirm each one still appears, unchanged, in PROPOSED CORRECTION - a dropped,
+altered, or duplicated placeholder is always a NEW defect, even if the surrounding sentence reads
+fine; (b) confirm every proper name/character/place/faction named in PROPOSED CORRECTION actually
+appears in SOURCE (as itself, a title, or an unambiguous placeholder referent) - a name that exists
+only in PROPOSED CORRECTION, most often a mistranslated title/role recast as if it were a person's
+name, is always a NEW defect, even when it reads as a plausible character.
+
 DEFECT CATEGORIES (for reference - CONFIRMED DEFECTS names one or more of these):
 - GARBLED_NUMBER: a garbled/dropped/duplicated number or clause.
 - DOMAIN_TERM: a mistranslated domain term that breaks the setting.
@@ -19,10 +28,12 @@ DEFECT CATEGORIES (for reference - CONFIRMED DEFECTS names one or more of these)
 - DROPPED_CONTENT: an omitted subject/object/clause, or a dropped title/honorific next to a name (literal or placeholder).
 - DROPPED_STUTTER: a SOURCE stammer/stutter (a word's leading syllable(s) repeated right before the full word) that TRANSLATION drops entirely (no repetition of the corresponding word at all) or renders as gibberish unconnected to the stammered word. A hyphenated partial repeat ("Y-y-you") and a full separately-spoken repeat ("You, you, you") are BOTH valid English stammer renderings - never treat this as unresolved just because one form was used instead of the other; that's a style preference, not a defect.
 - HARD_TO_PARSE_SEAM: a stitched-fragment seam that is genuinely hard to parse, ambiguous, or changes meaning - not just less fluent than an alternative. A markup/formatting tag or placeholder (e.g. <b>, </b>, <color=...>) sitting between two fragments is NOT itself a sentence boundary - a sentence-terminal mark (.!?) immediately before the tag followed by a capitalized word immediately after it (e.g. "...here.<b>#PosText#</b>Inside") is a genuine instance of this category, not a stylistic quibble; don't treat it as resolved just because the tag is preserved correctly.
-- OTHER_NAMED_DEFECT: something else concrete and nameable. Never covers replacing an already-
-  translated proper noun/title with a Pinyin transliteration - if PROPOSED CORRECTION does this,
-  treat it as a NEW defect (OTHER_NAMED_DEFECT), regardless of which category it was meant to
-  address; a translated name isn't a defect, and undoing it is a regression, not a fix.
+- OTHER_NAMED_DEFECT: something else concrete and nameable, including a dropped/altered placeholder
+  token or a fabricated name/character not present in SOURCE (see the two checks above). Never
+  covers replacing an already-translated proper noun/title with a Pinyin transliteration - if
+  PROPOSED CORRECTION does this, treat it as a NEW defect (OTHER_NAMED_DEFECT), regardless of which
+  category it was meant to address; a translated name isn't a defect, and undoing it is a
+  regression, not a fix.
 
 For each category in CONFIRMED DEFECTS, judge PROPOSED CORRECTION against SOURCE and TRANSLATION
 yourself - don't assume it actually fixes what it claims to. Common case for DROPPED_STUTTER:

@@ -7,7 +7,15 @@ never assuming it's correct just because it was drafted to be:
 1. For EACH category in CONFIRMED DEFECTS, decide whether PROPOSED CORRECTION actually resolves it.
 2. Separately, check whether PROPOSED CORRECTION introduces any NEW problem not in CONFIRMED
    DEFECTS - a broken name, dropped content, a regression back to raw Pinyin, garbled text, or
-   anything else concrete and nameable.
+   anything else concrete and nameable. Two specific mechanical checks, every time, regardless of
+   what CONFIRMED DEFECTS names:
+   a. Count every placeholder token in TRANSLATION (e.g. {0}, #PlayerName#, <b>...</b>) and confirm
+      each one still appears, unchanged, in PROPOSED CORRECTION. A dropped, altered, or duplicated
+      placeholder is always a NEW defect, even if the surrounding sentence reads fine.
+   b. Confirm every proper name/character/place/faction named in PROPOSED CORRECTION actually
+      appears in SOURCE (as itself, a title, or an unambiguous placeholder referent). A name that
+      exists only in PROPOSED CORRECTION - most often a mistranslated title/role recast as if it
+      were a person's name - is always a NEW defect, even when it reads as a plausible character.
 3. Grade your confidence that PROPOSED CORRECTION, taken as a whole, is a good replacement for
    TRANSLATION.
 
@@ -19,8 +27,10 @@ DEFECT CATEGORIES (for reference - CONFIRMED DEFECTS names one or more of these)
 - DROPPED_CONTENT: an omitted subject/object/clause, or a dropped title/honorific next to a name (literal or placeholder).
 - DROPPED_STUTTER: a SOURCE stammer/stutter (a word's leading syllable(s) repeated right before the full word) that TRANSLATION drops entirely or renders as gibberish unconnected to the stammered word. A hyphenated partial repeat ("Y-y-you") and a full separately-spoken repeat ("You, you, you") are BOTH valid English stammer renderings.
 - HARD_TO_PARSE_SEAM: a stitched-fragment seam that is genuinely hard to parse, ambiguous, or changes meaning - not just less fluent than an alternative. A markup/formatting tag or placeholder sitting between two fragments is NOT itself a sentence boundary.
-- OTHER_NAMED_DEFECT: something else concrete and nameable. Never covers replacing an already-
-  translated proper noun/title with a Pinyin transliteration - that's a regression, not a fix.
+- OTHER_NAMED_DEFECT: something else concrete and nameable, including a dropped/altered placeholder
+  token or a fabricated name/character not present in SOURCE (see checks 2a/2b above). Never covers
+  replacing an already-translated proper noun/title with a Pinyin transliteration - that's a
+  regression, not a fix.
 
 For each category in CONFIRMED DEFECTS, judge PROPOSED CORRECTION against SOURCE and TRANSLATION
 yourself - do not assume it actually fixes what it claims to. A category counts as resolved only

@@ -121,6 +121,21 @@ public class QualityEvaluatorAssessmentConfig
     public List<string> ModelNames { get; set; } = [];
     public string GoldSetPath { get; set; } = "TestResults/QcEvaluatorAssessment/GoldSet.yaml";
     public string OutputPath { get; set; } = "TestResults/QcEvaluatorAssessment";
+
+    /// <summary>
+    /// Whether detection runs both calls 1 and 2 (production's default) and merges them via
+    /// <see cref="Support.QcDetectionResult.Merge"/>, or only call 1 alone. See
+    /// docs/plans/qc-evaluator-comparison.md's "Process Variants" section - this measures the
+    /// recall/latency tradeoff of doubled detection independent of a specific model/quant.
+    /// </summary>
+    public bool DoubledDetection { get; set; } = true;
+
+    /// <summary>
+    /// Reserved for the doubled-verification process variant (see docs/plans/qc-evaluator-comparison.md) -
+    /// not yet wired to any behavior; the gold set has no harmful-labeled correction examples to
+    /// measure it against yet.
+    /// </summary>
+    public bool DoubledVerification { get; set; } = true;
 }
 
 // Convert this further

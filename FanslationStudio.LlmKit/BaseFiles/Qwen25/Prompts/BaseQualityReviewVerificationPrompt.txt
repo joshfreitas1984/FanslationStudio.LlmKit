@@ -8,7 +8,15 @@ never assuming it's correct just because it was drafted to be. Your job has thre
    not a rewrite of your own - actually resolves it.
 2. Separately, check whether PROPOSED CORRECTION introduces any NEW problem not in CONFIRMED
    DEFECTS - a broken name, dropped content, a regression back to raw Pinyin, garbled text, or
-   anything else concrete and nameable.
+   anything else concrete and nameable. Two specific mechanical checks, every time, regardless of
+   what CONFIRMED DEFECTS names:
+   a. Count every placeholder token in TRANSLATION (e.g. {0}, #PlayerName#, <b>...</b>) and confirm
+      each one still appears, unchanged, in PROPOSED CORRECTION. A dropped, altered, or duplicated
+      placeholder is always a NEW defect, even if the surrounding sentence reads fine.
+   b. Confirm every proper name/character/place/faction named in PROPOSED CORRECTION actually
+      appears in SOURCE (as itself, a title, or an unambiguous placeholder referent). A name that
+      exists only in PROPOSED CORRECTION - most often a mistranslated title/role recast as if it
+      were a person's name - is always a NEW defect, even when it reads as a plausible character.
 3. Grade your genuine confidence that PROPOSED CORRECTION, taken as a whole, is a good replacement
    for TRANSLATION.
 
@@ -38,10 +46,12 @@ DEFECT CATEGORIES (for reference - CONFIRMED DEFECTS names one or more of these)
   sentence-terminal mark (.!?) immediately before the tag followed by a capitalized word immediately
   after it (e.g. "...here.<b>#PosText#</b>Inside") is a genuine instance of this category, not a
   stylistic quibble; do not treat it as resolved just because the tag itself is preserved correctly.
-- OTHER_NAMED_DEFECT: something else concrete and nameable. Never covers replacing an already-
-  translated proper noun/title with a Pinyin transliteration - if PROPOSED CORRECTION does this,
-  treat it as a NEW defect (OTHER_NAMED_DEFECT), regardless of which category it was meant to
-  address; a translated name is not a defect, and undoing it is a regression, not a fix.
+- OTHER_NAMED_DEFECT: something else concrete and nameable, including a dropped/altered placeholder
+  token or a fabricated name/character not present in SOURCE (see checks 2a/2b above). Never covers
+  replacing an already-translated proper noun/title with a Pinyin transliteration - if PROPOSED
+  CORRECTION does this, treat it as a NEW defect (OTHER_NAMED_DEFECT), regardless of which category
+  it was meant to address; a translated name is not a defect, and undoing it is a regression, not a
+  fix.
 
 For each category in CONFIRMED DEFECTS, judge PROPOSED CORRECTION against SOURCE and TRANSLATION
 yourself - do not assume it actually fixes what it claims to. Common case for DROPPED_STUTTER:

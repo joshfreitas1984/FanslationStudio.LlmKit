@@ -98,7 +98,7 @@ public static class QualityEvaluatorAssessmentWorkflow
 
                 report.Results.Add(await ReviewDetectionAsync(config, model, client, resultId,
                     item.SampleId, item.SampleKind, item.Source, candidate.Value,
-                    expected));
+                    expected, config.QualityEvaluatorAssessment.DoubledDetection));
                 WriteYamlAtomically(resultPath, report);
             }
         }
@@ -109,7 +109,8 @@ public static class QualityEvaluatorAssessmentWorkflow
             if (report.Results.Any(x => x.ResultId == resultId))
                 continue;
 
-            report.Results.Add(await ReviewCorrectionAsync(config, model, client, resultId, item, modelName));
+            report.Results.Add(await ReviewCorrectionAsync(config, model, client, resultId, item, modelName,
+                config.QualityEvaluatorAssessment.DoubledVerification));
             WriteYamlAtomically(resultPath, report);
         }
 
@@ -121,6 +122,17 @@ public static class QualityEvaluatorAssessmentWorkflow
         return report;
     }
 
+    /// <summary>
+    /// Calls <see cref="QualityReviewWorkflow.DetectDefectsAsync"/> directly (once, or twice merged
+    /// via <see cref="QcDetectionResult.Merge"/> when <paramref name="doubledDetection"/> is true)
+    /// rather than the full five-call <see cref="QualityReviewWorkflow.GetLlmVerdictAsync"/>
+    /// orchestrator - detection is the only thing scored here, so calls 3-5 (correction draft/
+    /// verify/repair) would only contaminate elapsed-time measurements without affecting the score.
+    /// See docs/plans/qc-evaluator-comparison.md's "Handoff: Implementing Process Variants" section.
+    /// The classification below (None/Uncertain/named -> Pass/Abstain/Defect) mirrors
+    /// <see cref="QualityReviewWorkflow.GetLlmVerdictAsync"/>'s own mapping up to the point where it
+    /// would start drafting a correction.
+    /// </summary>
     private static async Task<EvaluatorResult> ReviewDetectionAsync(
         LlmConfig config,
         ModelExecutionConfig model,
@@ -130,7 +142,8 @@ public static class QualityEvaluatorAssessmentWorkflow
         string sampleKind,
         string source,
         string translation,
-        GoldLabel expected)
+        GoldLabel expected,
+        bool doubledDetection)
     {
         var stopwatch = Stopwatch.StartNew();
         var tokenReplacer = new StringTokenReplacer();
@@ -138,17 +151,49 @@ public static class QualityEvaluatorAssessmentWorkflow
         // this only affects glossary lines with "only"/"exclude" file restrictions, which are skipped
         // here the same way they'd be skipped for any file not in an "only" list.
         var glossaryPrompt = GlossaryLine.AppendPromptsFor(source, config.Runtime.GlossaryLines, string.Empty);
-        var verdict = await QualityReviewWorkflow.GetLlmVerdictAsync(config, model, client, source,
-            tokenReplacer.Replace(source), tokenReplacer.Replace(translation), glossaryPrompt);
+        var maskedRaw = tokenReplacer.Replace(source);
+        var maskedTranslated = tokenReplacer.Replace(translation);
+
+        var call1 = await QualityReviewWorkflow.DetectDefectsAsync(config, model, client, source, maskedRaw, maskedTranslated, glossaryPrompt, null);
+        var confirmed = call1;
+        if (doubledDetection && call1.Success)
+        {
+            var call2 = await QualityReviewWorkflow.DetectDefectsAsync(config, model, client, source, maskedRaw, maskedTranslated, glossaryPrompt, null);
+            confirmed = QcDetectionResult.Merge(call1, call2);
+        }
         stopwatch.Stop();
 
-        var actual = !verdict.Success
-            ? "Unscored"
-            : verdict.Defect == QcDefectCategory.None
-                ? "Pass"
-                : verdict.Defect == QcDefectCategory.Uncertain
-                    ? "Abstain"
-                    : "Defect";
+        string actual;
+        QcDefectCategory actualCategory;
+        List<string> actualCategories;
+        if (!confirmed.Success)
+        {
+            actual = "Unscored";
+            actualCategory = QcDefectCategory.Unknown;
+            actualCategories = [];
+        }
+        else if (!confirmed.HasDefects)
+        {
+            actual = "Pass";
+            actualCategory = QcDefectCategory.None;
+            actualCategories = [];
+        }
+        else
+        {
+            var isUncertain = confirmed.Findings.Any(finding => finding.Category == QcDefectCategory.Uncertain);
+            var namedDefects = confirmed.Findings
+                .Where(finding => finding.Category != QcDefectCategory.Uncertain)
+                .Select(finding => finding.Category)
+                .ToList();
+            actual = namedDefects.Count == 0 ? "Abstain" : "Defect";
+            actualCategory = namedDefects.Count == 0 ? QcDefectCategory.Uncertain : namedDefects[0];
+            actualCategories = namedDefects
+                .Select(category => category.ToString())
+                .Concat(isUncertain ? ["Uncertain"] : [])
+                .Distinct()
+                .ToList();
+        }
+
         return new EvaluatorResult
         {
             ResultId = resultId,
@@ -160,10 +205,10 @@ public static class QualityEvaluatorAssessmentWorkflow
             ExpectedLabel = expected.Label,
             ActualLabel = actual,
             ExpectedDefectCategories = expected.DefectCategories,
-            ActualDefectCategory = verdict.Defect.ToString(),
-            ActualDefectCategories = verdict.Findings?.Select(f => f.Category.ToString()).Distinct().ToList() ?? [],
-            ParseSuccess = verdict.Success,
-            Score = verdict.Score,
+            ActualDefectCategory = actualCategory.ToString(),
+            ActualDefectCategories = actualCategories,
+            ParseSuccess = confirmed.Success,
+            Score = actual == "Pass" ? 100 : null,
             ElapsedMilliseconds = stopwatch.ElapsedMilliseconds,
         };
     }
@@ -178,6 +223,14 @@ public static class QualityEvaluatorAssessmentWorkflow
     /// accuracy. The old "Unnecessary" bucket (the claimed defect didn't hold up) has no equivalent
     /// at this stage anymore; a full per-stage assessor that also re-runs detection independently is
     /// tracked as a follow-up (see docs/plans/qc-evaluator-comparison.md).
+    ///
+    /// Variant 2 (doubled verification, see docs/plans/qc-evaluator-comparison.md's "Process
+    /// Variants"): when <paramref name="doubledVerification"/> is true, runs
+    /// <see cref="QualityReviewWorkflow.GetVerificationVerdictAsync"/> twice (fresh, independent
+    /// calls) and combines them via <see cref="QcVerificationResult.Merge"/>, which merges strictly
+    /// (either call's objection rejects the correction) - the opposite direction from doubled
+    /// detection's permissive merge, since here the worse failure is accepting a harmful correction,
+    /// not rejecting a safe one.
     /// </summary>
     private static async Task<EvaluatorResult> ReviewCorrectionAsync(
         LlmConfig config,
@@ -185,7 +238,8 @@ public static class QualityEvaluatorAssessmentWorkflow
         HttpClient client,
         string resultId,
         CorrectionSample item,
-        string modelName)
+        string modelName,
+        bool doubledVerification)
     {
         var stopwatch = Stopwatch.StartNew();
         var tokenReplacer = new StringTokenReplacer();
@@ -193,11 +247,27 @@ public static class QualityEvaluatorAssessmentWorkflow
             ? [QcDefectCategory.OtherNamedDefect]
             : item.DefectCategories.Select(ParseCategory).Distinct().ToList();
         var glossaryPrompt = GlossaryLine.AppendPromptsFor(item.Source, config.Runtime.GlossaryLines, string.Empty);
-        var verdict = model.Prompts.ContainsKey("BaseQualityReviewVerificationPrompt")
-            ? await QualityReviewWorkflow.GetVerificationVerdictAsync(config, model, client, item.Source,
-                tokenReplacer.Replace(item.Source), tokenReplacer.Replace(item.CurrentTranslation), glossaryPrompt,
-                confirmedDefects, tokenReplacer.Replace(item.ProposedCorrection))
-            : new QcVerificationResult(false, [], [], 0);
+        var maskedRaw = tokenReplacer.Replace(item.Source);
+        var maskedTranslated = tokenReplacer.Replace(item.CurrentTranslation);
+        var maskedCorrection = tokenReplacer.Replace(item.ProposedCorrection);
+
+        QcVerificationResult verdict;
+        if (!model.Prompts.ContainsKey("BaseQualityReviewVerificationPrompt"))
+        {
+            verdict = new QcVerificationResult(false, [], [], 0);
+        }
+        else
+        {
+            var call1 = await QualityReviewWorkflow.GetVerificationVerdictAsync(config, model, client, item.Source,
+                maskedRaw, maskedTranslated, glossaryPrompt, confirmedDefects, maskedCorrection);
+            verdict = call1;
+            if (doubledVerification && call1.Success)
+            {
+                var call2 = await QualityReviewWorkflow.GetVerificationVerdictAsync(config, model, client, item.Source,
+                    maskedRaw, maskedTranslated, glossaryPrompt, confirmedDefects, maskedCorrection);
+                verdict = QcVerificationResult.Merge(call1, call2);
+            }
+        }
         stopwatch.Stop();
 
         var actualSafety = !verdict.Success
