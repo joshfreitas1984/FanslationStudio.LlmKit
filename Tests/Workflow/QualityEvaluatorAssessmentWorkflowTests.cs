@@ -87,4 +87,50 @@ public sealed class QualityEvaluatorAssessmentWorkflowTests
             QualityEvaluatorAssessmentWorkflow.CalculateFingerprint(first),
             QualityEvaluatorAssessmentWorkflow.CalculateFingerprint(second));
     }
+
+        [Fact]
+        public void Summary_SeparatesUnscoredDetectionFromFalsePositives()
+        {
+          var report = new QualityEvaluatorAssessmentWorkflow.EvaluatorResultFile
+          {
+            ModelName = "Evaluator",
+            Results =
+            [
+                new() { EvaluationKind = "detection", ExpectedLabel = "Pass", ActualLabel = "Defect", ParseSuccess = false },
+              new() { EvaluationKind = "detection", ExpectedLabel = "Defect", ActualLabel = "Pass", ParseSuccess = true },
+              new() { EvaluationKind = "detection", ExpectedLabel = "Defect", ActualLabel = "Defect", ActualDefectCategory = "DroppedContent", ExpectedDefectCategories = ["dropped-content"], ParseSuccess = true },
+            ],
+          };
+
+          var summary = report.ToSummary();
+
+          Assert.Equal(1, summary.DetectionUnscoredCount);
+          Assert.Equal(0, summary.FalsePositiveCount);
+          Assert.Equal(1, summary.FalseNegativeCount);
+          Assert.Equal(0.5, summary.DetectionAccuracy);
+          Assert.Equal(0.5, summary.DefectRecall);
+          Assert.Equal(1, summary.DefectCategoryAccuracy);
+        }
+
+        [Fact]
+        public void Summary_ReportsCorrectionSafetyOutcomes()
+        {
+          var report = new QualityEvaluatorAssessmentWorkflow.EvaluatorResultFile
+          {
+            ModelName = "Evaluator",
+            Results =
+            [
+              new() { EvaluationKind = "correction", ExpectedCorrectionSafety = "safe", ActualCorrectionSafety = "Safe", ParseSuccess = true },
+              new() { EvaluationKind = "correction", ExpectedCorrectionSafety = "harmful", ActualCorrectionSafety = "Safe", ParseSuccess = true },
+              new() { EvaluationKind = "correction", ExpectedCorrectionSafety = "unnecessary", ActualCorrectionSafety = "Unnecessary", ParseSuccess = true },
+            ],
+          };
+
+          var summary = report.ToSummary();
+
+          Assert.Equal(2, summary.CorrectionSafeCount);
+          Assert.Equal(1, summary.CorrectionUnnecessaryCount);
+          Assert.Equal(0, summary.CorrectionHarmfulCount);
+          Assert.Equal(2d / 3d, summary.CorrectionSafetyAccuracy);
+        }
 }

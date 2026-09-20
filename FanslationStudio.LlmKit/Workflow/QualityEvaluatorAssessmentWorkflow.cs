@@ -138,11 +138,13 @@ public static class QualityEvaluatorAssessmentWorkflow
             tokenReplacer.Replace(source), tokenReplacer.Replace(translation), string.Empty);
         stopwatch.Stop();
 
-        var actual = verdict.Success && verdict.Defect == QcDefectCategory.None
-            ? "Pass"
-            : verdict.Success && verdict.Defect == QcDefectCategory.Uncertain
-                ? "Abstain"
-                : "Defect";
+        var actual = !verdict.Success
+            ? "Unscored"
+            : verdict.Defect == QcDefectCategory.None
+                ? "Pass"
+                : verdict.Defect == QcDefectCategory.Uncertain
+                    ? "Abstain"
+                    : "Defect";
         return new EvaluatorResult
         {
             ResultId = resultId,
@@ -310,18 +312,51 @@ public static class QualityEvaluatorAssessmentWorkflow
         public long ElapsedMilliseconds { get; set; }
         public List<EvaluatorResult> Results { get; set; } = [];
 
-        public EvaluatorSummary ToSummary() => new()
+        public EvaluatorSummary ToSummary()
         {
-            ModelName = ModelName,
-            Status = Status,
-            SampleCount = Results.Count,
-            ParseSuccessRate = Results.Count == 0 ? 0 : Results.Count(x => x.ParseSuccess) / (double)Results.Count,
-            DetectionAccuracy = Results.Where(x => x.EvaluationKind == "detection").DefaultIfEmpty().Average(x => x == null ? 0 : x.ExpectedLabel == x.ActualLabel ? 1 : 0),
-            CorrectionSafetyAccuracy = Results.Where(x => x.EvaluationKind == "correction").DefaultIfEmpty().Average(x => x == null ? 0 : x.ExpectedCorrectionSafety == x.ActualCorrectionSafety ? 1 : 0),
-            AverageMilliseconds = Results.Count == 0 ? 0 : Results.Average(x => x.ElapsedMilliseconds),
-            P95Milliseconds = Percentile(Results.Select(x => x.ElapsedMilliseconds), 0.95),
-            ElapsedMilliseconds = ElapsedMilliseconds,
-        };
+            var detection = Results.Where(x => x.EvaluationKind == "detection").ToList();
+            var scoredDetection = detection.Where(x => x.ParseSuccess).ToList();
+            var corrections = Results.Where(x => x.EvaluationKind == "correction").ToList();
+            var detectionCorrect = scoredDetection.Count(x => x.ExpectedLabel == x.ActualLabel);
+            var expectedDefects = scoredDetection.Count(x => x.ExpectedLabel == "Defect");
+            var actualDefects = scoredDetection.Count(x => x.ActualLabel == "Defect");
+            var trueDefects = scoredDetection.Count(x => x.ExpectedLabel == "Defect" && x.ActualLabel == "Defect");
+            var categoryJudgments = scoredDetection.Where(x => x.ExpectedLabel == "Defect" && x.ActualLabel == "Defect");
+
+            return new EvaluatorSummary
+            {
+                ModelName = ModelName,
+                Status = Status,
+                SampleCount = Results.Count,
+                DetectionSampleCount = detection.Count,
+                CorrectionSampleCount = corrections.Count,
+                ParseSuccessRate = Results.Count == 0 ? 0 : Results.Count(x => x.ParseSuccess) / (double)Results.Count,
+                DetectionAccuracy = scoredDetection.Count == 0 ? 0 : detectionCorrect / (double)scoredDetection.Count,
+                DetectionAccuracyIncludingUnscored = detection.Count == 0 ? 0 : detectionCorrect / (double)detection.Count,
+                DetectionUnscoredCount = detection.Count(x => !x.ParseSuccess),
+                DetectionAbstainCount = detection.Count(x => x.ActualLabel == "Abstain"),
+                DetectionPassCount = detection.Count(x => x.ActualLabel == "Pass"),
+                DetectionDefectCount = actualDefects,
+                TrueDefectCount = trueDefects,
+                FalsePositiveCount = scoredDetection.Count(x => x.ExpectedLabel != "Defect" && x.ActualLabel == "Defect"),
+                FalseNegativeCount = scoredDetection.Count(x => x.ExpectedLabel == "Defect" && x.ActualLabel != "Defect"),
+                DefectRecall = expectedDefects == 0 ? 0 : trueDefects / (double)expectedDefects,
+                DefectPrecision = actualDefects == 0 ? 0 : trueDefects / (double)actualDefects,
+                DefectCategoryAccuracy = categoryJudgments.Any()
+                    ? categoryJudgments.Count(x => x.ExpectedDefectCategories.Any(expected =>
+                        string.Equals(expected, x.ActualDefectCategory, StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(ParseCategory(expected).ToString(), x.ActualDefectCategory, StringComparison.OrdinalIgnoreCase))) / (double)categoryJudgments.Count()
+                    : 0,
+                CorrectionSafetyAccuracy = corrections.Count == 0 ? 0 : corrections.Count(x => string.Equals(x.ExpectedCorrectionSafety, x.ActualCorrectionSafety, StringComparison.OrdinalIgnoreCase)) / (double)corrections.Count,
+                CorrectionSafeCount = corrections.Count(x => x.ActualCorrectionSafety == "Safe"),
+                CorrectionHarmfulCount = corrections.Count(x => x.ActualCorrectionSafety == "Harmful"),
+                CorrectionUnnecessaryCount = corrections.Count(x => x.ActualCorrectionSafety == "Unnecessary"),
+                CorrectionUnscoredCount = corrections.Count(x => x.ActualCorrectionSafety == "Unscored"),
+                AverageMilliseconds = Results.Count == 0 ? 0 : Results.Average(x => x.ElapsedMilliseconds),
+                P95Milliseconds = Percentile(Results.Select(x => x.ElapsedMilliseconds), 0.95),
+                ElapsedMilliseconds = ElapsedMilliseconds,
+            };
+        }
     }
 
     public sealed class EvaluatorResult
@@ -349,9 +384,26 @@ public static class QualityEvaluatorAssessmentWorkflow
         public string ModelName { get; set; } = string.Empty;
         public string Status { get; set; } = string.Empty;
         public int SampleCount { get; set; }
+        public int DetectionSampleCount { get; set; }
+        public int CorrectionSampleCount { get; set; }
         public double ParseSuccessRate { get; set; }
         public double DetectionAccuracy { get; set; }
+        public double DetectionAccuracyIncludingUnscored { get; set; }
+        public int DetectionUnscoredCount { get; set; }
+        public int DetectionAbstainCount { get; set; }
+        public int DetectionPassCount { get; set; }
+        public int DetectionDefectCount { get; set; }
+        public int TrueDefectCount { get; set; }
+        public int FalsePositiveCount { get; set; }
+        public int FalseNegativeCount { get; set; }
+        public double DefectRecall { get; set; }
+        public double DefectPrecision { get; set; }
+        public double DefectCategoryAccuracy { get; set; }
         public double CorrectionSafetyAccuracy { get; set; }
+        public int CorrectionSafeCount { get; set; }
+        public int CorrectionHarmfulCount { get; set; }
+        public int CorrectionUnnecessaryCount { get; set; }
+        public int CorrectionUnscoredCount { get; set; }
         public double AverageMilliseconds { get; set; }
         public long P95Milliseconds { get; set; }
         public long ElapsedMilliseconds { get; set; }
