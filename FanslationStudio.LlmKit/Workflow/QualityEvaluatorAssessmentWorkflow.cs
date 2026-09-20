@@ -163,6 +163,17 @@ public static class QualityEvaluatorAssessmentWorkflow
         };
     }
 
+    /// <summary>
+    /// Under the five-call redesign, call 4 (<see cref="QualityReviewWorkflow.GetVerificationVerdictAsync"/>)
+    /// only checks whether a correction resolves an ALREADY-CONFIRMED defect set and introduces no
+    /// new one - it no longer re-litigates whether the claimed defect exists at all (that judgment
+    /// moved entirely to calls 1/2's detection/merge). So <paramref name="item"/>'s gold-labeled
+    /// <see cref="CorrectionSample.DefectCategories"/> are treated here as already-confirmed ground
+    /// truth, not a claim to verify - this method measures correction safety only, not detection
+    /// accuracy. The old "Unnecessary" bucket (the claimed defect didn't hold up) has no equivalent
+    /// at this stage anymore; a full per-stage assessor that also re-runs detection independently is
+    /// tracked as a follow-up (see docs/plans/qc-evaluator-comparison.md).
+    /// </summary>
     private static async Task<EvaluatorResult> ReviewCorrectionAsync(
         LlmConfig config,
         ModelExecutionConfig model,
@@ -173,18 +184,20 @@ public static class QualityEvaluatorAssessmentWorkflow
     {
         var stopwatch = Stopwatch.StartNew();
         var tokenReplacer = new StringTokenReplacer();
-        var defect = ParseCategory(item.DefectCategories.FirstOrDefault());
+        var confirmedDefects = item.DefectCategories.Count == 0
+            ? [QcDefectCategory.OtherNamedDefect]
+            : item.DefectCategories.Select(ParseCategory).Distinct().ToList();
         var verdict = model.Prompts.ContainsKey("BaseQualityReviewVerificationPrompt")
             ? await QualityReviewWorkflow.GetVerificationVerdictAsync(config, model, client, item.Source,
                 tokenReplacer.Replace(item.Source), tokenReplacer.Replace(item.CurrentTranslation), string.Empty,
-                defect, tokenReplacer.Replace(item.ProposedCorrection))
-            : new QualityReviewWorkflow.ScoreVerdict(false, QcDefectCategory.Unknown, 0);
+                confirmedDefects, tokenReplacer.Replace(item.ProposedCorrection))
+            : new QcVerificationResult(false, [], [], 0);
         stopwatch.Stop();
 
         var actualSafety = !verdict.Success
             ? "Unscored"
-            : verdict.Defect == QcDefectCategory.None
-                ? "Unnecessary"
+            : !verdict.Accepted
+                ? "Harmful"
                 : verdict.Score >= config.QualityReview.MinAcceptableScore ? "Safe" : "Harmful";
         return new EvaluatorResult
         {
@@ -196,9 +209,9 @@ public static class QualityEvaluatorAssessmentWorkflow
             CurrentTranslation = item.CurrentTranslation,
             ProposedCorrection = item.ProposedCorrection,
             ExpectedLabel = item.Label,
-            ActualLabel = verdict.Defect == QcDefectCategory.None ? "Pass" : "Defect",
+            ActualLabel = verdict.Accepted ? "Pass" : "Defect",
             ExpectedDefectCategories = item.DefectCategories,
-            ActualDefectCategory = verdict.Defect.ToString(),
+            ActualDefectCategory = string.Join(",", confirmedDefects),
             ExpectedCorrectionSafety = item.CorrectionSafety,
             ActualCorrectionSafety = actualSafety,
             ParseSuccess = verdict.Success,
@@ -207,14 +220,29 @@ public static class QualityEvaluatorAssessmentWorkflow
         };
     }
 
-    private static QcDefectCategory ParseCategory(string? category) => category?.ToLowerInvariant() switch
+    /// <summary>
+    /// Maps the gold set's free-form kebab-case category vocabulary (see
+    /// docs/plans/qc-evaluator-comparison.md's "Validation" section) onto the production
+    /// <see cref="QcDefectCategory"/> enum. Every category actually used in
+    /// <c>Files/Goldset/GoldSet.yaml</c> is listed explicitly here - a category silently falling
+    /// through to <see cref="QcDefectCategory.OtherNamedDefect"/> corrupts per-category
+    /// precision/recall (see the taxonomy-mismatch gap this fixed). "formatting", "garbage-output",
+    /// "fluency", "invented-tag", and "prompt-leak" are deliberately kept mapped to
+    /// <see cref="QcDefectCategory.OtherNamedDefect"/> - they genuinely have no closer match in the
+    /// production category list, not because nobody looked.
+    /// </summary>
+    internal static QcDefectCategory ParseCategory(string? category) => category?.ToLowerInvariant() switch
     {
         "dropped-content" => QcDefectCategory.DroppedContent,
+        "pronoun-attribution" => QcDefectCategory.DroppedContent,
         "domain-term" or "terminology" => QcDefectCategory.DomainTerm,
         "lost-idiom" => QcDefectCategory.LostIdiom,
         "untranslated-pinyin" => QcDefectCategory.UntranslatedPinyin,
         "garbled-number" => QcDefectCategory.GarbledNumber,
         "hard-to-parse-seam" or "omitted-separator" => QcDefectCategory.HardToParseSeam,
+        "literal-newline" or "misplaced-separator" => QcDefectCategory.HardToParseSeam,
+        "mistranslation" => QcDefectCategory.OtherNamedDefect,
+        "formatting" or "garbage-output" or "fluency" or "invented-tag" or "prompt-leak" => QcDefectCategory.OtherNamedDefect,
         _ => QcDefectCategory.OtherNamedDefect,
     };
 

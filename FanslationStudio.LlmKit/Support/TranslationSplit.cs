@@ -111,6 +111,12 @@ public class TranslationSplit
     /// </summary>
     public QcDefectCategory QcDefectCategory { get; set; } = QcDefectCategory.Unknown;
 
+    /// <summary>All defect categories found during the latest quality review, in detector order.
+    /// The scalar <see cref="QcDefectCategory"/> remains the primary category for existing
+    /// consumers; this collection preserves co-occurring findings for newer triage and reporting.
+    /// </summary>
+    public List<QcDefectCategory> QcDefectCategories { get; set; } = [];
+
     /// <summary>
     /// How many consecutive times <see cref="Workflow.QualityReviewWorkflow.ApplyRulesToCurrentQcTranslated"/>
     /// has reset this column's <see cref="QcTranslated"/> for breaking a rule, against the SAME
@@ -183,6 +189,7 @@ public class TranslationSplit
         QcFailureReason = string.Empty;
         QcQualityScore = null;
         QcDefectCategory = QcDefectCategory.Unknown;
+        QcDefectCategories.Clear();
     }
 
     //public void ResetGlossaryFlags()

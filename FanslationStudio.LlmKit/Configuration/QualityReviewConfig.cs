@@ -76,13 +76,13 @@ public class QualityReviewConfig
     public int InlineRuleCheckRetries { get; set; } = 0;
 
     /// <summary>
-    /// Only meaningful when <see cref="TwoStageVerificationEnabled"/> is true. Bounds how many
-    /// times <see cref="Workflow.QualityReviewWorkflow.GetCorrectionRepairAsync"/> ("call 3") will
-    /// attempt to improve a correction that call 2 (<see cref="Workflow.QualityReviewWorkflow.GetVerificationVerdictAsync"/>)
-    /// scored below <see cref="MinAcceptableScore"/>, re-scoring via call 2 after each attempt,
-    /// before accepting whatever the last attempt was (still flagged via
-    /// <see cref="Support.TranslationSplit.FlaggedForQcReview"/> if still below threshold - never
-    /// discarded, same "accept once validated" philosophy every other QC retry follows). Default 2.
+    /// Bounds how many times call 5 (<see cref="Workflow.QualityReviewWorkflow.GetCorrectionRepairAsync"/>)
+    /// will attempt to improve a correction call 4 (<see cref="Workflow.QualityReviewWorkflow.GetVerificationVerdictAsync"/>)
+    /// found unresolved/regressed, re-verifying against the full confirmed defect set via call 4
+    /// after each attempt, before accepting whatever the last attempt was (still flagged via
+    /// <see cref="Support.TranslationSplit.FlaggedForQcReview"/> if still unresolved/below threshold -
+    /// never discarded, same "accept once validated" philosophy every other QC retry follows).
+    /// Default 2.
     /// </summary>
     public int MaxScoreRepairIterations { get; set; } = 2;
 
@@ -110,45 +110,19 @@ public class QualityReviewConfig
     public HashSet<QcDefectCategory> AutoAcceptDefectCategories { get; set; } = new();
 
     /// <summary>
-    /// Controls the ENTIRE scoring/repair pipeline for any column the main QC call
-    /// (<see cref="Workflow.QualityReviewWorkflow.GetLlmVerdictAsync"/>, "call 1") flags with a
-    /// named DEFECT (anything but <see cref="QcDefectCategory.None"/>/<see cref="QcDefectCategory.Unknown"/>).
-    /// Call 1 never self-scores its own draft (see docs/quality-review-pass-architecture.md
-    /// postmortem #6 for why: a model grading its own freshly-authored text is a structural bias no
-    /// rubric wording fixes) - scoring only ever happens in
-    /// <see cref="Workflow.QualityReviewWorkflow.GetVerificationVerdictAsync"/> ("call 2"), which
-    /// grades call 1's candidate (or a repaired one) without ever drafting text itself, and decides
-    /// whether <see cref="Workflow.QualityReviewWorkflow.GetCorrectionRepairAsync"/> ("call 3") needs
-    /// to attempt an improved fix (bounded by <see cref="MaxScoreRepairIterations"/>, re-scored by
-    /// call 2 after every attempt).
-    ///
-    /// False by default. When false (or the model is missing either prompt), a column call 1
-    /// corrects is accepted as-is (same validation gate either way) but gets NO score
-    /// (<see cref="Support.TranslationSplit.QcQualityScore"/> stays null) and is always flagged via
-    /// <see cref="Support.TranslationSplit.FlaggedForQcReview"/> - there is no fallback self-score to
-    /// fall back to, since call 1 was never asked to produce one. A <see cref="QcDefectCategory.None"/>
-    /// outcome (nothing to correct) is entirely unaffected by this flag either way - fixed score 100,
-    /// no extra call, regardless of setting. Adds up to <c>MaxScoreRepairIterations + 1</c> calls to
-    /// call 2 and up to <see cref="MaxScoreRepairIterations"/> calls to call 3, but only for the
-    /// ~10-15% of a corpus call 1 flags with a named defect - never for a column call 1 passes.
-    /// </summary>
-    public bool TwoStageVerificationEnabled { get; set; } = false;
-
-    /// <summary>
-    /// Only meaningful when <see cref="TwoStageVerificationEnabled"/> is true. Runs call 2
-    /// (<see cref="Workflow.QualityReviewWorkflow.GetVerificationVerdictAsync"/>) with Ollama's
-    /// `think` mode on, instead of production's normal thinking-off default (see
-    /// <see cref="Utility.LlmHelpers.GenerateLlmRequestData"/>). Call 2 is a narrow, single-claim
-    /// judgment ("does call 1's claimed DEFECT actually hold up?") rather than an open-ended
-    /// judgment, and only runs for the ~10-15% of a corpus call 1 already flagged - the call where
-    /// reasoning is most likely to help without paying for it across the whole corpus. Never
-    /// affects call 1 (<see cref="Workflow.QualityReviewWorkflow.GetLlmVerdictAsync"/>) or call 3
-    /// (<see cref="Workflow.QualityReviewWorkflow.GetCorrectionRepairAsync"/>).
+    /// Runs call 4 (<see cref="Workflow.QualityReviewWorkflow.GetVerificationVerdictAsync"/>) with
+    /// Ollama's `think` mode on, instead of production's normal thinking-off default (see
+    /// <see cref="Utility.LlmHelpers.GenerateLlmRequestData"/>). Call 4 only runs for the subset of a
+    /// corpus calls 1/2 confirm at least one named defect on - the call where reasoning is most
+    /// likely to help without paying for it across the whole corpus. Never affects calls 1/2
+    /// (<see cref="Workflow.QualityReviewWorkflow.GetLlmVerdictAsync"/>), call 3
+    /// (<see cref="Workflow.QualityReviewWorkflow.GetLlmVerdictAsync"/>'s correction generation), or
+    /// call 5 (<see cref="Workflow.QualityReviewWorkflow.GetCorrectionRepairAsync"/>).
     ///
     /// Reasoning tokens are generated into the SAME num_predict/num_ctx budget as the final
-    /// DEFECT:/SCORE: answer, so this deliberately does NOT swap in a bigger budget per-call
-    /// (that would force Ollama to reload the model with different context params on every single
-    /// verification call, since call 1/call 3 keep running against the same loaded model in
+    /// UNRESOLVED:/NEW_DEFECTS:/SCORE: answer, so this deliberately does NOT swap in a bigger budget
+    /// per-call (that would force Ollama to reload the model with different context params on every
+    /// single verification call, since the other calls keep running against the same loaded model in
     /// between) - instead, the model's own <c>BaseFiles/&lt;Family&gt;/Config.yaml</c>
     /// <c>modelParams</c> need enough static headroom (e.g. Qwen38's num_ctx/num_predict were raised
     /// to 8192/4096) for a reasoning trace to fit before this flag is turned on, or a real reasoning
@@ -157,7 +131,7 @@ public class QualityReviewConfig
     /// <see cref="Workflow.QualityReviewWorkflow.GetVerificationVerdictAsync"/>'s parse-failure
     /// branch) instead of an actual quality read. The reasoning trace itself is still always
     /// discarded before parsing (<see cref="TranslationService.TranslateMessagesAsync"/>'s
-    /// `includeThinking` stays false) - only the final DEFECT:/SCORE: lines ever reach the regexes.
+    /// `includeThinking` stays false) - only the final labeled lines ever reach the regexes.
     ///
     /// False by default, matching every other production call's thinking-off default. Turn on to
     /// test whether it measurably improves verification precision (re-run the per-category
@@ -165,39 +139,4 @@ public class QualityReviewConfig
     /// extra latency/tokens per call, but only for the already-flagged subset.
     /// </summary>
     public bool VerificationThinkingEnabled { get; set; } = false;
-
-    /// <summary>
-    /// Only meaningful when <see cref="TwoStageVerificationEnabled"/> is true (and either verification
-    /// prompt/repair prompt is present for the model). Sends a column call 1 (
-    /// <see cref="Workflow.QualityReviewWorkflow.GetLlmVerdictAsync"/>) passed with <c>DEFECT: NONE</c>
-    /// through call 2 (<see cref="Workflow.QualityReviewWorkflow.GetVerificationVerdictAsync"/>) too,
-    /// as a genuine independent second opinion, instead of accepting call 1's NONE outright at a fixed
-    /// score of 100 the way every other config does. Call 2 has no memory of call 1's own reasoning
-    /// and never drafted the translation itself, so it isn't subject to the same self-consistency
-    /// blind spot that let a genuine defect (e.g. a stitched-fragment seam glued directly to a markup
-    /// tag with no natural connector) come back <c>DEFECT: NONE</c> from call 1 every time, even after
-    /// the base prompt gained explicit wording for it - see
-    /// docs/quality-review-pass-architecture.md postmortem #6 for why wording alone doesn't reliably
-    /// close this kind of miss, and the tag-seam investigation this flag was added for.
-    ///
-    /// If call 2 also agrees nothing is wrong, the column is accepted exactly as before (fixed score
-    /// 100, <see cref="QcDefectCategory.None"/>) - this flag costs nothing extra in that case beyond
-    /// the one additional call. If call 2 instead names a real defect, call 2 itself never drafts
-    /// text (see <see cref="Workflow.QualityReviewWorkflow.ScoreVerdict"/>'s doc comment), so call 3
-    /// (<see cref="Workflow.QualityReviewWorkflow.GetCorrectionRepairAsync"/>) drafts the FIRST
-    /// candidate for the confirmed defect (there is no prior attempt to improve on yet), and that
-    /// candidate enters the SAME call-2 re-score/call-3 repair loop an ordinary call-1 correction
-    /// does - it can be accepted as a real <see cref="QcStatus.Corrected"/> column exactly like any
-    /// other. Only if the repair prompt is missing for this model, or call 3 can't draft anything at
-    /// all, does the column fall back to a below-threshold-score retry (via the normal
-    /// <see cref="Support.TranslationSplit.QcRuleCheckFailureCount"/>/<see cref="MaxRuleCheckRetries"/>
-    /// budget) with no correction, permanently <see cref="Support.TranslationSplit.FlaggedForQcReview"/>
-    /// once retries run out rather than force-corrected in code.
-    ///
-    /// False by default - doubles call 1's total LLM call count across the WHOLE corpus (every column,
-    /// not just the ~10-15% call 1 already names a defect on), unlike every other
-    /// <see cref="TwoStageVerificationEnabled"/> cost, which only applies to that flagged subset. Turn
-    /// on only if that cost is acceptable for the recall improvement on missed defects.
-    /// </summary>
-    public bool VerifyNoDefectClaims { get; set; } = false;
 }

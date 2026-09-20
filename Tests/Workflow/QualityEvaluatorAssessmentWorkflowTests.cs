@@ -1,9 +1,40 @@
+using FanslationStudio.LlmKit.Support;
 using FanslationStudio.LlmKit.Workflow;
 
 namespace Tests.Workflow;
 
 public sealed class QualityEvaluatorAssessmentWorkflowTests
 {
+    /// <summary>
+    /// Locks in ParseCategory's mapping from the gold set's free-form kebab-case category
+    /// vocabulary (Files/Goldset/GoldSet.yaml, DragonHierOverLlm) onto <see cref="QcDefectCategory"/>
+    /// - every category actually used in that gold set must land on a real category, never silently
+    /// fall through to a shared catch-all that would corrupt per-category precision/recall (see
+    /// docs/plans/qc-evaluator-comparison.md's taxonomy-mismatch note).
+    /// </summary>
+    [Theory]
+    [InlineData("dropped-content", QcDefectCategory.DroppedContent)]
+    [InlineData("pronoun-attribution", QcDefectCategory.DroppedContent)]
+    [InlineData("domain-term", QcDefectCategory.DomainTerm)]
+    [InlineData("terminology", QcDefectCategory.DomainTerm)]
+    [InlineData("lost-idiom", QcDefectCategory.LostIdiom)]
+    [InlineData("untranslated-pinyin", QcDefectCategory.UntranslatedPinyin)]
+    [InlineData("garbled-number", QcDefectCategory.GarbledNumber)]
+    [InlineData("hard-to-parse-seam", QcDefectCategory.HardToParseSeam)]
+    [InlineData("omitted-separator", QcDefectCategory.HardToParseSeam)]
+    [InlineData("literal-newline", QcDefectCategory.HardToParseSeam)]
+    [InlineData("misplaced-separator", QcDefectCategory.HardToParseSeam)]
+    [InlineData("formatting", QcDefectCategory.OtherNamedDefect)]
+    [InlineData("garbage-output", QcDefectCategory.OtherNamedDefect)]
+    [InlineData("fluency", QcDefectCategory.OtherNamedDefect)]
+    [InlineData("invented-tag", QcDefectCategory.OtherNamedDefect)]
+    [InlineData("prompt-leak", QcDefectCategory.OtherNamedDefect)]
+    [InlineData("mistranslation", QcDefectCategory.OtherNamedDefect)]
+    public void ParseCategory_MapsEveryGoldSetCategory(string goldSetCategory, QcDefectCategory expected)
+    {
+        Assert.Equal(expected, QualityEvaluatorAssessmentWorkflow.ParseCategory(goldSetCategory));
+    }
+
     [Fact]
     public void LoadGoldSet_FlattensCurrentCandidateShape()
     {

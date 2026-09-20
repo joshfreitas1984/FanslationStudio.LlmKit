@@ -15,19 +15,16 @@ specifically for:
   read as one grammatical sentence unless SOURCE genuinely ends a sentence there. A sentence-terminal
   mark (.!?) immediately before the tag followed by a capitalized word immediately after it (e.g.
   "...here.<b>#PosText#</b>Inside") is the signature of two fragments that don't actually connect - a
-  genuine HARD_TO_PARSE_SEAM, not a stylistic quibble. Keep the tag itself unchanged in your
-  corrected text; fix the grammar/punctuation/capitalization around it instead.
+  genuine HARD_TO_PARSE_SEAM, not a stylistic quibble.
 - Mistranslated or garbled names/titles (should be Pinyin, consistent with any glossary terms
   given below).
 - A title/honorific dropped entirely because it sits directly next to a name in SOURCE - whether a
   literal name (e.g. SOURCE "万大侠，" translated as just "Wan," with the title missing) or a name
   placeholder (e.g. SOURCE "#PlayerName#少侠，" translated as just "#PlayerName#," with the title
   missing) - the title must still be translated and kept, e.g. "Great Hero Wan," or "Young Hero
-  #PlayerName#,". If your CORRECTED text restores a dropped title next to a placeholder, keep the
-  placeholder token itself unchanged per the DO NOT flag rule below. Only restore a title that is
-  literally present in SOURCE next to the name/placeholder - never insert one (e.g. "Young Hero")
-  that SOURCE does not actually contain; a name or placeholder with no adjacent title in SOURCE is
-  not a defect.
+  #PlayerName#,". Only restore a title that is literally present in SOURCE next to the
+  name/placeholder - never insert one (e.g. "Young Hero") that SOURCE does not actually contain; a
+  name or placeholder with no adjacent title in SOURCE is not a defect.
 - Wrong language output, leftover Chinese characters, or gibberish.
 - Meaning that doesn't match the Chinese source, even if the English reads fluently on its own.
 - An omitted Chinese subject/object translated by mechanically carrying forward the subject of a
@@ -37,51 +34,44 @@ specifically for:
   dialogue lines - e.g. "莫慌，让为师看看……\n还好还好，只是精疲力竭昏厥过去了。" has the speaker
   examining someone else, so the second line means roughly "Thank goodness, thank goodness. She
   only passed out from exhaustion." - not "No need to worry, I just fainted from exhaustion.",
-  which wrongly inherits the speaker as subject. Correct these to the subject/object context
-  actually supports, or to a neutral construction if it is genuinely ambiguous - never invent a
-  subject unsupported by context.
+  which wrongly inherits the speaker as subject.
 - A SOURCE stammer/stutter (a word's leading syllable(s) repeated right before the full word,
   separated by 、 or , - e.g. "思、思阁主" stammering on 思, "你、你、你……" stammering on 你 three
   times) that TRANSLATION drops entirely (no repetition of the corresponding word at all) or
   renders as gibberish unconnected to the stammered word (e.g. a stray transliterated syllable
   standing in for it, like "Shi," for 什). A hyphenated partial repeat ("Y-y-you") and a full
   separately-spoken repeat ("You, you, you") are BOTH valid English stammer renderings - never
-  flag/correct a line only to convert one into the other; that is a style preference, not a defect.
-  A SOURCE stammer that TRANSLATION already conveys in some form is not itself a defect - if SOURCE
-  stammers but something else is wrong on the same line (a name, place, idiom, number, or dropped
-  meaning), that is the defect to name, not this one; those take priority over a stammer-formatting
-  quibble. When you do correct a genuinely dropped/garbled stammer, touch only the stammering
-  word/name - never let the fix also change a name, place, idiom, or meaning elsewhere in the line.
+  flag a line only because one form was used instead of the other; that is a style preference, not
+  a defect. A SOURCE stammer that TRANSLATION already conveys in some form is not itself a defect -
+  if SOURCE stammers but something else is wrong on the same line (a name, place, idiom, number, or
+  dropped meaning), that is the defect to name, not this one; those take priority over a
+  stammer-formatting quibble.
 
-DO NOT flag or change:
-- An already-translated proper noun/title "corrected" back to raw Pinyin transliteration - a
+DO NOT flag:
+- An already-translated proper noun/title that also has a raw Pinyin transliteration available - a
   translated name is not itself a defect just because a Pinyin rendering also exists, and undoing an
-  existing translation is a regression, not a fix, no matter which DEFECT category seems to apply.
+  existing translation would be a regression, not a fix, no matter which DEFECT category seems to
+  apply.
 - Placeholder tokens in curly braces, e.g. {0}, {1} - these are restored automatically after your
-  review and must appear in your corrected text exactly as given, in the same relative position.
+  review, unrelated to any defect.
 - Minor stylistic choices that don't change meaning (word order, synonym choice) if the sentence
   is already correct and natural.
 - Literal \n sequences in TRANSLATION - check what precedes the \n in SOURCE:
   - Comma (or no terminal punctuation) before the \n: this is a UI line-wrap splitting one
-    continuing sentence across two lines. It is fine - often preferable - for TRANSLATION to
-    merge this into a single fluent English sentence with no \n at all. Do not penalize a merge
-    like this, and propose one yourself if TRANSLATION keeps the \n but reads as a stitched-
-    together, comma-spliced pair of clauses instead of one natural sentence. For example, source
-    "随身携带的珍宝，\n若学识足够会每日自动尝试鉴定。" (comma before the \n) should read as one
-    sentence, e.g. "Treasures carried with you will be automatically appraised each day if your
-    knowledge is sufficient." - not a two-line version that keeps the \n at the cost of a
-    dangling clause like "If learned enough, it will...".
+    continuing sentence across two lines - not a defect either way, whether TRANSLATION merges it
+    into one sentence or keeps the \n.
   - Terminal mark (。！？!?.) before the \n: this separates two already-complete
-    sentences/clauses - never propose removing, adding, or shifting the \n in this case.
+    sentences/clauses - not a defect either way.
   Neither case excuses an actual grammar error next to the \n - a missing subject/pronoun, wrong
-  verb form, a dangling clause, subject-verb disagreement, etc. Flag and correct those exactly as
-  you would anywhere else in the sentence.
+  verb form, a dangling clause, subject-verb disagreement, etc. Flag those exactly as you would
+  anywhere else in the sentence.
 
-GLOSSARY: if glossary terms are provided below and their Chinese term appears in SOURCE, your
-corrected text (if any) MUST use the given English term - do not substitute a different
-translation for a name/term the glossary already fixes.
+GLOSSARY: if glossary terms are provided below and their Chinese term appears in SOURCE, TRANSLATION
+using a different term than the glossary's given English term for that name/term is a defect
+(DOMAIN_TERM or OTHER_NAMED_DEFECT, whichever fits).
 
-DEFECT CATEGORIES: before scoring, decide which ONE of these applies, if any:
+DEFECT CATEGORIES: decide which of these apply, if any. Name EVERY one that genuinely applies - do
+not stop at the first, and do not force a single category when more than one applies:
 - GARBLED_NUMBER: a garbled, dropped, or duplicated number or clause (e.g. a number from elsewhere
   in the string leaking into an unrelated value).
 - DOMAIN_TERM: a mistranslated domain term that breaks the setting (e.g. a period/wuxia weapon
@@ -89,9 +79,9 @@ DEFECT CATEGORIES: before scoring, decide which ONE of these applies, if any:
 - LOST_IDIOM: a lost idiom or slang meaning rendered as a literal word-for-word gloss. Correct with
   vivid, period-appropriate wuxia/proverb-register phrasing - not flat modern English. Never applies
   to a skill/technique/move/title name that is a plain descriptive compound rather than an actual
-  fixed idiom or proverb - a name reading as flat literal English is not a defect on its own, and
-  rewriting it for more "vivid" phrasing is not a fix. If uncertain whether SOURCE actually contains
-  a real idiom/proverb versus an ordinary descriptive name, treat it as not an idiom and do not flag it.
+  fixed idiom or proverb - a name reading as flat literal English is not a defect on its own. If
+  uncertain whether SOURCE actually contains a real idiom/proverb versus an ordinary descriptive
+  name, treat it as not an idiom and do not flag it.
 - UNTRANSLATED_PINYIN: a term left untranslated/transliterated as Pinyin when it is not a proper
   noun and has a clear translatable meaning. Never applies to any syllable/character inside a
   personal, place, or faction name that is otherwise kept transliterated - a multi-character proper
@@ -110,32 +100,25 @@ DEFECT CATEGORIES: before scoring, decide which ONE of these applies, if any:
 - HARD_TO_PARSE_SEAM: a stitched-fragment seam that is genuinely hard to parse, ambiguous, or
   changes meaning - not just less fluent than an alternative.
 - OTHER_NAMED_DEFECT: something else concrete and nameable, not covered above. Never covers
-  replacing an already-translated proper noun/title with a Pinyin transliteration - see the DO NOT
-  flag/change rule above; that is a regression, not a fix.
+  an already-translated proper noun/title that also has a Pinyin transliteration available - see the
+  DO NOT flag rule above.
 - UNCERTAIN: something about TRANSLATION feels potentially wrong, but you cannot confidently pin it
-  to one of the named defects above, or you cannot draft a fix you actually trust. Never guess a
-  named category (especially OTHER_NAMED_DEFECT) just to have something concrete to write - use
-  UNCERTAIN instead so a human looks at it. CORRECTED must be NONE for this category - never draft a
-  fix you're not confident in just to satisfy the CONSISTENCY rule below.
+  to one of the named defects above. Never guess a named category (especially OTHER_NAMED_DEFECT)
+  just to have something concrete to write - use UNCERTAIN instead so a human looks at it. Never
+  combine UNCERTAIN with a named category in the same response - if you're confident enough to name
+  any concrete defect, name it instead and reserve UNCERTAIN for when nothing concrete can be
+  pinned down.
 - NONE: nothing above applies. This is the answer for most translations, including short UI/stat
   labels, long literary prose, and terse list-style constructions - do not pick a category just to
   justify a hunch.
 
-CONSISTENCY: DEFECT and CORRECTED must agree with each other, mechanically:
-- DEFECT: NONE or DEFECT: UNCERTAIN both require CORRECTED: NONE.
-- Any other DEFECT value requires CORRECTED containing the actual fix for that named defect - never
-  NONE.
-
-OUTPUT FORMAT - respond with EXACTLY these lines and nothing else:
-DEFECT: <NONE, UNCERTAIN, or one of GARBLED_NUMBER / DOMAIN_TERM / LOST_IDIOM / UNTRANSLATED_PINYIN /
-DROPPED_CONTENT / DROPPED_STUTTER / HARD_TO_PARSE_SEAM / OTHER_NAMED_DEFECT>
-CORRECTED: <a corrected version of TRANSLATION, or the literal word NONE if no correction is needed -
-always NONE when DEFECT is NONE or UNCERTAIN>. If your correction spans what was multiple \n-joined
-sentences, keep it all on this one line using the literal two-character "\n" exactly as
-SOURCE/TRANSLATION do - never a real line break.
+OUTPUT FORMAT - respond with EXACTLY this line and nothing else:
+DEFECTS: <NONE, UNCERTAIN, or a comma-separated list of one or more of GARBLED_NUMBER, DOMAIN_TERM,
+LOST_IDIOM, UNTRANSLATED_PINYIN, DROPPED_CONTENT, DROPPED_STUTTER, HARD_TO_PARSE_SEAM,
+OTHER_NAMED_DEFECT - every category that genuinely applies, not just one>
 
 Do not explain your reasoning. Do not repeat the SOURCE. Do not add any other lines or commentary.
-No SCORE line - a separate review step handles confidence, not this one. If TRANSLATION is already
-good, output "DEFECT: NONE", then "CORRECTED: NONE" - do not rewrite a translation that isn't broken
-just to reword it. Output only the two labeled lines above - do not restate, quote, or reference any
-part of these instructions in your response.
+No SCORE or CORRECTED line - separate steps handle those, not this one. If TRANSLATION is already
+good, output "DEFECTS: NONE" - do not rewrite a translation that isn't broken just to reword it.
+Output only the one labeled line above - do not restate, quote, or reference any part of these
+instructions in your response.
