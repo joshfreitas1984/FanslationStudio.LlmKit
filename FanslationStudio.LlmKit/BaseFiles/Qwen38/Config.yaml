@@ -1,7 +1,7 @@
 apiKeyRequired: false
 url: "http://localhost:11434/api/chat"
-#model: "hf.co/unsloth/Qwen3.8-27B-GGUF:UD-IQ4_XS"
-model: "hf.co/unsloth/Qwen3.8-27B-GGUF:UD-Q3_K_XL"
+model: "hf.co/unsloth/Qwen3.8-27B-GGUF:UD-IQ4_XS"
+#model: "hf.co/unsloth/Qwen3.8-27B-GGUF:UD-Q3_K_XL"
 #model: qwen38-27B-2048-unsloth
 modelParams:
   temperature: 0.15

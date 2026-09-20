@@ -131,11 +131,47 @@ public class QualityEvaluatorAssessmentConfig
     public bool DoubledDetection { get; set; } = true;
 
     /// <summary>
-    /// Reserved for the doubled-verification process variant (see docs/plans/qc-evaluator-comparison.md) -
-    /// not yet wired to any behavior; the gold set has no harmful-labeled correction examples to
-    /// measure it against yet.
+    /// Whether correction verification (call 4) runs twice (fresh, independent calls merged via
+    /// <see cref="Support.QcVerificationResult.Merge"/>, strictly - either call's objection rejects
+    /// the correction) or once. See docs/plans/qc-evaluator-comparison.md's "Process Variants"
+    /// section, Twelfth round: measured to make no difference against the two harmful-correction
+    /// gold examples known at the time (both calls made the identical mistake) - kept as a harness
+    /// knob for re-testing against a larger harmful-correction denominator, not because it's
+    /// currently believed to help.
     /// </summary>
     public bool DoubledVerification { get; set; } = true;
+
+    /// <summary>
+    /// Candidate models to test in the CORRECTION-GENERATION (call 3) role, instead of always using
+    /// the detector model - each drafts a correction for every gold row with known confirmed defect
+    /// categories, then <see cref="JudgeModelName"/> scores every draft's safety via
+    /// <see cref="Workflow.QualityReviewWorkflow.GetVerificationVerdictAsync"/>. A model never grades
+    /// its own draft. See docs/plans/qc-fast-corrector-model-swap.md - this is that plan's validation
+    /// step. Empty (default) skips this evaluation mode entirely; existing detection/verification-only
+    /// rounds are unaffected.
+    /// </summary>
+    public List<string> CorrectorModelNames { get; set; } = [];
+
+    /// <summary>
+    /// Trusted judge model used to score every <see cref="CorrectorModelNames"/> entry's drafted
+    /// corrections for safety. Must be configured with a BaseQualityReviewVerificationPrompt and must
+    /// not appear in <see cref="CorrectorModelNames"/>. Required only when CorrectorModelNames is
+    /// non-empty.
+    /// </summary>
+    public string? JudgeModelName { get; set; }
+
+    /// <summary>
+    /// When true, the correction-generation comparison mirrors production's full verify/repair loop
+    /// (<see cref="Workflow.QualityReviewWorkflow.GetLlmVerdictAsync"/>'s calls 4/5) instead of a
+    /// single verify-only pass: a rejected draft goes back through the SAME corrector model's
+    /// <see cref="Workflow.QualityReviewWorkflow.GetCorrectionRepairAsync"/>, then <see cref="JudgeModelName"/>
+    /// re-verifies, up to <see cref="QualityReviewConfig.MaxScoreRepairIterations"/> times - answering
+    /// whether a cheap corrector's higher initial failure rate is rescued by repair, not just how
+    /// often its first draft succeeds. Written to a separate `CorrectionGenerationWithRepair` output
+    /// directory so single-shot and repair-loop numbers are never conflated. Default false preserves
+    /// the existing single-shot-only behavior.
+    /// </summary>
+    public bool EnableRepairLoop { get; set; }
 }
 
 // Convert this further

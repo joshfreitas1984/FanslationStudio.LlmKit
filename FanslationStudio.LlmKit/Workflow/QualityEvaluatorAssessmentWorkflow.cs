@@ -63,6 +63,343 @@ public static class QualityEvaluatorAssessmentWorkflow
             GeneratedAtUtc = DateTime.UtcNow,
             Evaluators = reports,
         });
+
+        if (settings.CorrectorModelNames.Count > 0)
+            await RunCorrectionGenerationComparisonAsync(config, settings, goldSet, fingerprint, outputDirectory, configuredModels);
+    }
+
+    /// <summary>
+    /// Validates docs/plans/qc-fast-corrector-model-swap.md's theory: for every gold row with a
+    /// known confirmed defect set, have each <see cref="QualityEvaluatorAssessmentConfig.CorrectorModelNames"/>
+    /// candidate draft its OWN correction via <see cref="QualityReviewWorkflow.GenerateCorrectionAsync"/>
+    /// (never reusing the gold set's human-authored <see cref="CorrectionSample.ProposedCorrection"/>,
+    /// which exists for a different purpose - scoring verification, not generation), then score every
+    /// draft's safety with <see cref="QualityEvaluatorAssessmentConfig.JudgeModelName"/> - a model
+    /// never grades its own draft.
+    ///
+    /// Runs as two full phases per corrector model rather than interleaving generate/verify per row:
+    /// phase A drafts every correction with only the corrector model resident, phase B scores every
+    /// draft with only the judge model resident. This keeps this run's own latency numbers free of
+    /// model-swap cost (measured separately - see the sibling swap-cost benchmark) and mirrors the
+    /// "batch by phase" production shape this whole test exists to justify or rule out.
+    /// </summary>
+    private static async Task RunCorrectionGenerationComparisonAsync(
+        LlmConfig config,
+        QualityEvaluatorAssessmentConfig settings,
+        GoldSet goldSet,
+        string fingerprint,
+        string outputDirectory,
+        Dictionary<string, ModelExecutionConfig> configuredModels)
+    {
+        if (string.IsNullOrEmpty(settings.JudgeModelName))
+            throw new InvalidOperationException("QualityEvaluatorAssessment.JudgeModelName is required when CorrectorModelNames is set.");
+        if (!configuredModels.TryGetValue(settings.JudgeModelName, out var judgeModel))
+            throw new InvalidOperationException($"QC evaluator judge model '{settings.JudgeModelName}' is not configured.");
+        if (!judgeModel.Prompts.ContainsKey("BaseQualityReviewVerificationPrompt"))
+            throw new InvalidOperationException($"QC evaluator judge model '{settings.JudgeModelName}' has no BaseQualityReviewVerificationPrompt.");
+
+        var pool = BuildCorrectionGenerationPool(goldSet);
+        if (pool.Count == 0)
+        {
+            Console.WriteLine("Correction-generation assessment: gold set has no Defect rows with known defect categories - nothing to draft against.");
+            return;
+        }
+
+        var comparisonDirectory = Path.Combine(outputDirectory, settings.EnableRepairLoop ? "CorrectionGenerationWithRepair" : "CorrectionGeneration");
+        Directory.CreateDirectory(comparisonDirectory);
+        var summaries = new List<CorrectionGenerationSummary>();
+
+        foreach (var correctorModelName in settings.CorrectorModelNames.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var selfJudged = string.Equals(correctorModelName, settings.JudgeModelName, StringComparison.OrdinalIgnoreCase);
+            if (selfJudged)
+                Console.WriteLine($"WARNING: '{correctorModelName}' is both corrector and judge for this run - it is grading its own draft. " +
+                    "Treat the resulting safe rate as an optimistic upper bound (self-grading bias), not a trustworthy absolute number - " +
+                    "useful only to check whether the correction-generation task itself is hard (a low self-graded score is a strong signal), " +
+                    "not to certify this model's corrections as actually safe.");
+            if (!configuredModels.TryGetValue(correctorModelName, out var correctorModel))
+                throw new InvalidOperationException($"QC evaluator corrector model '{correctorModelName}' is not configured.");
+            if (!correctorModel.Prompts.ContainsKey("BaseQualityReviewCorrectionPrompt"))
+                throw new InvalidOperationException($"QC evaluator corrector model '{correctorModelName}' has no BaseQualityReviewCorrectionPrompt.");
+
+            var modelDirectory = Path.Combine(comparisonDirectory, SafeName(correctorModelName));
+            Directory.CreateDirectory(modelDirectory);
+            var resultPath = Path.Combine(modelDirectory, "Results.yaml");
+            var report = LoadOrCreateCorrectionGenerationReport(resultPath, correctorModelName, settings.JudgeModelName, fingerprint, pool);
+            report.SelfJudged = selfJudged;
+
+            if (report.Status != "completed")
+            {
+                Console.WriteLine($"Correction generation: {correctorModelName} drafting, {settings.JudgeModelName} judging ({report.Results.Count} rows)");
+
+                using (var client = new HttpClient { Timeout = TimeSpan.FromSeconds(300) })
+                {
+                    config.Runtime.Models = new Dictionary<string, ModelExecutionConfig> { [correctorModelName] = correctorModel };
+                    foreach (var result in report.Results.Where(r => !r.GenerationAttempted))
+                    {
+                        var tokenReplacer = new StringTokenReplacer();
+                        var glossaryPrompt = GlossaryLine.AppendPromptsFor(result.Source, config.Runtime.GlossaryLines, string.Empty);
+                        var maskedRaw = tokenReplacer.Replace(result.Source);
+                        var maskedTranslated = tokenReplacer.Replace(result.CurrentTranslation);
+                        var confirmedDefects = result.ConfirmedDefectCategories.Select(ParseCategory).Distinct().ToList();
+
+                        var stopwatch = Stopwatch.StartNew();
+                        result.ProposedCorrection = await QualityReviewWorkflow.GenerateCorrectionAsync(
+                            config, correctorModel, client, result.SampleId, maskedRaw, maskedTranslated,
+                            glossaryPrompt, confirmedDefects, null);
+                        stopwatch.Stop();
+                        result.GenerationAttempted = true;
+                        result.GenerationElapsedMilliseconds = stopwatch.ElapsedMilliseconds;
+                        if (result.ProposedCorrection == null)
+                            result.ActualCorrectionSafety = "NoCorrectionProduced";
+                        WriteYamlAtomically(resultPath, report);
+                    }
+                }
+
+                using (var client = new HttpClient { Timeout = TimeSpan.FromSeconds(300) })
+                {
+                    config.Runtime.Models = new Dictionary<string, ModelExecutionConfig> { [settings.JudgeModelName] = judgeModel };
+                    foreach (var result in report.Results.Where(r => r.ProposedCorrection != null && r.ActualCorrectionSafety == null))
+                    {
+                        var tokenReplacer = new StringTokenReplacer();
+                        var glossaryPrompt = GlossaryLine.AppendPromptsFor(result.Source, config.Runtime.GlossaryLines, string.Empty);
+                        var maskedRaw = tokenReplacer.Replace(result.Source);
+                        var maskedTranslated = tokenReplacer.Replace(result.CurrentTranslation);
+                        var maskedCorrection = tokenReplacer.Replace(result.ProposedCorrection!);
+                        var confirmedDefects = result.ConfirmedDefectCategories.Select(ParseCategory).Distinct().ToList();
+
+                        var stopwatch = Stopwatch.StartNew();
+                        var verdict = await QualityReviewWorkflow.GetVerificationVerdictAsync(
+                            config, judgeModel, client, result.SampleId, maskedRaw, maskedTranslated,
+                            glossaryPrompt, confirmedDefects, maskedCorrection);
+                        stopwatch.Stop();
+                        result.VerificationElapsedMilliseconds = stopwatch.ElapsedMilliseconds;
+                        result.ParseSuccess = verdict.Success;
+                        result.VerificationScore = verdict.Score;
+                        result.ActualCorrectionSafety = !verdict.Success
+                            ? "Unscored"
+                            : !verdict.Accepted
+                                ? "Harmful"
+                                : verdict.Score >= config.QualityReview.MinAcceptableScore ? "Safe" : "Harmful";
+                        result.InitialCorrectionSafety = result.ActualCorrectionSafety;
+                        // Persisted on the result itself (not a local dictionary) so a crash/resume
+                        // mid-repair-loop reconstructs exactly which rows still need fixing from
+                        // Results.yaml alone - a local-only dictionary would silently forget any row
+                        // whose Harmful verdict was already persisted before an interruption, since
+                        // the loop above only re-verifies rows with ActualCorrectionSafety == null.
+                        result.UnresolvedDefectCategories = result.ActualCorrectionSafety == "Harmful"
+                            ? verdict.UnresolvedDefects.Concat(verdict.NewDefects).Distinct().Select(c => c.ToString()).ToList()
+                            : [];
+                        WriteYamlAtomically(resultPath, report);
+                    }
+                }
+
+                // Mirrors GetLlmVerdictAsync's calls 4/5 repair loop: a row verify rejected goes back
+                // through the SAME corrector model's GetCorrectionRepairAsync (never the judge - a
+                // model never authors its own grade), then the judge re-verifies against the FULL
+                // original confirmed set again (never a shrinking list), up to MaxScoreRepairIterations
+                // times. Each iteration is its own two-phase pass (repair with only the corrector
+                // resident, then reverify with only the judge resident) so repeated iterations still
+                // cost ~2 swaps each for the WHOLE batch, not per row - see the Twenty-second round's
+                // swap-cost finding this design depends on.
+                if (settings.EnableRepairLoop)
+                {
+                    var maxRepairAttempts = Math.Max(0, config.QualityReview.MaxScoreRepairIterations);
+                    for (var attempt = 0; attempt < maxRepairAttempts; attempt++)
+                    {
+                        var needsRepair = report.Results.Where(r => r.ActualCorrectionSafety == "Harmful" && r.UnresolvedDefectCategories.Count > 0).ToList();
+                        if (needsRepair.Count == 0)
+                            break;
+                        Console.WriteLine($"Correction generation: {correctorModelName} repair attempt {attempt + 1}/{maxRepairAttempts} for {needsRepair.Count} row(s)");
+
+                        using (var client = new HttpClient { Timeout = TimeSpan.FromSeconds(300) })
+                        {
+                            config.Runtime.Models = new Dictionary<string, ModelExecutionConfig> { [correctorModelName] = correctorModel };
+                            foreach (var result in needsRepair)
+                            {
+                                var tokenReplacer = new StringTokenReplacer();
+                                var glossaryPrompt = GlossaryLine.AppendPromptsFor(result.Source, config.Runtime.GlossaryLines, string.Empty);
+                                var maskedRaw = tokenReplacer.Replace(result.Source);
+                                var maskedTranslated = tokenReplacer.Replace(result.CurrentTranslation);
+                                var maskedPrevious = tokenReplacer.Replace(result.ProposedCorrection!);
+
+                                var targetDefects = result.UnresolvedDefectCategories.Select(ParseCategory).Distinct().ToList();
+                                var stopwatch = Stopwatch.StartNew();
+                                var repaired = await QualityReviewWorkflow.GetCorrectionRepairAsync(
+                                    config, correctorModel, client, result.SampleId, maskedRaw, maskedTranslated,
+                                    glossaryPrompt, targetDefects, maskedPrevious, null);
+                                stopwatch.Stop();
+                                result.RepairAttemptsUsed++;
+                                result.RepairElapsedMilliseconds = (result.RepairElapsedMilliseconds ?? 0) + stopwatch.ElapsedMilliseconds;
+                                if (repaired == null)
+                                    // Corrector couldn't improve on the previous attempt - same as
+                                    // production, stop repairing this row and keep the last verified
+                                    // candidate/verdict (still Harmful) as final. Clearing
+                                    // UnresolvedDefectCategories (rather than removing a dictionary
+                                    // entry) is what excludes it from the next attempt's needsRepair
+                                    // filter, and survives a crash/resume since it's persisted.
+                                    result.UnresolvedDefectCategories = [];
+                                else
+                                    result.ProposedCorrection = repaired;
+                                WriteYamlAtomically(resultPath, report);
+                            }
+                        }
+
+                        using (var client = new HttpClient { Timeout = TimeSpan.FromSeconds(300) })
+                        {
+                            config.Runtime.Models = new Dictionary<string, ModelExecutionConfig> { [settings.JudgeModelName] = judgeModel };
+                            foreach (var result in needsRepair.Where(r => r.UnresolvedDefectCategories.Count > 0))
+                            {
+                                var tokenReplacer = new StringTokenReplacer();
+                                var glossaryPrompt = GlossaryLine.AppendPromptsFor(result.Source, config.Runtime.GlossaryLines, string.Empty);
+                                var maskedRaw = tokenReplacer.Replace(result.Source);
+                                var maskedTranslated = tokenReplacer.Replace(result.CurrentTranslation);
+                                var maskedCorrection = tokenReplacer.Replace(result.ProposedCorrection!);
+                                var confirmedDefects = result.ConfirmedDefectCategories.Select(ParseCategory).Distinct().ToList();
+
+                                var stopwatch = Stopwatch.StartNew();
+                                var verdict = await QualityReviewWorkflow.GetVerificationVerdictAsync(
+                                    config, judgeModel, client, result.SampleId, maskedRaw, maskedTranslated,
+                                    glossaryPrompt, confirmedDefects, maskedCorrection);
+                                stopwatch.Stop();
+                                result.VerificationElapsedMilliseconds += stopwatch.ElapsedMilliseconds;
+                                result.ParseSuccess = verdict.Success;
+                                result.VerificationScore = verdict.Score;
+                                result.ActualCorrectionSafety = !verdict.Success
+                                    ? "Unscored"
+                                    : !verdict.Accepted
+                                        ? "Harmful"
+                                        : verdict.Score >= config.QualityReview.MinAcceptableScore ? "Safe" : "Harmful";
+                                result.UnresolvedDefectCategories = result.ActualCorrectionSafety == "Harmful"
+                                    ? verdict.UnresolvedDefects.Concat(verdict.NewDefects).Distinct().Select(c => c.ToString()).ToList()
+                                    : [];
+                                WriteYamlAtomically(resultPath, report);
+                            }
+                        }
+                    }
+                }
+
+                report.Status = "completed";
+                report.CompletedAtUtc = DateTime.UtcNow;
+                WriteYamlAtomically(resultPath, report);
+            }
+            else
+            {
+                Console.WriteLine($"Correction-generation assessment for '{correctorModelName}' already completed - skipping.");
+            }
+
+            summaries.Add(report.ToSummary());
+            WriteHumanReviewSample(modelDirectory, report);
+        }
+
+        WriteYamlAtomically(Path.Combine(comparisonDirectory, "Comparison.yaml"), new CorrectionGenerationComparison
+        {
+            SchemaVersion = 1,
+            GoldSetFingerprint = fingerprint,
+            JudgeModelName = settings.JudgeModelName,
+            GeneratedAtUtc = DateTime.UtcNow,
+            Correctors = summaries,
+        });
+    }
+
+    /// <summary>
+    /// Every gold row with a known confirmed defect set to draft a fresh correction against: gold
+    /// Items whose OWN candidate is labeled Defect (skips Pass/Abstain rows and any candidate not
+    /// itself the labeled one), plus every CorrectionSample (its human-authored ProposedCorrection is
+    /// intentionally ignored here - see the caller's summary). A row with zero listed categories still
+    /// counts (falls back to <see cref="QcDefectCategory.OtherNamedDefect"/> via <see cref="ParseCategory"/>
+    /// at draft time), matching <see cref="ReviewCorrectionAsync"/>'s existing fallback.
+    /// </summary>
+    private static List<CorrectionGenerationResult> BuildCorrectionGenerationPool(GoldSet goldSet)
+    {
+        var pool = new List<CorrectionGenerationResult>();
+        foreach (var item in goldSet.Items)
+        {
+            foreach (var candidate in item.Candidates)
+            {
+                if (!item.Labels.TryGetValue(candidate.Key, out var label) || label.Label != "Defect")
+                    continue;
+                pool.Add(new CorrectionGenerationResult
+                {
+                    SampleId = $"{item.SampleId}:{candidate.Key}",
+                    SampleKind = item.SampleKind,
+                    Source = item.Source,
+                    CurrentTranslation = candidate.Value,
+                    ConfirmedDefectCategories = label.DefectCategories,
+                });
+            }
+        }
+        foreach (var item in goldSet.CorrectionSamples)
+        {
+            pool.Add(new CorrectionGenerationResult
+            {
+                SampleId = item.SampleId,
+                SampleKind = item.SampleKind,
+                Source = item.Source,
+                CurrentTranslation = item.CurrentTranslation,
+                ConfirmedDefectCategories = item.DefectCategories,
+            });
+        }
+        return pool;
+    }
+
+    private static CorrectionGenerationReportFile LoadOrCreateCorrectionGenerationReport(
+        string path, string correctorModelName, string judgeModelName, string fingerprint, List<CorrectionGenerationResult> pool)
+    {
+        if (File.Exists(path))
+        {
+            var existing = YamlHelper.CreateDeserializer().Deserialize<CorrectionGenerationReportFile>(File.ReadAllText(path));
+            if (existing != null
+                && existing.CorrectorModelName == correctorModelName
+                && existing.JudgeModelName == judgeModelName
+                && existing.GoldSetFingerprint == fingerprint
+                && existing.Results.Count == pool.Count)
+            {
+                return existing;
+            }
+        }
+        return new CorrectionGenerationReportFile
+        {
+            CorrectorModelName = correctorModelName,
+            JudgeModelName = judgeModelName,
+            GoldSetFingerprint = fingerprint,
+            Results = pool.Select(item => new CorrectionGenerationResult
+            {
+                SampleId = item.SampleId,
+                SampleKind = item.SampleKind,
+                Source = item.Source,
+                CurrentTranslation = item.CurrentTranslation,
+                ConfirmedDefectCategories = item.ConfirmedDefectCategories,
+            }).ToList(),
+        };
+    }
+
+    /// <summary>
+    /// No automated ground truth exists for whether a drafted correction actually resolves the
+    /// confirmed defect (only whether it's safe) - per docs/plans/qc-fast-corrector-model-swap.md's
+    /// "What validating this would take" step 3, that needs human review. Writes every row (source,
+    /// current translation, confirmed defects, the draft, and the judge's safety verdict) to a plain
+    /// YAML file a human can read start to finish, instead of only a sample - the gold-row count here
+    /// is small enough (dozens, not thousands) that full review is cheap.
+    /// </summary>
+    private static void WriteHumanReviewSample(string modelDirectory, CorrectionGenerationReportFile report)
+    {
+        var reviewPath = Path.Combine(modelDirectory, "HumanReview.yaml");
+        var rows = report.Results.Select(r => new
+        {
+            r.SampleId,
+            r.ConfirmedDefectCategories,
+            r.Source,
+            r.CurrentTranslation,
+            r.ProposedCorrection,
+            InitialJudgeSafety = r.InitialCorrectionSafety,
+            JudgeSafety = r.ActualCorrectionSafety,
+            JudgeScore = r.VerificationScore,
+            r.RepairAttemptsUsed,
+            CompletenessReviewed = false,
+            CompletenessNote = "",
+        });
+        File.WriteAllText(reviewPath, YamlHelper.CreateSerializer().Serialize(rows), Encoding.UTF8);
     }
 
     private static async Task<EvaluatorResultFile> RunModelAsync(
@@ -368,7 +705,27 @@ public static class QualityEvaluatorAssessmentWorkflow
     {
         var temporaryPath = path + ".tmp";
         File.WriteAllText(temporaryPath, YamlHelper.CreateSerializer().Serialize(value), Encoding.UTF8);
-        File.Move(temporaryPath, path, true);
+        // Retries a transient Windows sharing violation (antivirus/indexer briefly opening the file
+        // right after a write, or an editor/IDE watching the output directory) rather than failing
+        // the whole multi-minute run on one unlucky write - this result file is rewritten after every
+        // single LLM call in this workflow, so it's hit often enough for a rare transient lock to show
+        // up in practice (observed repeatedly during the correction-generation repair-loop rounds).
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                File.Move(temporaryPath, path, true);
+                return;
+            }
+            catch (UnauthorizedAccessException) when (attempt < 5)
+            {
+                Thread.Sleep(200 * (attempt + 1));
+            }
+            catch (IOException) when (attempt < 5)
+            {
+                Thread.Sleep(200 * (attempt + 1));
+            }
+        }
     }
 
     public sealed class GoldSet
@@ -521,6 +878,133 @@ public static class QualityEvaluatorAssessmentWorkflow
         public int EvaluatorCount { get; set; }
         public DateTime GeneratedAtUtc { get; set; }
         public List<EvaluatorSummary> Evaluators { get; set; } = [];
+    }
+
+    public sealed class CorrectionGenerationResult
+    {
+        public string SampleId { get; set; } = string.Empty;
+        public string SampleKind { get; set; } = string.Empty;
+        public string Source { get; set; } = string.Empty;
+        public string CurrentTranslation { get; set; } = string.Empty;
+        public List<string> ConfirmedDefectCategories { get; set; } = [];
+        public bool GenerationAttempted { get; set; }
+        public string? ProposedCorrection { get; set; }
+        public long? GenerationElapsedMilliseconds { get; set; }
+        public bool ParseSuccess { get; set; }
+        public int? VerificationScore { get; set; }
+        public long? VerificationElapsedMilliseconds { get; set; }
+
+        /// <summary>Safe/Harmful/Unscored/NoCorrectionProduced, or null while phase B hasn't run yet.</summary>
+        public string? ActualCorrectionSafety { get; set; }
+
+        /// <summary>
+        /// The FIRST verify call's outcome, captured before any repair loop runs (only meaningfully
+        /// different from <see cref="ActualCorrectionSafety"/> when <see cref="QualityEvaluatorAssessmentConfig.EnableRepairLoop"/>
+        /// is true) - lets a summary report both "how often does the first draft land safe" and "how
+        /// often does the row end up safe after repair" from the same run.
+        /// </summary>
+        public string? InitialCorrectionSafety { get; set; }
+
+        public int RepairAttemptsUsed { get; set; }
+        public long? RepairElapsedMilliseconds { get; set; }
+
+        /// <summary>
+        /// Persisted (not a local dictionary) so a crash/resume mid-repair-loop reconstructs exactly
+        /// which rows still need fixing, and with which target categories, from Results.yaml alone -
+        /// see the caller's comment on the bug this replaced. Empty means "not currently in the
+        /// repair loop" - either never Harmful, or Harmful but the corrector gave up (returned null)
+        /// and there is nothing further to attempt.
+        /// </summary>
+        public List<string> UnresolvedDefectCategories { get; set; } = [];
+    }
+
+    public sealed class CorrectionGenerationReportFile
+    {
+        public string CorrectorModelName { get; set; } = string.Empty;
+        public string JudgeModelName { get; set; } = string.Empty;
+        public string Status { get; set; } = "running";
+        public string GoldSetFingerprint { get; set; } = string.Empty;
+        public DateTime? CompletedAtUtc { get; set; }
+
+        /// <summary>
+        /// True when CorrectorModelName == JudgeModelName - the model graded its own draft. Kept
+        /// visible on the report/summary rather than only in a console warning, so a saved
+        /// Comparison.yaml can't be misread later as an independently-judged number. See the
+        /// caller's console warning for the full caveat.
+        /// </summary>
+        public bool SelfJudged { get; set; }
+
+        public List<CorrectionGenerationResult> Results { get; set; } = [];
+
+        public CorrectionGenerationSummary ToSummary()
+        {
+            var scored = Results.Where(r => r.ActualCorrectionSafety != null).ToList();
+            var initialScored = Results.Where(r => r.InitialCorrectionSafety != null).ToList();
+            var repaired = Results.Where(r => r.RepairAttemptsUsed > 0).ToList();
+            return new CorrectionGenerationSummary
+            {
+                CorrectorModelName = CorrectorModelName,
+                SelfJudged = SelfJudged,
+                Status = Status,
+                SampleCount = Results.Count,
+                NoCorrectionProducedCount = scored.Count(r => r.ActualCorrectionSafety == "NoCorrectionProduced"),
+                SafeCount = scored.Count(r => r.ActualCorrectionSafety == "Safe"),
+                HarmfulCount = scored.Count(r => r.ActualCorrectionSafety == "Harmful"),
+                UnscoredCount = scored.Count(r => r.ActualCorrectionSafety == "Unscored"),
+                SafeRate = scored.Count == 0 ? 0 : scored.Count(r => r.ActualCorrectionSafety == "Safe") / (double)scored.Count,
+                InitialSafeRate = initialScored.Count == 0 ? 0 : initialScored.Count(r => r.InitialCorrectionSafety == "Safe") / (double)initialScored.Count,
+                RepairedRowCount = repaired.Count,
+                RepairRescuedCount = repaired.Count(r => r.InitialCorrectionSafety == "Harmful" && r.ActualCorrectionSafety == "Safe"),
+                RepairStillHarmfulCount = repaired.Count(r => r.ActualCorrectionSafety == "Harmful"),
+                AverageRepairAttempts = repaired.Count == 0 ? 0 : repaired.Average(r => r.RepairAttemptsUsed),
+                AverageGenerationMilliseconds = Results.Count(r => r.GenerationElapsedMilliseconds.HasValue) == 0
+                    ? 0 : Results.Where(r => r.GenerationElapsedMilliseconds.HasValue).Average(r => r.GenerationElapsedMilliseconds!.Value),
+                AverageVerificationMilliseconds = Results.Count(r => r.VerificationElapsedMilliseconds.HasValue) == 0
+                    ? 0 : Results.Where(r => r.VerificationElapsedMilliseconds.HasValue).Average(r => r.VerificationElapsedMilliseconds!.Value),
+                AverageRepairMilliseconds = repaired.Count == 0 ? 0 : repaired.Average(r => r.RepairElapsedMilliseconds ?? 0),
+            };
+        }
+    }
+
+    public sealed class CorrectionGenerationSummary
+    {
+        public string CorrectorModelName { get; set; } = string.Empty;
+        public bool SelfJudged { get; set; }
+        public string Status { get; set; } = string.Empty;
+        public int SampleCount { get; set; }
+        public int NoCorrectionProducedCount { get; set; }
+        public int SafeCount { get; set; }
+        public int HarmfulCount { get; set; }
+        public int UnscoredCount { get; set; }
+
+        /// <summary>Final safe rate - after the repair loop, when enabled. Identical to InitialSafeRate when EnableRepairLoop is false.</summary>
+        public double SafeRate { get; set; }
+
+        /// <summary>Safe rate of the FIRST draft, before any repair attempt.</summary>
+        public double InitialSafeRate { get; set; }
+
+        /// <summary>Rows that entered the repair loop at least once (initially Harmful).</summary>
+        public int RepairedRowCount { get; set; }
+
+        /// <summary>Of the repaired rows, how many ended up Safe - the repair loop's actual rescue rate.</summary>
+        public int RepairRescuedCount { get; set; }
+
+        /// <summary>Of the repaired rows, how many were STILL Harmful after exhausting the repair budget.</summary>
+        public int RepairStillHarmfulCount { get; set; }
+
+        public double AverageRepairAttempts { get; set; }
+        public double AverageGenerationMilliseconds { get; set; }
+        public double AverageVerificationMilliseconds { get; set; }
+        public double AverageRepairMilliseconds { get; set; }
+    }
+
+    public sealed class CorrectionGenerationComparison
+    {
+        public int SchemaVersion { get; set; }
+        public string GoldSetFingerprint { get; set; } = string.Empty;
+        public string JudgeModelName { get; set; } = string.Empty;
+        public DateTime GeneratedAtUtc { get; set; }
+        public List<CorrectionGenerationSummary> Correctors { get; set; } = [];
     }
 
     private static long Percentile(IEnumerable<long> values, double percentile)
