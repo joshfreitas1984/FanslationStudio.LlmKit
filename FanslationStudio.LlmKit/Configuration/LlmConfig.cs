@@ -131,6 +131,22 @@ public class QualityEvaluatorAssessmentConfig
     public bool DoubledDetection { get; set; } = true;
 
     /// <summary>
+    /// Runs detection (calls 1/2, <see cref="Workflow.QualityReviewWorkflow.DetectDefectsAsync"/>)
+    /// with Ollama's `think` mode on instead of production's normal thinking-off default. Mirrors
+    /// <see cref="QualityReviewConfig.VerificationThinkingEnabled"/> but for the detection role
+    /// instead of verification - a scoped, assessment-only way to test whether a candidate
+    /// detector's capability gap on hard semantic categories (name-as-gloss, invented-synonym-pair)
+    /// is a reasoning-budget problem rather than a genuine ceiling, without touching production's
+    /// <see cref="Workflow.QualityReviewWorkflow.RunAsync"/>/<see cref="Workflow.QualityReviewWorkflow.RunBruteForce"/>
+    /// path (neither ever passes this flag - see docs/investigations/tests/qc-evaluator-model-selection.md).
+    /// As with verification thinking, the reasoning trace shares the same num_ctx/num_predict budget
+    /// as the DEFECTS output line, so a candidate model's `modelParams` may need headroom (see that
+    /// flag's doc comment) before this is worth turning on against it. Default false preserves
+    /// existing detection behavior.
+    /// </summary>
+    public bool DetectionThinkingEnabled { get; set; }
+
+    /// <summary>
     /// Whether correction verification (call 4) runs twice (fresh, independent calls merged via
     /// <see cref="Support.QcVerificationResult.Merge"/>, strictly - either call's objection rejects
     /// the correction) or once. See docs/plans/qc-evaluator-comparison.md's "Process Variants"

@@ -435,7 +435,8 @@ public static class QualityEvaluatorAssessmentWorkflow
 
                 report.Results.Add(await ReviewDetectionAsync(config, model, client, resultId,
                     item.SampleId, item.SampleKind, item.Source, candidate.Value,
-                    expected, config.QualityEvaluatorAssessment.DoubledDetection));
+                    expected, config.QualityEvaluatorAssessment.DoubledDetection,
+                    config.QualityEvaluatorAssessment.DetectionThinkingEnabled));
                 WriteYamlAtomically(resultPath, report);
             }
         }
@@ -480,7 +481,8 @@ public static class QualityEvaluatorAssessmentWorkflow
         string source,
         string translation,
         GoldLabel expected,
-        bool doubledDetection)
+        bool doubledDetection,
+        bool enableThinking = false)
     {
         var stopwatch = Stopwatch.StartNew();
         var tokenReplacer = new StringTokenReplacer();
@@ -491,11 +493,11 @@ public static class QualityEvaluatorAssessmentWorkflow
         var maskedRaw = tokenReplacer.Replace(source);
         var maskedTranslated = tokenReplacer.Replace(translation);
 
-        var call1 = await QualityReviewWorkflow.DetectDefectsAsync(config, model, client, source, maskedRaw, maskedTranslated, glossaryPrompt, null);
+        var call1 = await QualityReviewWorkflow.DetectDefectsAsync(config, model, client, source, maskedRaw, maskedTranslated, glossaryPrompt, null, enableThinking);
         var confirmed = call1;
         if (doubledDetection && call1.Success)
         {
-            var call2 = await QualityReviewWorkflow.DetectDefectsAsync(config, model, client, source, maskedRaw, maskedTranslated, glossaryPrompt, null);
+            var call2 = await QualityReviewWorkflow.DetectDefectsAsync(config, model, client, source, maskedRaw, maskedTranslated, glossaryPrompt, null, enableThinking);
             confirmed = QcDetectionResult.Merge(call1, call2);
         }
         stopwatch.Stop();
@@ -704,16 +706,23 @@ public static class QualityEvaluatorAssessmentWorkflow
     private static void WriteYamlAtomically(string path, object value)
     {
         var temporaryPath = path + ".tmp";
-        File.WriteAllText(temporaryPath, YamlHelper.CreateSerializer().Serialize(value), Encoding.UTF8);
+        var directory = Path.GetDirectoryName(path)!;
+        var serialized = YamlHelper.CreateSerializer().Serialize(value);
         // Retries a transient Windows sharing violation (antivirus/indexer briefly opening the file
         // right after a write, or an editor/IDE watching the output directory) rather than failing
         // the whole multi-minute run on one unlucky write - this result file is rewritten after every
         // single LLM call in this workflow, so it's hit often enough for a rare transient lock to show
         // up in practice (observed repeatedly during the correction-generation repair-loop rounds).
+        // DirectoryNotFoundException is the same class of transient interference (observed against
+        // this output directory specifically, likely antivirus/indexer briefly removing then
+        // recreating a just-written directory) - recreate the directory before retrying rather than
+        // failing the whole run.
         for (var attempt = 0; ; attempt++)
         {
             try
             {
+                Directory.CreateDirectory(directory);
+                File.WriteAllText(temporaryPath, serialized, Encoding.UTF8);
                 File.Move(temporaryPath, path, true);
                 return;
             }

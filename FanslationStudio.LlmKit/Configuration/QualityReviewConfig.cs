@@ -139,4 +139,17 @@ public class QualityReviewConfig
     /// extra latency/tokens per call, but only for the already-flagged subset.
     /// </summary>
     public bool VerificationThinkingEnabled { get; set; } = false;
+
+    /// <summary>
+    /// Runs detection (calls 1/2, <see cref="Workflow.QualityReviewWorkflow.DetectDefectsAsync"/>)
+    /// twice and merges via <see cref="Support.QcDetectionResult.Merge"/> (a set union - doubling can
+    /// only match or exceed a single call's catch rate), instead of trusting call 1 alone. Measured
+    /// in docs/investigations/tests/qc-evaluator-model-selection.md: a real but thin recall lift
+    /// (1 of 18 in-scope defect rows caught only by the merge) at slightly more than double the
+    /// detection-phase latency (measured directly against the current production quant: 1268ms vs
+    /// 601ms per row) - roughly 15 hours across the full corpus's ~81,000 splits. Kept true
+    /// (production-matching) as the default; set false to trade that thin recall lift back for
+    /// detection-phase throughput when speed is the priority.
+    /// </summary>
+    public bool DoubledDetectionEnabled { get; set; } = true;
 }

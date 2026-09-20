@@ -866,6 +866,11 @@ public static class QualityReviewWorkflow
     /// issue itself rather than only confirm/deny call 1's specific claim - see
     /// <see cref="GetLlmVerdictAsync"/>, which merges both results via
     /// <see cref="QcDetectionResult.Merge"/> rather than trusting either alone.
+    /// <paramref name="enableThinking"/> defaults to false, matching production's call 1/2 (see
+    /// <see cref="Utility.LlmHelpers.GenerateLlmRequestData"/>'s doc comment) - only
+    /// <see cref="QualityEvaluatorAssessmentWorkflow"/> ever passes true, to test whether
+    /// detection-call reasoning moves recall on a candidate model; <see cref="GetLlmVerdictAsync"/>
+    /// never passes it, so production is unaffected.
     /// </summary>
     internal static async Task<QcDetectionResult> DetectDefectsAsync(
         LlmConfig config,
@@ -875,7 +880,8 @@ public static class QualityReviewWorkflow
         string maskedRaw,
         string maskedTranslated,
         string glossaryPrompt,
-        QcTimingStats? timing)
+        QcTimingStats? timing,
+        bool enableThinking = false)
     {
         var userPrompt = new StringBuilder();
         userPrompt.AppendLine($"SOURCE (Chinese): {maskedRaw}");
@@ -896,7 +902,7 @@ public static class QualityReviewWorkflow
         var llmStopwatch = Stopwatch.StartNew();
         try
         {
-            llmResponse = await TranslationService.TranslateMessagesAsync(client, config, modelConfig, messages);
+            llmResponse = await TranslationService.TranslateMessagesAsync(client, config, modelConfig, messages, enableThinking: enableThinking);
         }
         catch (Exception e) when (e is HttpRequestException or OperationCanceledException)
         {
@@ -1010,10 +1016,13 @@ public static class QualityReviewWorkflow
     ///
     /// Calls 1 and 2 (<see cref="DetectDefectsAsync"/>) are both full, independent multi-defect
     /// detections - call 2 never sees call 1's findings, so it can't anchor on them - merged via
-    /// <see cref="QcDetectionResult.Merge"/> into the confirmed defect set. An UNCERTAIN finding is
-    /// never treated as "nothing found": alone, it flags the column for human review with no
-    /// correction attempted; alongside a named defect, it still forces a human flag on whatever
-    /// verdict the named defect(s) end up with (see the final return below).
+    /// <see cref="QcDetectionResult.Merge"/> into the confirmed defect set. Call 2 only runs when
+    /// <see cref="QualityReviewConfig.DoubledDetectionEnabled"/> is true (the default); when false,
+    /// call 1 alone is the confirmed set - see that flag's doc comment for the recall/latency
+    /// tradeoff. An UNCERTAIN finding is never treated as "nothing found": alone, it flags the
+    /// column for human review with no correction attempted; alongside a named defect, it still
+    /// forces a human flag on whatever verdict the named defect(s) end up with (see the final return
+    /// below).
     ///
     /// If any named defect was confirmed, call 3 (<see cref="GenerateCorrectionAsync"/>) drafts ONE
     /// correction addressing all of them, then calls 4/5 (<see cref="GetVerificationVerdictAsync"/>/
@@ -1036,13 +1045,17 @@ public static class QualityReviewWorkflow
         if (!call1.Success)
             return new LlmVerdict(false, null, null);
 
-        var call2 = await DetectDefectsAsync(config, modelConfig, client, rawText, maskedRaw, maskedTranslated, glossaryPrompt, timing);
-        if (!call2.Success)
-            return new LlmVerdict(false, null, null);
+        var confirmed = call1;
+        if (config.QualityReview.DoubledDetectionEnabled)
+        {
+            var call2 = await DetectDefectsAsync(config, modelConfig, client, rawText, maskedRaw, maskedTranslated, glossaryPrompt, timing);
+            if (!call2.Success)
+                return new LlmVerdict(false, null, null);
 
-        var confirmed = QcDetectionResult.Merge(call1, call2);
-        if (!confirmed.Success)
-            return new LlmVerdict(false, null, null);
+            confirmed = QcDetectionResult.Merge(call1, call2);
+            if (!confirmed.Success)
+                return new LlmVerdict(false, null, null);
+        }
 
         if (!confirmed.HasDefects)
             return new LlmVerdict(true, 100, null, QcDefectCategory.None, confirmed.Findings);
