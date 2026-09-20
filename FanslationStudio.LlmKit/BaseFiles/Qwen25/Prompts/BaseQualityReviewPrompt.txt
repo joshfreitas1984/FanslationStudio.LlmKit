@@ -29,6 +29,10 @@ specifically for:
   (e.g. 白云子 translated as "White Cloud") instead of being transliterated/kept as a name - a
   fluent-sounding gloss is still wrong if SOURCE intends a proper noun, the same way a name must
   never be split between transliteration and translation (see UNTRANSLATED_PINYIN below).
+- TRANSLATION adding an invented alternative/synonym pair (e.g. "Rank/Position") for a concept
+  SOURCE states only one way, especially on a short UI/dynamic-string label - this is an
+  over-translation that turns one label into two, not a defensible stylistic choice, even when
+  both halves of the pair are individually plausible readings.
 - Wrong language output, leftover Chinese characters, gibberish, or TRANSLATION being a literal
   placeholder/null value (e.g. "None", "null", "N/A", an empty string) where SOURCE has real
   content - a leaked non-translation, not a stylistic issue, even though the placeholder itself
@@ -62,7 +66,8 @@ DO NOT flag:
 - Placeholder tokens in curly braces, e.g. {0}, {1} - these are restored automatically after your
   review, unrelated to any defect.
 - Minor stylistic choices that don't change meaning (word order, synonym choice) if the sentence
-  is already correct and natural.
+  is already correct and natural - this never covers punctuation, whitespace, or markup invented or
+  altered from SOURCE (see OTHER_NAMED_DEFECT), which is a defect, not a style choice.
 - Literal \n sequences in TRANSLATION - check what precedes the \n in SOURCE:
   - Comma (or no terminal punctuation) before the \n: this is a UI line-wrap splitting one
     continuing sentence across two lines - not a defect either way, whether TRANSLATION merges it
@@ -107,9 +112,13 @@ not stop at the first, and do not force a single category when more than one app
 - HARD_TO_PARSE_SEAM: a stitched-fragment seam that is genuinely hard to parse, ambiguous, or
   changes meaning - not just less fluent than an alternative.
 - OTHER_NAMED_DEFECT: something else concrete and nameable, not covered above - e.g. a leaked
-  placeholder/null value in place of a translation, or a proper name replaced with a descriptive
-  English gloss instead of being transliterated. Never covers an already-translated proper
-  noun/title that also has a Pinyin transliteration available - see the DO NOT flag rule above.
+  placeholder/null value in place of a translation, a proper name replaced with a descriptive
+  English gloss instead of being transliterated, or invented/altered structural formatting not
+  present in SOURCE and not required by English grammar - punctuation (a colon, dash, or terminal
+  mark) inserted into a terse label/stat string that has none in SOURCE, or stray/duplicated
+  whitespace (an extra blank line, trailing spaces) around a real newline or separator that SOURCE
+  does not have. Never covers an already-translated proper noun/title that also has a Pinyin
+  transliteration available - see the DO NOT flag rule above.
 - UNCERTAIN: something about TRANSLATION feels potentially wrong, but you cannot confidently pin it
   to one of the named defects above. Never guess a named category (especially OTHER_NAMED_DEFECT)
   just to have something concrete to write - use UNCERTAIN instead so a human looks at it. Never
@@ -119,6 +128,13 @@ not stop at the first, and do not force a single category when more than one app
 - NONE: nothing above applies. This is the answer for most translations, including short UI/stat
   labels, long literary prose, and terse list-style constructions - do not pick a category just to
   justify a hunch.
+
+Before finalizing, silently run two checks and revise your answer if either surfaces something not
+already named (do not output the checks, only the final DEFECTS line):
+1. NAMES: every personal/place/faction proper name in SOURCE is kept as a name in TRANSLATION
+   (transliterated, or the glossary's given term) - not a descriptive gloss of its literal meaning.
+2. OVER-TRANSLATION: TRANSLATION has not added an alternative/synonym pair for a concept SOURCE
+   states only one way.
 
 OUTPUT FORMAT - respond with EXACTLY this line and nothing else:
 DEFECTS: <NONE, UNCERTAIN, or a comma-separated list of one or more of GARBLED_NUMBER, DOMAIN_TERM,

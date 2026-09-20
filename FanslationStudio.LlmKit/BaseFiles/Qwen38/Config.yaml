@@ -10,7 +10,16 @@ modelParams:
   repeat_penalty: 1.05
   frequency_penalty: 0
   presence_penalty: 0
-  num_ctx: 8192
+  # num_ctx lowered 8192 -> 4096 2026-09-20: measured real QC-review prompt+completion token usage
+  # via direct /api/chat calls against the longest gold-set SOURCE and a representative
+  # correction call - detection peaked at ~2783 total tokens (prompt_eval_count 2773 + eval_count
+  # 10), correction at ~1050 total. 4096 keeps >1300 tokens of headroom above the worst case
+  # measured while roughly halving the KV-cache memory footprint, which is what was pushing the
+  # larger quants (Q4_K_M, 17.74GB) into a CPU/GPU split on this 16GB-VRAM card. num_predict left
+  # at 4096 (actual completion length measured at 10-70 tokens) since it only caps generation
+  # length, not KV-cache size, and a correction call legitimately needs room for a full rewritten
+  # translation.
+  num_ctx: 4096
   num_predict: 4096
 structuredTextModelParams:
   temperature: 0

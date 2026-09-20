@@ -134,8 +134,12 @@ public static class QualityEvaluatorAssessmentWorkflow
     {
         var stopwatch = Stopwatch.StartNew();
         var tokenReplacer = new StringTokenReplacer();
+        // Gold-set items have no output-file identity, so pass string.Empty for the outputFile scope -
+        // this only affects glossary lines with "only"/"exclude" file restrictions, which are skipped
+        // here the same way they'd be skipped for any file not in an "only" list.
+        var glossaryPrompt = GlossaryLine.AppendPromptsFor(source, config.Runtime.GlossaryLines, string.Empty);
         var verdict = await QualityReviewWorkflow.GetLlmVerdictAsync(config, model, client, source,
-            tokenReplacer.Replace(source), tokenReplacer.Replace(translation), string.Empty);
+            tokenReplacer.Replace(source), tokenReplacer.Replace(translation), glossaryPrompt);
         stopwatch.Stop();
 
         var actual = !verdict.Success
@@ -157,6 +161,7 @@ public static class QualityEvaluatorAssessmentWorkflow
             ActualLabel = actual,
             ExpectedDefectCategories = expected.DefectCategories,
             ActualDefectCategory = verdict.Defect.ToString(),
+            ActualDefectCategories = verdict.Findings?.Select(f => f.Category.ToString()).Distinct().ToList() ?? [],
             ParseSuccess = verdict.Success,
             Score = verdict.Score,
             ElapsedMilliseconds = stopwatch.ElapsedMilliseconds,
@@ -187,9 +192,10 @@ public static class QualityEvaluatorAssessmentWorkflow
         var confirmedDefects = item.DefectCategories.Count == 0
             ? [QcDefectCategory.OtherNamedDefect]
             : item.DefectCategories.Select(ParseCategory).Distinct().ToList();
+        var glossaryPrompt = GlossaryLine.AppendPromptsFor(item.Source, config.Runtime.GlossaryLines, string.Empty);
         var verdict = model.Prompts.ContainsKey("BaseQualityReviewVerificationPrompt")
             ? await QualityReviewWorkflow.GetVerificationVerdictAsync(config, model, client, item.Source,
-                tokenReplacer.Replace(item.Source), tokenReplacer.Replace(item.CurrentTranslation), string.Empty,
+                tokenReplacer.Replace(item.Source), tokenReplacer.Replace(item.CurrentTranslation), glossaryPrompt,
                 confirmedDefects, tokenReplacer.Replace(item.ProposedCorrection))
             : new QcVerificationResult(false, [], [], 0);
         stopwatch.Stop();
@@ -400,6 +406,7 @@ public static class QualityEvaluatorAssessmentWorkflow
         public string ActualLabel { get; set; } = string.Empty;
         public List<string> ExpectedDefectCategories { get; set; } = [];
         public string ActualDefectCategory { get; set; } = string.Empty;
+        public List<string> ActualDefectCategories { get; set; } = [];
         public string ExpectedCorrectionSafety { get; set; } = string.Empty;
         public string ActualCorrectionSafety { get; set; } = string.Empty;
         public bool ParseSuccess { get; set; }
