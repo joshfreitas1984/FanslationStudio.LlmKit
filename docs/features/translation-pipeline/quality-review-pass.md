@@ -158,9 +158,16 @@ since-changed `Translated`, see below).
 
 `Workflow.TranslationWorkflow.UpdateSplit` snapshots `Translated` before applying the ordinary
 translation rules. If any rule, manual translation, game-specific repair, or normalization changes
-the value, it calls `ResetQcState()` immediately. This prevents a corrected or retranslated split
-from carrying visible QC results for the previous text. Flag-only outcomes still preserve QC state,
-and `ResetQcState()` deliberately leaves `QcRuleCheckFailureCount`/`QcRuleCheckFailureBaseline`
+the value, it calls `ResetQcState()` immediately - but on the column's **anchor** fragment
+(`FindQcAnchor`, same `SubIndex == 0` convention/column-key grouping `QualityReviewWorkflow` and
+every packaging path already use), not necessarily on the fragment whose `Translated` actually
+changed. For a plain column these are the same split. For a templated/compound column, a
+retranslated `SubIndex >= 1` fragment never carried QC state of its own (see the anchor convention
+above) - resetting it directly used to leave the anchor's stale `Passed`/`Corrected`
+state/score/`QcTranslated` visibly unchanged in `Files/Converted/*.yaml` until the next QC run's own
+`IsQcReviewFresh` recompute caught up (that recompute was always correct on its own; only the
+*visible*, immediate reset was resolving the wrong fragment). Flag-only outcomes still preserve QC
+state, and `ResetQcState()` deliberately leaves `QcRuleCheckFailureCount`/`QcRuleCheckFailureBaseline`
 intact so the QC rule-retry budget remains meaningful.
 
 The freshness check remains a defense in depth for changes made by other workflows or external

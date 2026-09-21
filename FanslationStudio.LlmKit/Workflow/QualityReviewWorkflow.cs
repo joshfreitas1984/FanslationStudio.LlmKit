@@ -33,7 +33,12 @@ public static class QualityReviewWorkflow
     /// field's template. The "#" prefix on the int form keeps it from ever colliding with a numeric-
     /// looking SplitPath string.
     /// </summary>
-    private static string ColumnKey(TranslationSplit split) =>
+    /// <remarks>
+    /// Internal (not private) so <see cref="TranslationWorkflow.UpdateSplit"/> can look up the
+    /// same column identity when locating a compound column's QC anchor fragment - see that
+    /// method's own doc comment.
+    /// </remarks>
+    internal static string ColumnKey(TranslationSplit split) =>
         string.IsNullOrEmpty(split.SplitPath) ? $"#{split.Split}" : split.SplitPath;
 
     /// <inheritdoc cref="ColumnKey(TranslationSplit)"/>
@@ -2078,6 +2083,59 @@ public static class QualityReviewWorkflow
                         continue;
 
                     Console.WriteLine($"Quality review cleanup: '{textFile.Path}' split {anchor.Split} SOURCE contains a stutter pattern - resetting for re-review.");
+                    anchor.ResetQcState();
+                    resetCount++;
+                }
+            }
+
+            if (resetCount > 0)
+                await FileHelper.WriteAllTextWithRetryAsync(outputFile, serializer.Serialize(fileLines));
+        });
+    }
+
+    /// <summary>
+    /// Resets every column at <see cref="QcStatus.Corrected"/> whose <see
+    /// cref="TranslationSplit.QcTranslated"/> dropped a negative-number sign ("-0.5%" -> "0.5%")
+    /// that the SOURCE has (see <see cref="TranslationWorkflow.IsMissingRequiredNegativeSign"/>)
+    /// back to <see cref="QcStatus.NotReviewed"/> for a fresh review - added after
+    /// <c>EvaluateRules</c>'s validation gate gained a check for this (previously a correction that
+    /// dropped a leading "-" off a stat/buff tooltip's percentage sailed straight through with
+    /// nothing catching it - see the /investigate-qc-issue writeup this reset was added from).
+    /// Unlike <see cref="ResetStutterAffectedQcState"/>/<see cref="ResetTagSeamAffectedQcState"/>
+    /// (which target already-<c>Passed</c> columns the model silently missed), this targets
+    /// <c>Corrected</c> columns specifically - the sign was only ever dropped as part of a QC
+    /// correction being ACCEPTED, never as part of a plain <c>Passed</c> verdict (which leaves
+    /// <c>Translated</c>, and so the sign, untouched). Cheap: a plain regex-count comparison against
+    /// the already-reconstructed effective raw text, no LLM call of its own.
+    /// </summary>
+    public static async Task ResetNegativeSignAffectedQcState(string workingDirectory, TextFileToSplit[] textFiles)
+    {
+        var serializer = YamlHelper.CreateSerializer();
+
+        await FileIteration.IterateTranslatedFilesInParallelAsync(workingDirectory, textFiles, async (outputFile, textFile, fileLines) =>
+        {
+            var resetCount = 0;
+
+            foreach (var line in fileLines)
+            {
+                foreach (var columnGroup in line.Splits.GroupBy(ColumnKey))
+                {
+                    var fragments = columnGroup.OrderBy(s => s.SubIndex).ToList();
+                    var anchor = fragments.FirstOrDefault(f => f.SubIndex == 0) ?? fragments[0];
+
+                    if (anchor.QcStatus != QcStatus.Corrected || string.IsNullOrEmpty(anchor.QcTranslated))
+                        continue;
+
+                    var template = line.Templates.FirstOrDefault(t => ColumnKey(t) == columnGroup.Key);
+                    var rawText = template != null
+                        ? CompoundFieldSplitter.Reconstruct(template.Template, fragments.Select(f => f.Text).ToList())
+                        : anchor.Text;
+                    var preparedRaw = LineValidation.PrepareRaw(rawText, null);
+
+                    if (!TranslationWorkflow.IsMissingRequiredNegativeSign(preparedRaw, anchor.QcTranslated))
+                        continue;
+
+                    Console.WriteLine($"Quality review cleanup: '{textFile.Path}' split {anchor.Split} QcTranslated dropped a required negative sign - resetting for re-review.");
                     anchor.ResetQcState();
                     resetCount++;
                 }

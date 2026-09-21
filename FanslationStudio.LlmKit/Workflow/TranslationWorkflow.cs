@@ -132,7 +132,7 @@ public static class TranslationWorkflow
                 continue;
             }
 
-            if (UpdateSplit(logLines, split, textFile, context.Config, context.ChineseCharRegex, tokenReplacer))
+            if (UpdateSplit(logLines, line, split, textFile, context.Config, context.ChineseCharRegex, tokenReplacer))
                 modded++;
         }
 
@@ -141,6 +141,7 @@ public static class TranslationWorkflow
 
     public static bool UpdateSplit(
         ConcurrentBag<string> logLines,
+        TranslationLine line,
         TranslationSplit split,
         TextFileToSplit textFile,
         LlmConfig config,
@@ -151,9 +152,48 @@ public static class TranslationWorkflow
         var modified = UpdateSplitCore(logLines, split, textFile, config, chineseCharRegex, tokenReplacer);
 
         if (!string.Equals(translatedBeforeRules, split.Translated, StringComparison.Ordinal))
-            split.ResetQcState();
+            FindQcAnchor(line, split).ResetQcState();
 
         return modified;
+    }
+
+    /// <summary>
+    /// The fragment that actually carries a column's QC state - see the <c>SubIndex == 0</c> anchor
+    /// convention (docs/features/translation-pipeline/quality-review-pass.md, FanslationStudio.LlmKit repo):
+    /// a templated/compound column's whole-cell <see cref="TranslationSplit.QcStatus"/>/
+    /// <see cref="TranslationSplit.QcTranslated"/>/<see cref="TranslationSplit.QcQualityScore"/>/
+    /// <see cref="TranslationSplit.QcReviewedText"/> live entirely on that column's
+    /// <c>SubIndex == 0</c> fragment, never on <c>SubIndex >= 1</c> fragments. <paramref name="split"/>
+    /// itself IS that anchor for a plain (single-fragment) column, but for a compound column whose
+    /// changed fragment is <c>SubIndex >= 1</c>, calling <see cref="TranslationSplit.ResetQcState"/>
+    /// on <paramref name="split"/> directly resets fields that never held any real QC data, leaving
+    /// the anchor's stale <c>Passed</c>/<c>Corrected</c> state untouched until the next QC run's own
+    /// <see cref="Utility.QualityReviewHelpers.IsQcReviewFresh"/> dynamic recompute catches up.
+    /// Groups <paramref name="line"/>'s splits by <see cref="QualityReviewWorkflow.ColumnKey(TranslationSplit)"/>
+    /// - the same SplitPath-for-JSON/Split-for-everything-else key <c>QualityReviewWorkflow</c> and
+    /// every packaging path already use - so this resolves the anchor identically for CSV,
+    /// PrefabText, DynamicStrings, and JSON field-path columns alike.
+    /// </summary>
+    private static TranslationSplit FindQcAnchor(TranslationLine line, TranslationSplit split)
+    {
+        var key = QualityReviewWorkflow.ColumnKey(split);
+        TranslationSplit? anchor = null;
+        TranslationSplit? first = null;
+
+        foreach (var candidate in line.Splits)
+        {
+            if (QualityReviewWorkflow.ColumnKey(candidate) != key)
+                continue;
+
+            first ??= candidate;
+            if (candidate.SubIndex == 0)
+            {
+                anchor = candidate;
+                break;
+            }
+        }
+
+        return anchor ?? first ?? split;
     }
 
     private static bool UpdateSplitCore(
@@ -507,6 +547,13 @@ public static class TranslationWorkflow
             modified = true;
         }
 
+        if (ruleResult.NegativeSignReason != null)
+        {
+            logLines.Add($"Missing negative sign {textFile.Path} Replaces: \n{split.Translated}");
+            split.FlaggedForRetranslation = true;
+            modified = true;
+        }
+
         if (ruleResult.MissingTokenReason != null)
         {
             logLines.Add($"Invalid {textFile.Path} Failures:{ruleResult.MissingTokenReason}\n{split.Translated}");
@@ -556,6 +603,28 @@ public static class TranslationWorkflow
             && !translatedForEllipsisCheck.EndsWith("...!!")
             && !translatedForEllipsisCheck.EndsWith("...?!");
     }
+
+    /// <summary>
+    /// Matches a hyphen-minus immediately before a digit, in either its raw ASCII form ("-5") or the
+    /// non-breaking hyphen (U+2011) <see cref="LineValidation.CleanupLineBeforeSaving"/> normalizes
+    /// ordinary hyphens to on the translated side ("‑5") - both count as "the negative sign is
+    /// still there" for <see cref="IsMissingRequiredNegativeSign"/>.
+    /// </summary>
+    private static readonly Regex NegativeNumberRegex = new(@"[-‑](?=\d)", RegexOptions.Compiled);
+
+    /// <summary>
+    /// True when <paramref name="translated"/> dropped a negative-number sign ("-0.5%" -> "0.5%")
+    /// that <paramref name="preparedRaw"/> has - a real observed QC-correction quirk (see
+    /// docs/quality-review-pass-architecture.md) where a stat/buff tooltip's leading "-" before a
+    /// percentage got silently stripped while the rest of the line was accepted as a valid
+    /// correction. Compares counts rather than exact positions since a fragment can legitimately
+    /// reorder clauses around a number - what must never happen is the raw text having MORE
+    /// negative-number signs than the candidate ends up with. Shared between
+    /// <see cref="ApplyTranslationRules"/> and <see cref="Workflow.QualityReviewWorkflow"/>'s QC
+    /// validation gate, same as <see cref="IsMissingRequiredEllipsis"/>.
+    /// </summary>
+    internal static bool IsMissingRequiredNegativeSign(string preparedRaw, string translated) =>
+        NegativeNumberRegex.Matches(preparedRaw).Count > NegativeNumberRegex.Matches(translated).Count;
 
     /// <summary>
     /// Returns the first configured <see cref="LlmConfig.ExtraStringTokenReplacers"/> token present
@@ -618,6 +687,7 @@ public static class TranslationWorkflow
             ? $"Matches the bad-words list (found: {string.Join(", ", badWordMatches)})."
             : null;
         var ellipsisReason = IsMissingRequiredEllipsis(preparedRaw, candidate) ? "Missing an ellipsis '...' required by the source." : null;
+        var negativeSignReason = IsMissingRequiredNegativeSign(preparedRaw, candidate) ? "Missing a negative sign '-' before a number required by the source." : null;
         var missingTokenReason = FindMissingRequiredToken(splitRaw, candidate, config.ExtraStringTokenReplacers) is string missingToken
             ? $"Missing required token '{missingToken}'."
             : null;
@@ -630,6 +700,7 @@ public static class TranslationWorkflow
             hallucinationReason,
             badWordsReason,
             ellipsisReason,
+            negativeSignReason,
             missingTokenReason,
             customValidatorReason,
             structuralReason);
@@ -641,6 +712,7 @@ public static class TranslationWorkflow
         string? HallucinationReason,
         string? BadWordsReason,
         string? EllipsisReason,
+        string? NegativeSignReason,
         string? MissingTokenReason,
         string? CustomValidatorReason,
         string? StructuralReason)
@@ -659,6 +731,7 @@ public static class TranslationWorkflow
                 if (HallucinationReason != null) yield return HallucinationReason;
                 if (BadWordsReason != null) yield return BadWordsReason;
                 if (EllipsisReason != null) yield return EllipsisReason;
+                if (NegativeSignReason != null) yield return NegativeSignReason;
                 if (MissingTokenReason != null) yield return MissingTokenReason;
                 if (CustomValidatorReason != null) yield return CustomValidatorReason;
                 if (StructuralReason != null) yield return StructuralReason;
@@ -670,6 +743,7 @@ public static class TranslationWorkflow
             || HallucinationReason != null
             || BadWordsReason != null
             || EllipsisReason != null
+            || NegativeSignReason != null
             || MissingTokenReason != null
             || CustomValidatorReason != null
             || StructuralReason != null;
