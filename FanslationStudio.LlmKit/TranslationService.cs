@@ -482,6 +482,9 @@ public static class TranslationService
                             split.Translated = result.Valid ? result.Result : string.Empty;
                         }
 
+                        if (!string.Equals(original, split.Translated, StringComparison.Ordinal))
+                            QualityReviewHelpers.FindQcAnchor(line, split).ResetQcState();
+
                         split.ResetFlags(split.Translated != original);
                         recordsProcessed++;
                         totalRecordsProcessed++;
@@ -502,22 +505,26 @@ public static class TranslationService
                 var duplicates = batch
                     .SelectMany(line => line.Splits.Select(split => (Line: line, Split: split)))
                     .GroupBy(x => DedupKey(x.Line, x.Split))
-                    .Where(group => group.Count() > 1)
-                    .Select(group => group.Select(x => x.Split));
+                    .Where(group => group.Count() > 1);
 
-                foreach (var splitDupes in duplicates)
+                foreach (var dupeGroup in duplicates)
                 {
-                    var firstSplit = splitDupes.First();
+                    var firstSplit = dupeGroup.First().Split;
 
                     // Skip first one - it should be ok
-                    foreach (var split in splitDupes.Skip(1))
+                    foreach (var (line, split) in dupeGroup.Skip(1))
                     {
                         if (split.Translated != firstSplit.Translated
                             || string.IsNullOrEmpty(split.Translated)
                             || forceRetranslation
                             || (config.TranslateFlagged && split.FlaggedForRetranslation))
                         {
+                            var originalDupe = split.Translated;
                             split.Translated = firstSplit.Translated;
+
+                            if (!string.Equals(originalDupe, split.Translated, StringComparison.Ordinal))
+                                QualityReviewHelpers.FindQcAnchor(line, split).ResetQcState();
+
                             split.ResetFlags();
                             recordsProcessed++;
                             totalRecordsProcessed++;
@@ -744,6 +751,9 @@ public static class TranslationService
                         }
                     }
 
+                    if (!string.Equals(original, split.Translated, StringComparison.Ordinal))
+                        QualityReviewHelpers.FindQcAnchor(line, split).ResetQcState();
+
                     split.ResetFlags(split.Translated != original);
                     Interlocked.Increment(ref file.RecordsProcessed);
                     var totalProcessed = Interlocked.Increment(ref totalRecordsProcessed);
@@ -881,25 +891,29 @@ public static class TranslationService
         var duplicates = file.FileLines
             .SelectMany(line => line.Splits.Select(split => (Line: line, Split: split)))
             .GroupBy(x => DedupKey(x.Line, x.Split))
-            .Where(group => group.Count() > 1)
-            .Select(group => group.Select(x => x.Split));
+            .Where(group => group.Count() > 1);
 
-        foreach (var splitDupes in duplicates)
+        foreach (var dupeGroup in duplicates)
         {
-            var firstSplit = splitDupes.First();
+            var firstSplit = dupeGroup.First().Split;
 
             if (string.IsNullOrEmpty(firstSplit.Translated))
                 continue;
 
             // Skip first one - it should be ok
-            foreach (var split in splitDupes.Skip(1))
+            foreach (var (line, split) in dupeGroup.Skip(1))
             {
                 if (split.Translated != firstSplit.Translated
                     || string.IsNullOrEmpty(split.Translated)
                     || forceRetranslation
                     || (config.TranslateFlagged && split.FlaggedForRetranslation))
                 {
+                    var originalDupe = split.Translated;
                     split.Translated = firstSplit.Translated;
+
+                    if (!string.Equals(originalDupe, split.Translated, StringComparison.Ordinal))
+                        QualityReviewHelpers.FindQcAnchor(line, split).ResetQcState();
+
                     split.ResetFlags();
                     Interlocked.Increment(ref file.RecordsProcessed);
                     Interlocked.Increment(ref totalRecordsProcessed);

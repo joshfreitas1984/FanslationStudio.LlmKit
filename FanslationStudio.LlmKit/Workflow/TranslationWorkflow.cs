@@ -11,6 +11,11 @@ public static class TranslationWorkflow
     public static async Task ApplyAllRulesToCurrentTranslation(string workingDirectory, TextFileToSplit[] textFiles, GameHooks? hooks = null)
     {
         await UpdateCurrentTranslationLines(workingDirectory, true, textFiles, hooks);
+
+        // Catches columns left with a stale Qc* verdict from before UpdateSplit (above) eagerly
+        // reset the anchor on every Translated change - e.g. a corpus translated/QC'd under an
+        // older build. See QualityReviewWorkflow.ResetStaleQcState's doc comment.
+        await QualityReviewWorkflow.ResetStaleQcState(workingDirectory, textFiles, hooks);
     }
 
     public static async Task TranslateLines(string workingDirectory, TextFileToSplit[] textFiles, GameHooks? hooks = null)
@@ -152,48 +157,9 @@ public static class TranslationWorkflow
         var modified = UpdateSplitCore(logLines, split, textFile, config, chineseCharRegex, tokenReplacer);
 
         if (!string.Equals(translatedBeforeRules, split.Translated, StringComparison.Ordinal))
-            FindQcAnchor(line, split).ResetQcState();
+            QualityReviewHelpers.FindQcAnchor(line, split).ResetQcState();
 
         return modified;
-    }
-
-    /// <summary>
-    /// The fragment that actually carries a column's QC state - see the <c>SubIndex == 0</c> anchor
-    /// convention (docs/features/translation-pipeline/quality-review-pass.md, FanslationStudio.LlmKit repo):
-    /// a templated/compound column's whole-cell <see cref="TranslationSplit.QcStatus"/>/
-    /// <see cref="TranslationSplit.QcTranslated"/>/<see cref="TranslationSplit.QcQualityScore"/>/
-    /// <see cref="TranslationSplit.QcReviewedText"/> live entirely on that column's
-    /// <c>SubIndex == 0</c> fragment, never on <c>SubIndex >= 1</c> fragments. <paramref name="split"/>
-    /// itself IS that anchor for a plain (single-fragment) column, but for a compound column whose
-    /// changed fragment is <c>SubIndex >= 1</c>, calling <see cref="TranslationSplit.ResetQcState"/>
-    /// on <paramref name="split"/> directly resets fields that never held any real QC data, leaving
-    /// the anchor's stale <c>Passed</c>/<c>Corrected</c> state untouched until the next QC run's own
-    /// <see cref="Utility.QualityReviewHelpers.IsQcReviewFresh"/> dynamic recompute catches up.
-    /// Groups <paramref name="line"/>'s splits by <see cref="QualityReviewWorkflow.ColumnKey(TranslationSplit)"/>
-    /// - the same SplitPath-for-JSON/Split-for-everything-else key <c>QualityReviewWorkflow</c> and
-    /// every packaging path already use - so this resolves the anchor identically for CSV,
-    /// PrefabText, DynamicStrings, and JSON field-path columns alike.
-    /// </summary>
-    private static TranslationSplit FindQcAnchor(TranslationLine line, TranslationSplit split)
-    {
-        var key = QualityReviewWorkflow.ColumnKey(split);
-        TranslationSplit? anchor = null;
-        TranslationSplit? first = null;
-
-        foreach (var candidate in line.Splits)
-        {
-            if (QualityReviewWorkflow.ColumnKey(candidate) != key)
-                continue;
-
-            first ??= candidate;
-            if (candidate.SubIndex == 0)
-            {
-                anchor = candidate;
-                break;
-            }
-        }
-
-        return anchor ?? first ?? split;
     }
 
     private static bool UpdateSplitCore(

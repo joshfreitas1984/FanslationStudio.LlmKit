@@ -6,27 +6,57 @@ namespace Tests.Workflow;
 
 public class QualityReviewWorkflowTests
 {
-    // Regression test for a real corrupted QcTranslated found in DragonHierOverLlm's
-    // AchievementData.csv.yaml: "Wealth in the millions CORRECTED: NONE" and "Become the number one
-    // ... CORRECTED: Become the top fighter ...". CorrectedLineRegex used to be Singleline with no
-    // line anchor, so it captured everything from the first "CORRECTED:" to the end of the whole
-    // response instead of just that one line - if the model's response restated the label or added
-    // any trailing text after it, that trailing text got swept into the captured correction.
-    [Theory(DisplayName = "CorrectedLineRegex captures only the CORRECTED line, not trailing text")]
-    [InlineData("SCORE: 85\nCORRECTED: NONE", "NONE")]
-    [InlineData("SCORE: 85\nCORRECTED: Wealth in the millions\nCORRECTED: NONE", "Wealth in the millions")]
-    [InlineData("SCORE: 90\nCORRECTED: Become the top fighter in the heroes' battle rankings", "Become the top fighter in the heroes' battle rankings")]
-    public void CorrectedLineRegexStopsAtEndOfLine(string llmResponse, string expectedCorrected)
+    // CorrectedLineRegex is deliberately Singleline (dot matches newline) as of commit 116539a - a
+    // multi-sentence correction is frequently joined by a real line break rather than a literal
+    // "\n" token, and an earlier single-line-anchored version of this regex silently truncated
+    // those (see the regex's own doc comment). That means a plain, un-leaked correction spanning
+    // multiple real lines is captured whole, as this case verifies.
+    [Fact(DisplayName = "CorrectedLineRegex captures a plain multi-line correction in full")]
+    public void CorrectedLineRegexCapturesMultiLineCorrection()
     {
-        var regex = (Regex)typeof(QualityReviewWorkflow)
-            .GetField("CorrectedLineRegex", BindingFlags.NonPublic | BindingFlags.Static)!
-            .GetValue(null)!;
+        var regex = GetCorrectedLineRegex();
 
-        var match = regex.Match(llmResponse);
+        var match = regex.Match("SCORE: 85\nCORRECTED: First sentence.\nSecond sentence on its own line.");
+
+        Assert.True(match.Success);
+        Assert.Equal("First sentence.\nSecond sentence on its own line.", match.Groups[1].Value.Trim());
+    }
+
+    [Theory(DisplayName = "CorrectedLineRegex captures a single-line correction exactly")]
+    [InlineData("SCORE: 85\nCORRECTED: NONE", "NONE")]
+    [InlineData("SCORE: 90\nCORRECTED: Become the top fighter in the heroes' battle rankings", "Become the top fighter in the heroes' battle rankings")]
+    public void CorrectedLineRegexCapturesSingleLineCorrection(string llmResponse, string expectedCorrected)
+    {
+        var match = GetCorrectedLineRegex().Match(llmResponse);
 
         Assert.True(match.Success);
         Assert.Equal(expectedCorrected, match.Groups[1].Value.Trim());
     }
+
+    // Regression test for a real corrupted QcTranslated found in DragonHierOverLlm's
+    // AchievementData.csv.yaml: "Wealth in the millions CORRECTED: NONE". Because CorrectedLineRegex
+    // is Singleline (see above), a model that restates "CORRECTED:"/"SCORE:" on a later line gets
+    // that whole trailing leak swept into the captured group rather than truncated - this is by
+    // design, NOT a bug: the regex's own doc comment calls out ContainsLeakedProtocolText as the
+    // independent guard for exactly this case. This test locks in that two-stage contract: the
+    // regex captures everything (including the leak), and ContainsLeakedProtocolText then flags
+    // that captured text so GetLlmVerdictAsync discards the whole response as unparseable instead
+    // of quietly accepting the leading, seemingly-clean-looking prefix.
+    [Fact(DisplayName = "CorrectedLineRegex captures a trailing leaked CORRECTED: line, which ContainsLeakedProtocolText then flags")]
+    public void CorrectedLineRegexCapturesLeakWhichIsThenFlagged()
+    {
+        var match = GetCorrectedLineRegex().Match("SCORE: 85\nCORRECTED: Wealth in the millions\nCORRECTED: NONE");
+
+        Assert.True(match.Success);
+        var captured = match.Groups[1].Value.Trim();
+        Assert.Equal("Wealth in the millions\nCORRECTED: NONE", captured);
+        Assert.True(QualityReviewWorkflow.ContainsLeakedProtocolText(captured));
+    }
+
+    private static Regex GetCorrectedLineRegex() =>
+        (Regex)typeof(QualityReviewWorkflow)
+            .GetField("CorrectedLineRegex", BindingFlags.NonPublic | BindingFlags.Static)!
+            .GetValue(null)!;
 
     // Regression test for a real bad correction found in DragonHierOverLlm's ArmorData.csv.yaml:
     // "Full helmet" -> "FULL HELMET", accepted with QcStatus.Corrected and a self-reported

@@ -73,8 +73,8 @@ public static class QualityReviewWorkflow
     {
         "SCORE:",
         "CORRECTED:",
-        "SOURCE (CHINESE)",
-        "CURRENT TRANSLATION (ENGLISH)",
+        "SOURCE (Chinese)",
+        "CURRENT TRANSLATION (English)",
     };
 
     /// <summary>Catches "NONE" as its own word anywhere in the text (a leading/trailing/mid-sentence
@@ -114,12 +114,15 @@ public static class QualityReviewWorkflow
             return false;
 
         // Case-SENSITIVE (Ordinal, not OrdinalIgnoreCase) for the same reason StandaloneNoneRegex/
-        // TrailingNoneRegex already are: a genuine leak is always the literal uppercase label copied
-        // verbatim from the prompt's own format ("SCORE:", "CORRECTED:"), whereas a real correction
-        // is normal-cased English prose that can legitimately contain the same word - e.g. a UI
-        // string like "New practice high score: {1} points" was misidentified as a leak and silently
-        // discarded (treated as unparseable) when this was OrdinalIgnoreCase, purely because "score:"
-        // happened to appear as an ordinary lowercase word in a real, correct translation.
+        // TrailingNoneRegex already are: a genuine leak is always the literal label copied verbatim
+        // from the prompt's own format - each ProtocolLeakMarkers entry matches that exact casing
+        // ("SCORE:"/"CORRECTED:" uppercase per the output format the model is told to produce;
+        // "SOURCE (Chinese)"/"CURRENT TRANSLATION (English)" mixed-case per the literal input labels
+        // built in GetLlmVerdictAsync) - whereas a real correction is normal-cased English prose that
+        // can legitimately contain the same word lowercased - e.g. a UI string like "New practice
+        // high score: {1} points" was misidentified as a leak and silently discarded (treated as
+        // unparseable) when this was OrdinalIgnoreCase, purely because "score:" happened to appear as
+        // an ordinary lowercase word in a real, correct translation.
         return ProtocolLeakMarkers.Any(marker => correctedText.Contains(marker, StringComparison.Ordinal))
             || StandaloneNoneRegex.IsMatch(correctedText)
             || TrailingNoneRegex.IsMatch(correctedText);
@@ -1799,6 +1802,77 @@ public static class QualityReviewWorkflow
             if (resetCount > 0)
                 await FileHelper.WriteAllTextWithRetryAsync(outputFile, serializer.Serialize(fileLines));
         });
+    }
+
+    /// <summary>
+    /// Sweeps every already-reviewed column for a stored <see cref="TranslationSplit.QcReviewedText"/>
+    /// that no longer matches its current effective <see cref="TranslationSplit.Translated"/> text
+    /// (<see cref="QualityReviewHelpers.IsQcReviewFresh"/> - same freshness check packaging and
+    /// <see cref="RunAsync"/> already use to decide a stale verdict can't be trusted) and physically
+    /// clears the anchor's Qc* fields back to <see cref="QcStatus.NotReviewed"/>, instead of leaving a
+    /// stale <see cref="QcStatus.Passed"/>/<see cref="QcStatus.Corrected"/> verdict sitting in
+    /// <c>Files/Converted/*.yaml</c> describing text that no longer exists. Freshness is already a
+    /// defense in depth at read time - nothing that trusts <c>QcTranslated</c>/<c>QcQualityScore</c>
+    /// can be fooled by a mismatch like this - so this is a pure hygiene pass; it changes nothing about
+    /// which text ships, only how honestly the stored file reflects it.
+    ///
+    /// Exists for the corpus built up BEFORE <see cref="Workflow.TranslationWorkflow.UpdateSplit"/>/
+    /// <see cref="TranslationService"/>'s direct LLM writes started eagerly calling
+    /// <see cref="QualityReviewHelpers.FindQcAnchor"/>'s <c>ResetQcState()</c> on every
+    /// <see cref="TranslationSplit.Translated"/> change (see "Staleness / freshness" in
+    /// docs/features/translation-pipeline/quality-review-pass.md) - a line whose <c>Translated</c>
+    /// changed before that eager reset existed can be left with a permanent
+    /// <c>QcReviewedText</c>/<c>Translated</c> mismatch that nothing else will ever go back and clear.
+    /// Called automatically from <see cref="Workflow.TranslationWorkflow.ApplyAllRulesToCurrentTranslation"/>,
+    /// so re-running "2. ApplyRulesToCurrentTranslation" also cleans this up for the whole corpus
+    /// without a separate manual step. A no-op if <c>qualityReview.enabled</c> is false - nothing
+    /// recorded is trustworthy either way (see <see cref="QualityReviewHelpers.IsQcReviewFresh"/>).
+    /// </summary>
+    public static async Task<int> ResetStaleQcState(string workingDirectory, TextFileToSplit[] textFiles, GameHooks? hooks = null)
+    {
+        var config = ConfigurationExtensions.GetConfiguration(workingDirectory, hooks);
+        if (!config.QualityReview.Enabled)
+            return 0;
+
+        var serializer = YamlHelper.CreateSerializer();
+        var totalReset = 0;
+
+        await FileIteration.IterateTranslatedFilesInParallelAsync(workingDirectory, textFiles, async (outputFile, textFile, fileLines) =>
+        {
+            var resetCount = 0;
+
+            foreach (var line in fileLines)
+            {
+                foreach (var columnGroup in line.Splits.GroupBy(ColumnKey))
+                {
+                    var fragments = columnGroup.OrderBy(s => s.SubIndex).ToList();
+                    var anchor = fragments.FirstOrDefault(f => f.SubIndex == 0) ?? fragments[0];
+
+                    if (anchor.QcStatus == QcStatus.NotReviewed)
+                        continue;
+
+                    var template = line.Templates.FirstOrDefault(t => ColumnKey(t) == columnGroup.Key);
+
+                    if (QualityReviewHelpers.IsQcReviewFresh(anchor, template, fragments, config.QualityReview))
+                        continue;
+
+                    Console.WriteLine($"Quality review cleanup: '{textFile.Path}' split {anchor.Split} had a stale QC verdict (QcReviewedText no longer matches Translated) - resetting for re-review.");
+                    anchor.ResetQcState();
+                    resetCount++;
+                }
+            }
+
+            if (resetCount > 0)
+            {
+                Interlocked.Add(ref totalReset, resetCount);
+                await FileHelper.WriteAllTextWithRetryAsync(outputFile, serializer.Serialize(fileLines));
+            }
+        });
+
+        if (totalReset > 0)
+            Console.WriteLine($"Quality review cleanup: reset {totalReset} stale QC verdict(s) across the corpus.");
+
+        return totalReset;
     }
 
     /// <summary>

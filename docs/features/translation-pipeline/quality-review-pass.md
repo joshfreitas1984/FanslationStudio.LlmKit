@@ -157,18 +157,24 @@ since-changed `Translated`, see below).
 ## Staleness / freshness (`Utility/QualityReviewHelpers.cs`)
 
 `Workflow.TranslationWorkflow.UpdateSplit` snapshots `Translated` before applying the ordinary
-translation rules. If any rule, manual translation, game-specific repair, or normalization changes
-the value, it calls `ResetQcState()` immediately - but on the column's **anchor** fragment
-(`FindQcAnchor`, same `SubIndex == 0` convention/column-key grouping `QualityReviewWorkflow` and
-every packaging path already use), not necessarily on the fragment whose `Translated` actually
-changed. For a plain column these are the same split. For a templated/compound column, a
-retranslated `SubIndex >= 1` fragment never carried QC state of its own (see the anchor convention
-above) - resetting it directly used to leave the anchor's stale `Passed`/`Corrected`
-state/score/`QcTranslated` visibly unchanged in `Files/Converted/*.yaml` until the next QC run's own
-`IsQcReviewFresh` recompute caught up (that recompute was always correct on its own; only the
-*visible*, immediate reset was resolving the wrong fragment). Flag-only outcomes still preserve QC
-state, and `ResetQcState()` deliberately leaves `QcRuleCheckFailureCount`/`QcRuleCheckFailureBaseline`
-intact so the QC rule-retry budget remains meaningful.
+translation rules, and `TranslationService`'s two LLM-retranslation paths (batched and
+continuous-worker-pool, including each one's own dedupe-copy pass) do the same around their direct
+`split.Translated = ...` writes. If the value changes, all of these call `ResetQcState()`
+immediately - but on the column's **anchor** fragment (`QualityReviewHelpers.FindQcAnchor`, same
+`SubIndex == 0` convention/column-key grouping `QualityReviewWorkflow` and every packaging path
+already use), not necessarily on the fragment whose `Translated` actually changed. For a plain
+column these are the same split. For a templated/compound column, a retranslated `SubIndex >= 1`
+fragment never carried QC state of its own (see the anchor convention above) - resetting it
+directly used to leave the anchor's stale `Passed`/`Corrected` state/score/`QcTranslated` visibly
+unchanged in `Files/Converted/*.yaml` until the next QC run's own `IsQcReviewFresh` recompute caught
+up (that recompute was always correct on its own; only the *visible*, immediate reset was resolving
+the wrong fragment). `TranslationService`'s direct LLM writes used to skip this eager reset entirely
+(a brute-force retranslation of a flagged/empty line left the anchor's stale Qc* fields sitting in
+`Files/Converted/*.yaml`, sometimes describing wildly different text, until the next QC run) - it now
+calls the same shared `FindQcAnchor(...).ResetQcState()` for consistency with `UpdateSplit`. Flag-only
+outcomes still preserve QC state, and `ResetQcState()` deliberately leaves
+`QcRuleCheckFailureCount`/`QcRuleCheckFailureBaseline` intact so the QC rule-retry budget remains
+meaningful.
 
 The freshness check remains a defense in depth for changes made by other workflows or external
 editing: every place that would otherwise trust `QcTranslated`/
@@ -354,6 +360,18 @@ Five levels, narrowest to broadest:
   almost always passed QC silently at a high score, so this targets exactly those columns for a
   fresh look instead of paying for a full-corpus re-review to catch a narrow pattern. Finds
   candidates via a plain regex scan (no LLM call), so it's cheap to run even on a large corpus.
+- **`ResetStaleQcState(workingDirectory, textFiles, hooks)`** — unlike the six above (which all
+  reset by current status/score/category, a deliberate judgment call about what's still
+  trustworthy), this one only cleans up columns that are ALREADY stale by `IsQcReviewFresh`'s own
+  definition (`QcReviewedText` no longer matches the column's current effective `Translated`) but
+  are still sitting at `Passed`/`Corrected`/`FailedValidation` in `Files/Converted/*.yaml` instead of
+  `NotReviewed`. Every packaging/re-review path already treats a stale verdict as untrustworthy at
+  read time via `IsQcReviewFresh`, so this changes nothing about which text ships — it's pure
+  hygiene, for a corpus built up before `UpdateSplit`/`TranslationService`'s direct LLM writes
+  started eagerly calling `ResetQcState()` on the anchor for every `Translated` change. Called
+  automatically at the end of `TranslationWorkflow.ApplyAllRulesToCurrentTranslation`, so re-running
+  "2. ApplyRulesToCurrentTranslation" sweeps the whole corpus clean without a separate manual step.
+  A no-op if `qualityReview.enabled` is false.
 
 ## Triage and fix-prompt generation (`GetQcTriageAsync`/`WriteTriageReportAsync`/`WriteFixPromptsAsync`)
 
