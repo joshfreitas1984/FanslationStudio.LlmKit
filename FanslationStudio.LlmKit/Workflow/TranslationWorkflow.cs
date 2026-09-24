@@ -486,6 +486,7 @@ public static class TranslationWorkflow
 
         if (ruleResult.MistranslatedGlossaryTerms.Count > 0)
         {
+            logLines.Add($"Mistranslated Glossary {textFile.Path} Replaces: \n{split.Translated}");
             foreach (var item in ruleResult.MistranslatedGlossaryTerms)
                 split.FlaggedMistranslation += $"{item.Result},{item.Raw},";
             split.FlaggedForRetranslation = true;
@@ -494,6 +495,7 @@ public static class TranslationWorkflow
 
         if (ruleResult.HallucinationReason != null)
         {
+            logLines.Add($"Hallucination {textFile.Path} Replaces: \n{split.Translated}");
             split.FlaggedHallucination += ruleResult.HallucinationReason;
             split.FlaggedForRetranslation = true;
             modified = true;
