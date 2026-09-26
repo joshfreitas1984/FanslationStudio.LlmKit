@@ -19,6 +19,7 @@ public static class QcDefectCategoryTokens
         "DROPPED_STUTTER" => QcDefectCategory.DroppedStutter,
         "HARD_TO_PARSE_SEAM" => QcDefectCategory.HardToParseSeam,
         "OTHER_NAMED_DEFECT" => QcDefectCategory.OtherNamedDefect,
+        "MEANING_REVERSAL" => QcDefectCategory.MeaningReversal,
         "UNCERTAIN" => QcDefectCategory.Uncertain,
         _ => QcDefectCategory.Unknown,
     };
@@ -36,6 +37,7 @@ public static class QcDefectCategoryTokens
         QcDefectCategory.DroppedStutter => "DROPPED_STUTTER",
         QcDefectCategory.HardToParseSeam => "HARD_TO_PARSE_SEAM",
         QcDefectCategory.OtherNamedDefect => "OTHER_NAMED_DEFECT",
+        QcDefectCategory.MeaningReversal => "MEANING_REVERSAL",
         QcDefectCategory.Uncertain => "UNCERTAIN",
         _ => throw new ArgumentOutOfRangeException(nameof(category), category, "QcDefectCategory.Unknown has no wire token."),
     };

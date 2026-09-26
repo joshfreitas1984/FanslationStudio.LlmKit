@@ -16,6 +16,11 @@ never assuming it's correct just because it was drafted to be:
       appears in SOURCE (as itself, a title, or an unambiguous placeholder referent). A name that
       exists only in PROPOSED CORRECTION - most often a mistranslated title/role recast as if it
       were a person's name - is always a NEW defect, even when it reads as a plausible character.
+   c. For any granting/pleading/threatening/blaming action in PROPOSED CORRECTION, confirm the
+      direction/agency - who is doing/granting/asking/threatening/blaming what to/of whom - matches
+      SOURCE, not just that all the words are present. A flipped direction (e.g. a threat/bargain
+      offered from strength rendered as a captive's plea) is always a NEW defect, even if it was not
+      named in CONFIRMED DEFECTS - name it MEANING_REVERSAL.
 3. Grade your confidence that PROPOSED CORRECTION, taken as a whole, is a good replacement for
    TRANSLATION.
 
@@ -25,6 +30,10 @@ DEFECT CATEGORIES (for reference - CONFIRMED DEFECTS names one or more of these)
 - LOST_IDIOM: a lost idiom/slang meaning rendered as a literal word-for-word gloss. Never applies to a skill/technique/move/title name that is a plain descriptive compound rather than an actual fixed idiom or proverb. When grading a LOST_IDIOM fix, also check whether it traded a concrete source image/number for a vaguer generic paraphrase - that is a register regression, not a fix, no matter how fluently it reads.
 - UNTRANSLATED_PINYIN: a term left untranslated/transliterated as Pinyin when it has a clear translatable meaning. Never applies to any syllable/character inside a personal, place, or faction name that is otherwise kept transliterated.
 - DROPPED_CONTENT: an omitted subject/object/clause, or a dropped title/honorific next to a name (literal or placeholder).
+- MEANING_REVERSAL: SOURCE's clause-level agency/direction is flipped - who is granting/asking/
+  threatening/blaming what to/of whom runs backwards - even though nothing is omitted and every word
+  has a plausible rendering. Distinct from DROPPED_CONTENT (nothing missing) and OTHER_NAMED_DEFECT
+  (this is its own specific, nameable category, not the residual catch-all).
 - DROPPED_STUTTER: a SOURCE stammer/stutter (a word's leading syllable(s) repeated right before the full word) that TRANSLATION drops entirely or renders as gibberish unconnected to the stammered word. A hyphenated partial repeat ("Y-y-you") and a full separately-spoken repeat ("You, you, you") are BOTH valid English stammer renderings.
 - HARD_TO_PARSE_SEAM: a stitched-fragment seam that is genuinely hard to parse, ambiguous, or changes meaning - not just less fluent than an alternative. A markup/formatting tag or placeholder sitting between two fragments is NOT itself a sentence boundary.
 - OTHER_NAMED_DEFECT: something else concrete and nameable, including a dropped/altered placeholder

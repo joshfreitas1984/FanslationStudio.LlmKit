@@ -652,11 +652,9 @@ correction-suffix-leak postmortem documents for `qwen2.5:7b`). Concretely:
 
 - `BaseFiles/Qwen25/Prompts/BaseQualityReviewPrompt.txt` — includes an explicit anti-echo
   instruction line, informed by that documented `qwen2.5` quirk.
-- `BaseFiles/Glm4/Prompts/BaseQualityReviewPrompt.txt` — a new, minimal `Glm4` preset added
-  specifically for this (GLM wasn't a supported preset at all before). Only ships this one prompt
-  today (no `BaseSystemPrompt`/`Corrections`/`Dynamics`) since it's currently only used as a QC
-  candidate, never for primary translation — add the rest under `BaseFiles/Glm4/` the same way
-  `Qwen25` has them if it's ever used for real translation.
+- `Qwen38`, `HyMT2` and `HyMT2Moe` share the same wording, which lives in
+  `BaseFiles/Common/Prompts/BaseQualityReviewPrompt.txt` (see `LoadPresetPromptsWithCommon`) rather
+  than being duplicated under each preset.
 
 A downstream repo can still override either per-model with its own `BaseQualityReviewPrompt.txt`
 under that model's `CustomPromptsPath` folder — same workspace-prompt-overrides-preset convention

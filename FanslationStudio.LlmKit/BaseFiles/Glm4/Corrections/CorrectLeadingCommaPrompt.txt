@@ -1,1 +1,0 @@
-The source text starts with a comma, implying direct continuation from the prior sentence/cell. Your translation should start with ", " at the beginning.

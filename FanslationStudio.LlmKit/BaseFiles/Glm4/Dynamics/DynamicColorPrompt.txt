@@ -1,3 +1,0 @@
----
-
-**Color Tags:** Retain all <color> tags and incorporate into translation and output.

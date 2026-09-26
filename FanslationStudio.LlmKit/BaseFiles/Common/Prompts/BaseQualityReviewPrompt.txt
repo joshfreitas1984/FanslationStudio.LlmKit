@@ -22,6 +22,14 @@ Given Chinese SOURCE and CURRENT English TRANSLATION, judge accuracy and natural
   non-translation, not a stylistic issue, even though the placeholder itself reads as a normal
   English word.
 - Meaning mismatch with SOURCE, even if fluent.
+- SOURCE's clause-level meaning inverted rather than merely mistranslated word-for-word - who is
+  granting/asking/threatening/blaming what to/of whom is flipped, even though every individual word
+  has a plausible-looking rendering, so the agency/leverage in the exchange runs backwards. E.g.
+  SOURCE "大！当！家！放我顾师弟走，饶你不死。" (the speaker, bargaining from strength, offers to
+  spare the boss's life in exchange for releasing their junior brother) rendered as "Great Master, if
+  you let my junior disciple go, I beg you not to kill me." - this flips a threat/bargain into a
+  captive's plea. A correct rendering keeps the speaker holding leverage: "Boss! Let my junior
+  brother go, and I'll spare your life."
 - Omitted subject/object translated by mechanically carrying forward the subject of a preceding sentence, or defaulted to "I"/"me"/"we"/"you" solely because it's dialogue, when SOURCE/context (who's addressed, observed, examined, described, or acted upon) establish a different speaker/subject/object - can span multiple consecutive dialogue lines. E.g. "莫慌，让为师看看……\n还好还好，只是精疲力竭昏厥过去了。" - second line means roughly "Thank goodness, thank goodness. She only passed out from exhaustion.", not "No need to worry, I just fainted from exhaustion." (wrongly inherits the speaker as subject).
 - Internal formatting inconsistency within TRANSLATION itself, independent of SOURCE - check this
   even when SOURCE gives no explicit signal, by comparing TRANSLATION only against its own other
@@ -84,6 +92,11 @@ at the first, and do not force a single category when more than one genuinely ap
   LOST_IDIOM or forcing a pass you are not sure of.
 - UNTRANSLATED_PINYIN: a term left untranslated/transliterated as Pinyin when it is not a proper noun and has a clear translatable meaning. Never applies to any syllable/character inside a personal, place, or faction name that is otherwise kept transliterated - a multi-character proper noun is rendered as a whole, either fully transliterated or fully translated by established convention/glossary, never split so only some syllables are literally translated (e.g. do not turn a name ending in 月 into "...Month" while the rest of the same name stays transliterated - that produces a name that is neither, not a fix). If uncertain whether a term is part of a name versus a standalone common noun, treat it as part of the name and do not flag it.
 - DROPPED_CONTENT: an omitted subject/object/clause, or a dropped title/honorific next to a name (literal or placeholder), per the rules above.
+- MEANING_REVERSAL: SOURCE's clause-level agency/direction is flipped - who is granting/asking/
+  threatening/blaming what to/of whom runs backwards - even though nothing is omitted and every word
+  has a plausible rendering. Distinct from DROPPED_CONTENT (nothing is missing here, the relationship
+  between the words is backwards) and from OTHER_NAMED_DEFECT (this is now its own specific, nameable
+  category, not the residual catch-all).
 - DROPPED_STUTTER: a SOURCE stammer/stutter (repeated leading syllable(s) before a word) that TRANSLATION drops entirely or renders as gibberish unconnected to the stammered word. Do NOT use this just because SOURCE contains a stammer - a stammer TRANSLATION already conveys (hyphenated or as a full repeated word - both valid) is not a defect. If another defect is also present on the line, name that instead - it takes priority over a stammer-formatting quibble.
 - HARD_TO_PARSE_SEAM: a stitched-fragment seam that is genuinely hard to parse, ambiguous, or changes meaning - not just less fluent than an alternative.
 - OTHER_NAMED_DEFECT: something else concrete and nameable, not covered above - e.g. a leaked
@@ -119,7 +132,7 @@ already named (do not output the checks, only the final DEFECTS line):
    from the rest, that is a defect even though it reads fine on its own.
 
 OUTPUT FORMAT - respond with EXACTLY this line and nothing else:
-DEFECTS: <NONE, UNCERTAIN, or a comma-separated list of one or more of GARBLED_NUMBER / DOMAIN_TERM / LOST_IDIOM / UNTRANSLATED_PINYIN / DROPPED_CONTENT / DROPPED_STUTTER / HARD_TO_PARSE_SEAM / OTHER_NAMED_DEFECT - every category that genuinely applies, not just one>
+DEFECTS: <NONE, UNCERTAIN, or a comma-separated list of one or more of GARBLED_NUMBER / DOMAIN_TERM / LOST_IDIOM / UNTRANSLATED_PINYIN / DROPPED_CONTENT / MEANING_REVERSAL / DROPPED_STUTTER / HARD_TO_PARSE_SEAM / OTHER_NAMED_DEFECT - every category that genuinely applies, not just one>
 
 No reasoning. No SOURCE repetition. No other lines. No SCORE or CORRECTED line - separate steps
 handle those, not this one.

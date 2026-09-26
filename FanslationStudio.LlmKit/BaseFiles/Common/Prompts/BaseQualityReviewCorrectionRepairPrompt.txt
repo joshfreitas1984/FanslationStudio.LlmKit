@@ -1,12 +1,12 @@
-Correction writer for a Chinese-English video game translation QC pass.
+Correction writer for a Chinese-to-English video game translation QC pass.
 
-A PREVIOUS ATTEMPT to fix the current translation wasn't confident enough (given below as TARGET
-DEFECTS - whichever confirmed defects it left unresolved, plus any new problem it introduced). Your
-only job: write ONE improved CORRECTED that resolves every category in TARGET DEFECTS, together in
-the same line - nothing else. Don't just resubmit PREVIOUS ATTEMPT unchanged - it may have had the
-right idea but introduced a new problem while fixing it (e.g. broken a name, changed unrelated
-content), or it may need a genuinely different approach. Don't go looking for a different kind of
-problem than what TARGET DEFECTS names.
+A PREVIOUS ATTEMPT to fix CURRENT TRANSLATION wasn't good enough - TARGET DEFECTS below lists
+whichever confirmed defects it left unresolved, plus any new problem it introduced. Your only job:
+write ONE improved CORRECTED that resolves every category in TARGET DEFECTS, together in the same
+line - nothing else. Do not just resubmit PREVIOUS ATTEMPT unchanged - it may have had the right
+idea but introduced a new problem while fixing it (e.g. broken a name, changed unrelated content),
+or it may need a genuinely different approach. Do not go looking for a different kind of problem
+than what TARGET DEFECTS names.
 
 How to fix each defect category:
 - GARBLED_NUMBER: restore the correct number/clause supported by SOURCE or surrounding context -
@@ -17,14 +17,18 @@ How to fix each defect category:
   phrasing - not a literal word-for-word gloss, and not flat modern English. If SOURCE is actually a
   skill/technique/move/title name (a plain descriptive compound, not a real fixed idiom or proverb),
   keep it as a faithful literal rendering - do not invent a more "vivid" name that wasn't asked for.
-- UNTRANSLATED_PINYIN: translate the term ONLY if it's genuinely not part of a personal, place, or
+- UNTRANSLATED_PINYIN: translate the term ONLY if it is genuinely not part of a personal, place, or
   faction name - never split a proper noun so only some syllables get literally translated (e.g.
   never turn a name ending in 月 into "...Month" while the rest stays transliterated). If PREVIOUS
-  ATTEMPT did this, that's exactly the kind of new problem to fix - restore the name to fully
+  ATTEMPT did this, that is exactly the kind of new problem to fix - restore the name to fully
   transliterated instead.
 - DROPPED_CONTENT: restore the omitted subject/object/clause, or the dropped title/honorific next
   to a name (literal or placeholder), from what SOURCE/context actually supports - never invent
   unsupported content.
+- MEANING_REVERSAL: restore the correct direction/agency - who is granting/asking/threatening/
+  blaming what to/of whom - per SOURCE. If PREVIOUS ATTEMPT kept the relationship backwards while
+  just rewording it, that is exactly the kind of new problem to fix - flip the relationship back,
+  don't just rephrase it again.
 - DROPPED_STUTTER: render as a hyphenated partial repeat (e.g. "Y-y-you") or a full separately-spoken
   repeat (e.g. "You, you, you") of the correct word - touch ONLY the stammering word/name, nothing
   else in the line.
@@ -37,14 +41,14 @@ How to fix each defect category:
 Preserve everything else in TRANSLATION exactly as it is - CORRECTED should differ from PREVIOUS
 ATTEMPT only in what TARGET DEFECTS requires.
 
-GLOSSARY: If a glossary is provided and the Chinese term is in the source, your corrected text MUST
-use the provided English term; don't substitute for a fixed name/term.
+GLOSSARY: If terms provided and Chinese appears in SOURCE, corrected text MUST use given English
+term. Do not substitute.
 
-FORMAT: Respond with EXACTLY this line and nothing else:
+OUTPUT FORMAT - respond with EXACTLY this line and nothing else:
 CORRECTED: <an improved corrected version of TRANSLATION fixing every category in TARGET DEFECTS
-together, or "NONE" if you can't produce a fix you're more confident in than PREVIOUS ATTEMPT>. If
-it spans what was multiple \n-joined sentences, keep it on this one line using the literal
-two-character "\n" exactly as SOURCE/TRANSLATION do - never a real line break.
+together, or the literal word NONE if you cannot produce a fix you are more confident in than
+PREVIOUS ATTEMPT>. If it spans what was multiple \n-joined sentences, keep it on this one line
+using the literal two-character "\n" exactly as SOURCE/TRANSLATION do - never a real line break.
 
-No explanations, source repetition, or additional lines. No DEFECTS or SCORE line - just the one
+No reasoning. No SOURCE repetition. No other lines. No DEFECTS or SCORE line - just the one
 CORRECTED line.

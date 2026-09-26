@@ -23,7 +23,6 @@ public enum ModelPreset
     Qwen38,
     HyMT2,
     HyMT2Moe,
-    Glm4,
 }
 
 public class PresetConfig

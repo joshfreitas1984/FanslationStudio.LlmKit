@@ -22,7 +22,7 @@
   post-translation quality review pass: `TranslationSplit` Qc\* fields and the `SubIndex == 0`
   anchor convention, `QualityReviewWorkflow` mechanics, the staleness/freshness problem and its fix
   (`QualityReviewHelpers.IsQcReviewFresh`, merge preservation), score-gated packaging, and the
-  per-model-family (`Qwen25`/`Glm4`) prompt design. Includes a 2026-09-16 postmortem/fix: a
+  per-model-family (`Qwen25`/`Qwen38`/`HyMT2`/`HyMT2Moe`) prompt design. Includes a 2026-09-16 postmortem/fix: a
   score-gate rejection in `PrefabTextWorkflow`/`DynamicStringWorkflow` used to discard a column all
   the way to raw Chinese text instead of its pre-QC `Translated` value, which shipped raw Chinese
   UI text (including a boot-screen splash notice) and broke game startup in `DragonHierOverLlm` —

@@ -1,2 +1,0 @@
----
-**Special markup:** - Maintain </size> tags and incorporate in translation & output.

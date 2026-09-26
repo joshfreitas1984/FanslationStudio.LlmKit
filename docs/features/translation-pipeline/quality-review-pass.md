@@ -483,7 +483,30 @@ rather than merely waste a reviewer's time on a non-issue. That's a project-spec
 made when deciding what goes into `autoAcceptDefectCategories` - this library only provides the
 mechanism, not the policy.
 
-## Two-stage DEFECT verification and scoring (opt-in, `twoStageVerificationEnabled`)
+**`MeaningReversal`** (added after a downstream real-production case - see
+`docs/investigations/tests/qc-qualityscore-noise-investigation.md`, DragonHierOverLlm repo,
+sampleId `8a1f6e0c9d723bb4`) is a deliberate exception to the "let the hand-validated sample decide"
+loop above: it ships with no track record at all, and is intentionally never added to
+`autoAcceptDefectCategories` regardless of what a future sample shows, because
+`PassesQcScoreGate` only even consults the category once the score is *already* below
+`minAcceptableScore` - so for this category specifically, the category itself is the last line of
+defense, not the score. `DroppedContent`/`OtherNamedDefect` cover omission and residual
+stylistic-paraphrase misses respectively; neither describes a clause whose whole meaning is
+inverted (who grants/asks/threatens what to/of whom) while every word still has a plausible-looking
+rendering - the single highest-consequence miss shape, since it reads fluently and contradicts
+SOURCE at the same time. If a future project wants to revisit this, do so explicitly and
+deliberately, not via the same precision-sampling loop used for the other categories.
+
+## Two-stage DEFECT verification and scoring (always-on)
+
+**Stale-doc note**: this section previously described the feature as gated by a
+`qualityReview.twoStageVerificationEnabled` config flag. That flag no longer exists in
+`QualityReviewConfig`/`Config.yaml`, and `GetVerificationVerdictAsync`/`GetCorrectionRepairAsync`
+are called unconditionally whenever call 1 names a defect - the feature became the permanent
+architecture rather than an opt-in variant, and this doc wasn't updated at the time. The paragraph
+below describing "when `twoStageVerificationEnabled` is false" is dead - there is no such path in
+current code. Left in place for now rather than rewritten wholesale; re-derive the exact removal
+commit from git history if the full migration story is needed.
 
 **Call 1 never scores** - it only drafts `DEFECT`/`CORRECTED`.
 Scoring, defect confirmation, and (when needed) repair are three separate, single-purpose calls, so
@@ -669,11 +692,9 @@ correction-suffix behavior documented in the translation retry guide). Concretel
 
 - `BaseFiles/Qwen25/Prompts/BaseQualityReviewPrompt.txt` — includes an explicit anti-echo
   instruction line, informed by that documented `qwen2.5` quirk.
-- `BaseFiles/Glm4/Prompts/BaseQualityReviewPrompt.txt` — a new, minimal `Glm4` preset added
-  specifically for this (GLM wasn't a supported preset at all before). Only ships this one prompt
-  today (no `BaseSystemPrompt`/`Corrections`/`Dynamics`) since it's currently only used as a QC
-  candidate, never for primary translation — add the rest under `BaseFiles/Glm4/` the same way
-  `Qwen25` has them if it's ever used for real translation.
+- `Qwen38`, `HyMT2` and `HyMT2Moe` share the same wording, which lives in
+  `BaseFiles/Common/Prompts/BaseQualityReviewPrompt.txt` (see `LoadPresetPromptsWithCommon`) rather
+  than being duplicated under each preset.
 
 A downstream repo can still override either per-model with its own `BaseQualityReviewPrompt.txt`
 under that model's `CustomPromptsPath` folder — same workspace-prompt-overrides-preset convention

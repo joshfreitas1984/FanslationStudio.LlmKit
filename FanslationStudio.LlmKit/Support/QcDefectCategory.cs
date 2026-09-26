@@ -47,6 +47,21 @@ public enum QcDefectCategory
     /// <summary>Something else concrete and nameable, not covered by the categories above.</summary>
     OtherNamedDefect,
 
+    /// <summary>SOURCE's clause-level meaning is inverted rather than merely mistranslated at the
+    /// word/phrase level - who is doing/granting/asking what to/of whom is flipped (e.g. "I'll
+    /// spare you" rendered as "spare me", a threat rendered as a plea, blame rendered as an
+    /// admission). Distinct from <see cref="DroppedContent"/> (nothing is omitted - every word has
+    /// a rendering, the relationship between them is backwards) and from <see
+    /// cref="OtherNamedDefect"/> (this is a specific, nameable failure shape, not a residual
+    /// catch-all). Deliberately left off <see
+    /// cref="Configuration.QualityReviewConfig.AutoAcceptDefectCategories"/> by default - unlike
+    /// <see cref="DroppedContent"/>/<see cref="OtherNamedDefect"/>, this shape has no
+    /// hand-validated low-severity track record yet, and ships a translation whose surface reads
+    /// fluently while contradicting SOURCE, the highest-consequence kind of miss. See
+    /// docs/qc-qualityscore-noise-investigation.md (Tests project, DragonHierOverLlm repo) for the
+    /// case that added this category.</summary>
+    MeaningReversal,
+
     /// <summary>Model believes something about the translation may be off but isn't confident
     /// enough to name a specific category or draft a fix it trusts - see
     /// docs/quality-review-pass-architecture.md postmortem #9. Unlike every other non-<see

@@ -1,3 +1,0 @@
-**Markup Tags:**
-Preserve/include all tags in translation/final output:
-{0}

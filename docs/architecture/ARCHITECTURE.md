@@ -58,22 +58,23 @@ Single entry point, called once per workflow invocation. Loads, in order:
 3. Per-model runtime config (`RuntimeValues.Models[name]`): merges a built-in **preset** with
    workspace-level prompt overrides (`{WorkingDirectory}/{ModelName}Prompts/*.txt`, or
    `CustomPromptsPath` if set) and an API key file (`{ModelName}ApiKey.txt`). Presets today:
-   - `Qwen25` (`BaseFiles/Qwen25/`) — the primary translation preset: model params (Standard vs.
-     StructuredText) + full prompt set (`BaseSystemPrompt`, `BaseGlossaryPrompt`,
-     `BaseCorrectionSuffixPrompt`, `Corrections/*`, `Dynamics/*`, `BaseQualityReviewPrompt`).
-   - `Glm4` (`BaseFiles/Glm4/`) — currently QC-only (see
-    [`../features/translation-pipeline/quality-review-pass.md`](../features/translation-pipeline/quality-review-pass.md)): only ships
-     `BaseQualityReviewPrompt` today, since it isn't used for real translation yet. Add the rest
-     under `BaseFiles/Glm4/` the same way `Qwen25` has them if it ever is.
+   `Qwen25`, `Qwen38`, `HyMT2`, `HyMT2Moe` (`BaseFiles/<Preset>/`) — each is model params (Standard
+   vs. StructuredText) + a prompt set (`BaseSystemPrompt`, `BaseGlossaryPrompt`,
+   `BaseCorrectionSuffixPrompt`, `Corrections/*`, `Dynamics/*`, `BaseQualityReviewPrompt` and
+   friends). A preset's prompt set is loaded via `LoadPresetPromptsWithCommon`
+   (`ConfigurationExtensions.cs`), which loads `BaseFiles/Common/` first — the prompt files two or
+   more presets agree on verbatim — then overlays the preset's own `BaseFiles/<Preset>/` files by
+   filename on top, so a preset only ships the files where its wording genuinely diverges (e.g.
+   `Qwen25`'s own system/QC/correction wording, or `HyMT2Moe`'s own dynamic-tag prompts).
 4. Preset Chinese glossary (embedded `BaseFiles/ChineseGlossary/*.yaml`, filterable by
    `ChineseGlossaryTypesToSupress`), then workspace `Glossary/*.yaml` merged on top (workspace
    entries override preset entries matching on `Raw`/`RawSimplified`/`RawTraditional`).
 5. Hyphens in glossary/manual results are rewritten to non-breaking hyphens (Unity line-break
    workaround).
 
-Adding a new preset model = add a case in `GetConfiguration`'s preset-branch (a `GetQwen25Preset`/
-`GetGlm4Preset`-style method) + embedded `BaseFiles/<Name>/Config.yaml` + prompt `.txt` resources +
-a new `ModelPreset` enum value.
+Adding a new preset model = add a case in `GetConfiguration`'s preset-branch (a `GetQwen25Preset`-
+style method) + embedded `BaseFiles/<Name>/Config.yaml` + only the prompt `.txt` resources that
+diverge from `BaseFiles/Common/` + a new `ModelPreset` enum value.
 
 ## Entry points (`Workflow/TranslationWorkflow.cs`)
 

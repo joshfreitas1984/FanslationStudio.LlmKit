@@ -1,4 +1,0 @@
----
-GLOSSARY RULES:
-Use exact glossary matches. Choose any glossary translation if multiple exist.
-GLOSSARY ITEMS:

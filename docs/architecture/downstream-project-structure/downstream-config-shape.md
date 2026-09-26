@@ -72,7 +72,7 @@ qualityReview:
 | Field | Required? | Notes |
 | --- | --- | --- |
 | `enabled` | Yes | Every downstream repo should have this block with an explicit `enabled` value (`true` in DragonHeir's current run) rather than omitting the block — `QualityReviewWorkflow` treats a missing/disabled block as a no-op, so leaving it out entirely is indistinguishable from disabled but less discoverable for a new contributor. |
-| `modelName` | Yes | Must reference a `name` from the top-level `models` list. DragonHeir's inline comment (`#QwenQc-14B #Glm4Qc-9B`) shows this is meant to be swapped between candidate QC models during tuning — keep that as a live comment convention in new configs, not just a bare value. |
+| `modelName` | Yes | Must reference a `name` from the top-level `models` list. It's meant to be swapped between candidate QC models during tuning — a live comment noting the alternatives considered (e.g. `#QwenQc-14B`) is a useful convention in new configs, not just a bare value. |
 | `minAcceptableScore` | Yes | Project-tuned threshold (DragonHeir: `60`); `new-translation-project`'s current starter default of `70` is a reasonable placeholder but is **not** derived from DragonHeir's real value — a new repo should expect to re-tune this from real hand-triage, not treat either number as gospel. |
 | `maxConcurrency` | Yes | QC-pass-specific concurrency, independent of the top-level `maxConcurrency`. |
 | `inlineRuleCheckRetries` | Yes | |

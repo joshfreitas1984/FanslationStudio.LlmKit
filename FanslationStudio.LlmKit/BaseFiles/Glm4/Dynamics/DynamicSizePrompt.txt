@@ -1,3 +1,0 @@
----
-**Size Tags:**
-- Keep all <size> tags; integrate into translation and final output.

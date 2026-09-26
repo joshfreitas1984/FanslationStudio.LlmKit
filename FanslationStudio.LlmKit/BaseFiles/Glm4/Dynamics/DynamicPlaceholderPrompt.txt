@@ -1,4 +1,0 @@
-**Placeholders:**
-- Keep `{0}`, `{1}` placeholders unaltered.
-- Do not remove placeholders from text.
-- Treat placeholders as contextually specific objects.

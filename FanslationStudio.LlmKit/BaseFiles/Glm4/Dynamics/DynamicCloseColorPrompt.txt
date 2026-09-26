@@ -1,2 +1,0 @@
----
-**Special markup:** - Keep </color> tags; include in translation/output

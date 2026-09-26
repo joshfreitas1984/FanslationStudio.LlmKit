@@ -1,3 +1,0 @@
----
-**Markup Tags:**
-- Include {0} in the translated text and final output without removing them.

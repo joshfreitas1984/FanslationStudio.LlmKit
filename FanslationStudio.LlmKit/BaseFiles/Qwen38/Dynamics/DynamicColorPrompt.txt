@@ -1,2 +1,0 @@
-**Color Tags:**
-- Preserve <color> tags; include in translation and final output.

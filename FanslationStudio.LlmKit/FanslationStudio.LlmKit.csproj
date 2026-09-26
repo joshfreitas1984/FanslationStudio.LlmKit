@@ -10,10 +10,12 @@
   <ItemGroup>
     <EmbeddedResource Include="BaseFiles\ChineseGlossary\*.yaml" />
 
+    <EmbeddedResource Include="BaseFiles\Common\Prompts\*.txt" />
+    <EmbeddedResource Include="BaseFiles\Common\Corrections\*.txt" />
+    <EmbeddedResource Include="BaseFiles\Common\Dynamics\*.txt" />
+
     <EmbeddedResource Include="BaseFiles\Qwen25\Config.yaml" />
     <EmbeddedResource Include="BaseFiles\Qwen25\Prompts\*.txt" />
-    <EmbeddedResource Include="BaseFiles\Qwen25\Corrections\*.txt" />
-    <EmbeddedResource Include="BaseFiles\Qwen25\Dynamics\*.txt" />
 
     <EmbeddedResource Include="BaseFiles\Qwen38\Config.yaml" />
     <EmbeddedResource Include="BaseFiles\Qwen38\Prompts\*.txt" />
@@ -29,11 +31,6 @@
     <EmbeddedResource Include="BaseFiles\HyMT2Moe\Prompts\*.txt" />
     <EmbeddedResource Include="BaseFiles\HyMT2Moe\Corrections\*.txt" />
     <EmbeddedResource Include="BaseFiles\HyMT2Moe\Dynamics\*.txt" />
-
-    <EmbeddedResource Include="BaseFiles\Glm4\Config.yaml" />
-    <EmbeddedResource Include="BaseFiles\Glm4\Prompts\*.txt" />
-    <EmbeddedResource Include="BaseFiles\Glm4\Corrections\*.txt" />
-    <EmbeddedResource Include="BaseFiles\Glm4\Dynamics\*.txt" />
   </ItemGroup>
 
   <ItemGroup>

@@ -66,8 +66,6 @@ public static class ConfigurationExtensions
                 runtimeConfig = MergeModelConfig(GetHyMT2Preset(deserializer, model), runtimeConfig);
             else if (model.ModelPreset == ModelPreset.HyMT2Moe)
                 runtimeConfig = MergeModelConfig(GetHyMT2MoePreset(deserializer, model), runtimeConfig);
-            else if (model.ModelPreset == ModelPreset.Glm4)
-                runtimeConfig = MergeModelConfig(GetGlm4Preset(deserializer, model), runtimeConfig);
 
 
             // Set the merged config to runtime
@@ -142,15 +140,6 @@ public static class ConfigurationExtensions
         GetPresetModelConfig(ModelPreset.HyMT2Moe, model.ModelPresetType);
 
     /// <summary>
-    /// GLM-4 preset - ships the full Qwen25-equivalent prompt set (BaseSystemPrompt, Corrections,
-    /// Dynamics) under BaseFiles/Glm4/ so it can be used as a drop-in swap. Its
-    /// BaseQualityReviewPrompt is its own tuned wording (see the comment in Config.yaml on
-    /// `models:`); the rest were copied verbatim from Qwen25 and not yet re-tuned for GLM-4.
-    /// </summary>
-    private static ModelExecutionConfig GetGlm4Preset(IDeserializer deserializer, ModelConfig model) =>
-        GetPresetModelConfig(ModelPreset.Glm4, model.ModelPresetType);
-
-    /// <summary>
     /// Public entry point onto a preset's embedded Model/Url/ModelParams/Prompts (the same data
     /// <see cref="GetConfiguration"/> merges into a workspace's Models dictionary), without
     /// requiring a full workspace Config.yaml. Used by <see cref="Workflow.PromptOptimisationWorkflow"/>
@@ -165,7 +154,6 @@ public static class ConfigurationExtensions
             ModelPreset.Qwen38 => "Qwen38",
             ModelPreset.HyMT2 => "HyMT2",
             ModelPreset.HyMT2Moe => "HyMT2Moe",
-            ModelPreset.Glm4 => "Glm4",
             _ => throw new InvalidOperationException($"No preset configuration available for '{preset}'."),
         };
 
@@ -186,8 +174,26 @@ public static class ConfigurationExtensions
             ModelParams = presetType == ModelPresetType.Standard ?
                 presetConfig.ModelParams
                 : presetConfig.StructuredTextModelParams,
-            Prompts = LoadPresetPrompts($"FanslationStudio.LlmKit.BaseFiles.{presetName}")
+            Prompts = LoadPresetPromptsWithCommon(presetName)
         };
+    }
+
+    /// <summary>
+    /// Loads BaseFiles/Common - the QC, correction and dynamic-tag prompts shared verbatim by two or
+    /// more presets (currently Qwen38/HyMT2/HyMT2Moe's whole shared set, plus a couple of files every
+    /// preset agrees on) - and then overlays the given preset's own BaseFiles/&lt;preset&gt; files on
+    /// top by filename. A preset only needs to ship the files where its wording genuinely diverges
+    /// (e.g. Qwen25's own system/QC/correction wording, or HyMT2Moe's own dynamic-tag prompts);
+    /// everything else falls through to Common.
+    /// </summary>
+    private static Dictionary<string, string> LoadPresetPromptsWithCommon(string presetName)
+    {
+        var prompts = LoadPresetPrompts("FanslationStudio.LlmKit.BaseFiles.Common");
+
+        foreach (var (key, value) in LoadPresetPrompts($"FanslationStudio.LlmKit.BaseFiles.{presetName}"))
+            prompts[key] = value;
+
+        return prompts;
     }
 
     public static Dictionary<string, string> LoadPresetPrompts(string resourcePrefix)
