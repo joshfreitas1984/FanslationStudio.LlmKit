@@ -911,7 +911,7 @@ public static class QualityReviewWorkflow
         var llmStopwatch = Stopwatch.StartNew();
         try
         {
-            (llmResponse, stopReason) = await TranslationService.TranslateMessagesWithStopReasonAsync(client, config, modelConfig, messages, enableThinking: enableThinking);
+            (llmResponse, stopReason) = await TranslationService.TranslateMessagesWithStopReasonAsync(client, config, WithDetectionTemperature(config, modelConfig), messages, enableThinking: enableThinking);
         }
         catch (Exception e) when (e is HttpRequestException or OperationCanceledException)
         {
@@ -937,6 +937,29 @@ public static class QualityReviewWorkflow
         {
             FailureKind = truncated ? QcDetectionFailureKind.Truncated : QcDetectionFailureKind.ParseError,
             FailureDetail = llmResponse,
+        };
+    }
+
+    /// <summary>
+    /// Returns <paramref name="modelConfig"/> with <c>temperature</c> replaced by
+    /// <see cref="QualityReviewConfig.DetectionTemperature"/> when one is configured (unchanged
+    /// otherwise). A copy - the shared model config is also used by the correction calls, which keep
+    /// the model's own temperature.
+    /// </summary>
+    internal static ModelExecutionConfig WithDetectionTemperature(LlmConfig config, ModelExecutionConfig modelConfig)
+    {
+        if (config.QualityReview.DetectionTemperature is not { } temperature || modelConfig.ModelParams == null)
+            return modelConfig;
+
+        return new ModelExecutionConfig
+        {
+            ApiKey = modelConfig.ApiKey,
+            ApiKeyRequired = modelConfig.ApiKeyRequired,
+            EnableThinking = modelConfig.EnableThinking,
+            Url = modelConfig.Url,
+            Model = modelConfig.Model,
+            Prompts = modelConfig.Prompts,
+            ModelParams = new Dictionary<string, object>(modelConfig.ModelParams) { ["temperature"] = temperature },
         };
     }
 

@@ -152,4 +152,17 @@ public class QualityReviewConfig
     /// detection-phase throughput when speed is the priority.
     /// </summary>
     public bool DoubledDetectionEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Overrides the QC model's <c>modelParams.temperature</c> for detection calls only
+    /// (<see cref="Workflow.QualityReviewWorkflow.DetectDefectsAsync"/>); null keeps the model's own
+    /// value. Detection is a classification, so 0 makes the same SOURCE/TRANSLATION always get the
+    /// same verdict - at Qwen38's 0.15 an identical request was observed to return NONE on one call
+    /// and DROPPED_CONTENT on the next, which shows up as run-to-run label flips on the gold set.
+    /// Correction/verification/repair calls deliberately keep the model's temperature: their inline
+    /// retries resend the same prompt, and at 0 every retry would return the identical answer.
+    /// Note that at 0, <see cref="DoubledDetectionEnabled"/> adds latency for (almost) no recall,
+    /// since both detection calls see the same prompt and return the same answer.
+    /// </summary>
+    public double? DetectionTemperature { get; set; }
 }

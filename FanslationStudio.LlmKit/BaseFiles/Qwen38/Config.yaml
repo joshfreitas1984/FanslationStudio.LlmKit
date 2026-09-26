@@ -29,9 +29,11 @@ modelParams:
   # Tried OLLAMA_FLASH_ATTENTION=1 + OLLAMA_KV_CACHE_TYPE=q8_0 the same day: KV cache 512 -> 272MB
   # (hybrid model - only 16/64 layers have KV), but still 63/66 layers offloaded, and the gold-set
   # run was ~12% slower (avg 1469 -> 1653ms) with quality unchanged within noise. Not worth it.
-  # Also tried num_gpu: 999 (force 66/66 layers onto the 16GB card): loads fine, but under real
-  # ~4K-token prompts Windows spilled ~2.6GB into shared system memory and detection calls went
-  # from ~1.2s to ~18s median. Leave Ollama's default 63/66 split alone.
+  # num_gpu: 999 (force 66/66 layers onto the 16GB card), clean retest with nothing else on the
+  # GPU: ~15% faster once settled (median ~1000 vs ~1200ms per detection call), but VRAM sits at
+  # ~15.9/16.3GB and the first quarter of the gold-set run stalled badly (26 calls >5s vs 1 on the
+  # default split). Any other VRAM user (a game, browser) makes that worse - an earlier run with a
+  # stray llama-server alive went ~15x slower. Left off (Ollama's default split) as the safe choice.
   num_ctx: 8192
   num_predict: 4096
 structuredTextModelParams:
