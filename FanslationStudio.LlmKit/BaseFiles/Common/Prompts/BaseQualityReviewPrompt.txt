@@ -90,7 +90,7 @@ at the first, and do not force a single category when more than one genuinely ap
   one of them naturally, do not flip between flagging it and not chasing the other reading; if you
   cannot confidently tell which reading SOURCE actually intends, use UNCERTAIN instead of guessing
   LOST_IDIOM or forcing a pass you are not sure of.
-- UNTRANSLATED_PINYIN: a term left untranslated/transliterated as Pinyin when it is not a proper noun and has a clear translatable meaning. Never applies to any syllable/character inside a personal, place, or faction name that is otherwise kept transliterated - a multi-character proper noun is rendered as a whole, either fully transliterated or fully translated by established convention/glossary, never split so only some syllables are literally translated (e.g. do not turn a name ending in 月 into "...Month" while the rest of the same name stays transliterated - that produces a name that is neither, not a fix). If uncertain whether a term is part of a name versus a standalone common noun, treat it as part of the name and do not flag it.
+- UNTRANSLATED_PINYIN: a term left untranslated/transliterated as Pinyin when it is not a proper noun and has a clear translatable meaning. Never applies to any syllable/character inside a personal, place, or faction name that is otherwise kept transliterated - a multi-character proper noun is rendered as a whole, either fully transliterated or fully translated by established convention/glossary, never split so only some syllables are literally translated (e.g. do not turn a name ending in 月 into "...Month" while the rest of the same name stays transliterated - that produces a name that is neither, not a fix). If uncertain whether a term is part of a name versus a standalone common noun, treat it as part of the name and do not flag it. This category is one direction only - Pinyin left in place of a translation. The opposite failure - a name or domain term that convention keeps in Pinyin (a person's name, an acupoint, a fixed technique term) instead rendered as an English gloss - is OTHER_NAMED_DEFECT, not this category; see that entry below.
 - DROPPED_CONTENT: an omitted subject/object/clause, or a dropped title/honorific next to a name (literal or placeholder), per the rules above.
 - MEANING_REVERSAL: SOURCE's clause-level agency/direction is flipped - who is granting/asking/
   threatening/blaming what to/of whom runs backwards - even though nothing is omitted and every word
@@ -100,8 +100,11 @@ at the first, and do not force a single category when more than one genuinely ap
 - DROPPED_STUTTER: a SOURCE stammer/stutter (repeated leading syllable(s) before a word) that TRANSLATION drops entirely or renders as gibberish unconnected to the stammered word. Do NOT use this just because SOURCE contains a stammer - a stammer TRANSLATION already conveys (hyphenated or as a full repeated word - both valid) is not a defect. If another defect is also present on the line, name that instead - it takes priority over a stammer-formatting quibble.
 - HARD_TO_PARSE_SEAM: a stitched-fragment seam that is genuinely hard to parse, ambiguous, or changes meaning - not just less fluent than an alternative.
 - OTHER_NAMED_DEFECT: something else concrete and nameable, not covered above - e.g. a leaked
-  placeholder/null value in place of a translation, a proper name replaced with a descriptive
-  English gloss instead of being transliterated, or invented/altered structural formatting not
+  placeholder/null value in place of a translation, a proper name or domain-specific term replaced
+  with a descriptive English gloss instead of being transliterated (e.g. a person's name rendered as
+  a literal-meaning gloss, or an acupoint/fixed-technique name this corpus's convention keeps in
+  Pinyin - such as "合谷"/Hegu or "江十二"/Jiang Shier - instead rendered as an invented or literal
+  English phrase), or invented/altered structural formatting not
   present in SOURCE and not required by English grammar - punctuation (a colon, dash, or terminal
   mark) inserted into a terse label/stat string that has none in SOURCE, or stray/duplicated
   whitespace (an extra blank line, trailing spaces) around a real newline or separator that SOURCE
@@ -109,7 +112,21 @@ at the first, and do not force a single category when more than one genuinely ap
   the internal-consistency rule above) - a delimited stat/label entry whose number/label order or
   spacing breaks the pattern its sibling entries use, or a name/word with an anomalous internal
   capitalization pattern. Never covers an already-translated proper noun/title that also has a
-  Pinyin transliteration available - see the DO NOT flag rule above.
+  Pinyin transliteration available - see the DO NOT flag rule above. This is the correct category for
+  a name/domain term that should have stayed in Pinyin but was translated instead - not
+  UNTRANSLATED_PINYIN, which is the opposite direction only (see that entry above).
+- UNNATURAL_PHRASING: TRANSLATION is grammatically valid and meaning-accurate but reads as
+  mechanically literal/non-idiomatic English that a native speaker would not actually write - e.g.
+  source-order word-for-word construction producing an awkward noun phrase ("Extra Max for Inner
+  Power obtained by the character" instead of "Max Inner Power Increased"). A common concrete
+  shape of this: a stat/reward label ending in a bare trailing past participle describing how it
+  was acquired ("Additional Max Health obtained", "Initial random Secret Manual obtained") instead
+  of leading with the participle, a gerund, or an imperative the way a native speaker would write
+  the same label ("Bonus Max Health Gained", "Random Starting Secret Manual"). This is **not** a
+  synonym/word-order preference (still covered by "DO NOT flag: minor stylistic choices") and
+  **not** a seam/fragment-boundary issue (HARD_TO_PARSE_SEAM) - only flag when the phrasing is
+  different enough from natural English that a player would visibly notice it's machine-translated,
+  not merely "a smoother version exists."
 - UNCERTAIN: something about TRANSLATION feels potentially wrong, but you cannot confidently pin it
   to one of the named defects above. Never guess a named category (especially OTHER_NAMED_DEFECT)
   just to have something concrete to write - use UNCERTAIN instead so a human looks at it. Never
@@ -132,7 +149,7 @@ already named (do not output the checks, only the final DEFECTS line):
    from the rest, that is a defect even though it reads fine on its own.
 
 OUTPUT FORMAT - respond with EXACTLY this line and nothing else:
-DEFECTS: <NONE, UNCERTAIN, or a comma-separated list of one or more of GARBLED_NUMBER / DOMAIN_TERM / LOST_IDIOM / UNTRANSLATED_PINYIN / DROPPED_CONTENT / MEANING_REVERSAL / DROPPED_STUTTER / HARD_TO_PARSE_SEAM / OTHER_NAMED_DEFECT - every category that genuinely applies, not just one>
+DEFECTS: <NONE, UNCERTAIN, or a comma-separated list of one or more of GARBLED_NUMBER / DOMAIN_TERM / LOST_IDIOM / UNTRANSLATED_PINYIN / DROPPED_CONTENT / MEANING_REVERSAL / DROPPED_STUTTER / HARD_TO_PARSE_SEAM / OTHER_NAMED_DEFECT / UNNATURAL_PHRASING - every category that genuinely applies, not just one>
 
 No reasoning. No SOURCE repetition. No other lines. No SCORE or CORRECTED line - separate steps
 handle those, not this one.

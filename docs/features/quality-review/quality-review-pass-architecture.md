@@ -43,7 +43,8 @@ already-serialized YAML:
   not a calibrated absolute metric — a small/local model's self-rating is inherently noisy.
 - `QcDefectCategory` (`Support/QcDefectCategory.cs` enum: `Unknown` / `None` / `GarbledNumber` /
   `DomainTerm` / `LostIdiom` / `UntranslatedPinyin` / `DroppedContent` / `HardToParseSeam` /
-  `OtherNamedDefect`) — the `DEFECT:` category the model names alongside `SCORE:`, parsed from the
+  `OtherNamedDefect` / `MeaningReversal` / `Uncertain` / `UnnaturalPhrasing`) — the `DEFECT:`
+  category the model names alongside `SCORE:`, parsed from the
   same response (see step 6 below). `Unknown` (the default) means either "never reviewed" or a
   response that predates the DEFECT-first prompt — same "not yet reviewed" convention as
   `QcQualityScore` being `null`. Exists specifically so a large flagged set can be triaged/policed
@@ -458,6 +459,12 @@ stratified and policed *by category* instead of treating every flagged line iden
    the DEFECT-first prompt existed) and picks up anything newly reclassified after
    `autoAcceptDefectCategories` changes.
 
+`UnnaturalPhrasing` (added to catch meaning-accurate but mechanically literal/non-idiomatic phrasing
+that none of the other 8 categories cover) starts outside `autoAcceptDefectCategories` like every new
+category does - it is inherently more subjective than the mostly factual/structural categories above,
+so it needs its own hand-validated precision sample (step 2) before it can be considered for
+auto-accept.
+
 Not every category needs identical treatment even among the "not auto-accepted" set - a category
 can have low precision (mostly false positives) yet still be judged too risky to blanket-accept, if
 the rare true positive that does show up is a correction that would make a fine translation *worse*
@@ -584,6 +591,21 @@ whether or not this flag is on for a given run. This is a static, always-on incr
 model, not something scoped to `verificationThinkingEnabled` - if a different model family is
 configured for QC, its own `BaseFiles/<Family>/Config.yaml` would need the same headroom before
 turning this flag on against it.
+
+**Context headroom regression (2026-09-26)**: `num_ctx` was later lowered back to 4096 on the
+strength of a ~2,783-token peak detection prompt, then the QC prompt grew (prompt tidy +
+`UNNATURAL_PHRASING`) until glossary-heavy `fullCell` detection prompts reached 4,096-4,108 tokens.
+Those rows either got an immediate HTTP 400 (`exceed_context_size_error`, ~30ms) or had their
+answer cut off mid-token (`DEFECTS: HARD_TO_PARSE_SE`) - both surfaced only as `Success = false`,
+indistinguishable from a real protocol violation, and in production the same rows would silently
+retry forever. `num_ctx` is back at 8192 (costs ~0.3GB on UD-IQ4_XS). To keep this diagnosable,
+`QcDetectionResult` now carries a `QcDetectionFailureKind` - `RequestError` (HTTP failure),
+`Truncated` (server stop reason `length`, via `TranslationService.TranslateMessagesWithStopReasonAsync`)
+or `ParseError` (model finished but broke the protocol) - plus the error/raw response, and
+`QualityEvaluatorAssessmentWorkflow` writes both into each `Results.yaml` row (`failureKind`/
+`failureDetail`) and the per-kind counts into the summary (`detectionUnscoredByFailureKind`). A
+`RequestError`/`Truncated` count above zero means "re-measure prompt size against `num_ctx`", not
+"tune the prompt wording".
 
 **The reasoning trace is still always discarded before parsing** - `TranslateMessagesAsync` is
 called with `enableThinking: true` but `includeThinking` left at its default `false`, so only the

@@ -21,6 +21,7 @@ public static class QcDefectCategoryTokens
         "OTHER_NAMED_DEFECT" => QcDefectCategory.OtherNamedDefect,
         "MEANING_REVERSAL" => QcDefectCategory.MeaningReversal,
         "UNCERTAIN" => QcDefectCategory.Uncertain,
+        "UNNATURAL_PHRASING" => QcDefectCategory.UnnaturalPhrasing,
         _ => QcDefectCategory.Unknown,
     };
 
@@ -39,6 +40,7 @@ public static class QcDefectCategoryTokens
         QcDefectCategory.OtherNamedDefect => "OTHER_NAMED_DEFECT",
         QcDefectCategory.MeaningReversal => "MEANING_REVERSAL",
         QcDefectCategory.Uncertain => "UNCERTAIN",
+        QcDefectCategory.UnnaturalPhrasing => "UNNATURAL_PHRASING",
         _ => throw new ArgumentOutOfRangeException(nameof(category), category, "QcDefectCategory.Unknown has no wire token."),
     };
 }

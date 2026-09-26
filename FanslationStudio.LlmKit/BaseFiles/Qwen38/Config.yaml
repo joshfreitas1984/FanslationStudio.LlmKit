@@ -19,7 +19,20 @@ modelParams:
   # at 4096 (actual completion length measured at 10-70 tokens) since it only caps generation
   # length, not KV-cache size, and a correction call legitimately needs room for a full rewritten
   # translation.
-  num_ctx: 4096
+  # num_ctx raised back 4096 -> 8192 2026-09-26: BaseQualityReviewPrompt.txt had grown enough
+  # (prompt tidy + UNNATURAL_PHRASING) that glossary-heavy fullCell detection prompts reached
+  # 4096-4108 tokens - the server 400'd them outright (exceed_context_size_error, ~30ms "Unscored")
+  # or truncated the answer mid-token ("DEFECTS: HARD_TO_PARSE_SE"). Measured on the UD-IQ4_XS
+  # quant via /api/ps: 4096 -> 8192 only grows the loaded footprint ~14.1GB -> ~14.4GB (the model
+  # was already ~1.1GB CPU-split at 4096 alongside desktop VRAM use), so the headroom is ~free.
+  # Re-measure prompt_eval_count against this ceiling after any large QC prompt growth.
+  # Tried OLLAMA_FLASH_ATTENTION=1 + OLLAMA_KV_CACHE_TYPE=q8_0 the same day: KV cache 512 -> 272MB
+  # (hybrid model - only 16/64 layers have KV), but still 63/66 layers offloaded, and the gold-set
+  # run was ~12% slower (avg 1469 -> 1653ms) with quality unchanged within noise. Not worth it.
+  # Also tried num_gpu: 999 (force 66/66 layers onto the 16GB card): loads fine, but under real
+  # ~4K-token prompts Windows spilled ~2.6GB into shared system memory and detection calls went
+  # from ~1.2s to ~18s median. Leave Ollama's default 63/66 split alone.
+  num_ctx: 8192
   num_predict: 4096
 structuredTextModelParams:
   temperature: 0

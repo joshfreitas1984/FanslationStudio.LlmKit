@@ -17,6 +17,15 @@ public sealed class QcDetectionResponseParserTests
     }
 
     [Fact]
+    public void Parse_UnnaturalPhrasing()
+    {
+        var result = QcDetectionResponseParser.Parse("DEFECTS: UNNATURAL_PHRASING");
+
+        Assert.True(result.Success);
+        Assert.Equal([QcDefectCategory.UnnaturalPhrasing], result.Findings.Select(finding => finding.Category));
+    }
+
+    [Fact]
     public void Parse_None()
     {
         var result = QcDetectionResponseParser.Parse("DEFECTS: NONE");

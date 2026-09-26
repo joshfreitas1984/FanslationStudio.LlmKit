@@ -547,6 +547,8 @@ public static class QualityEvaluatorAssessmentWorkflow
             ActualDefectCategory = actualCategory.ToString(),
             ActualDefectCategories = actualCategories,
             ParseSuccess = confirmed.Success,
+            FailureKind = confirmed.Success ? null : confirmed.FailureKind.ToString(),
+            FailureDetail = confirmed.Success ? null : confirmed.FailureDetail,
             Score = actual == "Pass" ? 100 : null,
             ElapsedMilliseconds = stopwatch.ElapsedMilliseconds,
         };
@@ -656,6 +658,7 @@ public static class QualityEvaluatorAssessmentWorkflow
         "garbled-number" => QcDefectCategory.GarbledNumber,
         "hard-to-parse-seam" or "omitted-separator" => QcDefectCategory.HardToParseSeam,
         "literal-newline" or "misplaced-separator" => QcDefectCategory.HardToParseSeam,
+        "unnatural-phrasing" => QcDefectCategory.UnnaturalPhrasing,
         "mistranslation" => QcDefectCategory.OtherNamedDefect,
         "formatting" or "garbage-output" or "fluency" or "invented-tag" or "prompt-leak" => QcDefectCategory.OtherNamedDefect,
         _ => QcDefectCategory.OtherNamedDefect,
@@ -804,6 +807,11 @@ public static class QualityEvaluatorAssessmentWorkflow
                 DetectionAccuracy = scoredDetection.Count == 0 ? 0 : detectionCorrect / (double)scoredDetection.Count,
                 DetectionAccuracyIncludingUnscored = detection.Count == 0 ? 0 : detectionCorrect / (double)detection.Count,
                 DetectionUnscoredCount = detection.Count(x => !x.ParseSuccess),
+                DetectionUnscoredByFailureKind = detection
+                    .Where(x => !x.ParseSuccess)
+                    .GroupBy(x => x.FailureKind ?? nameof(QcDetectionFailureKind.ParseError))
+                    .OrderBy(group => group.Key, StringComparer.Ordinal)
+                    .ToDictionary(group => group.Key, group => group.Count()),
                 DetectionAbstainCount = detection.Count(x => x.ActualLabel == "Abstain"),
                 DetectionPassCount = detection.Count(x => x.ActualLabel == "Pass"),
                 DetectionDefectCount = actualDefects,
@@ -846,6 +854,13 @@ public static class QualityEvaluatorAssessmentWorkflow
         public string ExpectedCorrectionSafety { get; set; } = string.Empty;
         public string ActualCorrectionSafety { get; set; } = string.Empty;
         public bool ParseSuccess { get; set; }
+        /// <summary>Detection only, null on success: RequestError/Truncated/ParseError - see
+        /// <see cref="QcDetectionFailureKind"/>. RequestError/Truncated almost always mean the prompt
+        /// outgrew the model's num_ctx rather than the model misbehaving.</summary>
+        public string? FailureKind { get; set; }
+        /// <summary>Detection only, null on success: the HTTP error message (RequestError) or the
+        /// raw model response that failed to parse (Truncated/ParseError).</summary>
+        public string? FailureDetail { get; set; }
         public int? Score { get; set; }
         public long ElapsedMilliseconds { get; set; }
     }
@@ -861,6 +876,7 @@ public static class QualityEvaluatorAssessmentWorkflow
         public double DetectionAccuracy { get; set; }
         public double DetectionAccuracyIncludingUnscored { get; set; }
         public int DetectionUnscoredCount { get; set; }
+        public Dictionary<string, int> DetectionUnscoredByFailureKind { get; set; } = [];
         public int DetectionAbstainCount { get; set; }
         public int DetectionPassCount { get; set; }
         public int DetectionDefectCount { get; set; }

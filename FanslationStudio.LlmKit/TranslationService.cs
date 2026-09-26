@@ -1476,7 +1476,17 @@ public static class TranslationService
     /// content in the returned string instead of stripping it, so the reasoning is actually visible
     /// to the caller.
     /// </summary>
-    public static async Task<string> TranslateMessagesAsync(HttpClient client, LlmConfig config, ModelExecutionConfig modelToUse, List<object> messages, bool enableThinking = false, bool includeThinking = false)
+    public static async Task<string> TranslateMessagesAsync(HttpClient client, LlmConfig config, ModelExecutionConfig modelToUse, List<object> messages, bool enableThinking = false, bool includeThinking = false) =>
+        (await TranslateMessagesWithStopReasonAsync(client, config, modelToUse, messages, enableThinking, includeThinking)).Content;
+
+    /// <summary>
+    /// Same as <see cref="TranslateMessagesAsync"/>, but also returns why the server stopped
+    /// generating: Ollama native <c>/api/chat</c>'s <c>done_reason</c> or an OpenAI-compatible
+    /// endpoint's <c>choices[0].finish_reason</c> (null if the server sent neither). "length" means
+    /// the response was cut off by <c>num_predict</c>/<c>num_ctx</c> - a strict-protocol caller
+    /// (e.g. QC detection) uses it to tell a truncated answer apart from a genuinely malformed one.
+    /// </summary>
+    public static async Task<(string Content, string? StopReason)> TranslateMessagesWithStopReasonAsync(HttpClient client, LlmConfig config, ModelExecutionConfig modelToUse, List<object> messages, bool enableThinking = false, bool includeThinking = false)
     {
         // Generate based on what would have been created
         var requestData = LlmHelpers.GenerateLlmRequestData(modelToUse, messages, enableThinking);
@@ -1528,9 +1538,17 @@ public static class TranslationService
 
             using var jsonDoc = JsonDocument.Parse(responseBody);
 
-            var messageElement = responseBody.Contains("\"choices\":")
+            var isOpenAiShape = responseBody.Contains("\"choices\":");
+            var messageElement = isOpenAiShape
                 ? jsonDoc.RootElement.GetProperty("choices")[0].GetProperty("message")
                 : jsonDoc.RootElement.GetProperty("message");
+            var stopReasonElement = isOpenAiShape
+                ? jsonDoc.RootElement.GetProperty("choices")[0]
+                : jsonDoc.RootElement;
+            var stopReason = stopReasonElement.TryGetProperty(isOpenAiShape ? "finish_reason" : "done_reason", out var stopReasonProp)
+                && stopReasonProp.ValueKind == JsonValueKind.String
+                ? stopReasonProp.GetString()
+                : null;
 
             var result = messageElement.GetProperty("content").GetString()?.Trim() ?? string.Empty;
 
@@ -1556,7 +1574,7 @@ public static class TranslationService
             if (!enableThinking)
                 result = RemoveThinkTags(result);
 
-            return result;
+            return (result, stopReason);
         }
         catch (Exception e)
         {
@@ -1564,7 +1582,7 @@ public static class TranslationService
             {
                 Console.WriteLine($"Exception on: {requestData}");
                 Console.WriteLine($"Exception message: {e.Message}");
-                return "";
+                return ("", null);
             }
             else
                 throw;

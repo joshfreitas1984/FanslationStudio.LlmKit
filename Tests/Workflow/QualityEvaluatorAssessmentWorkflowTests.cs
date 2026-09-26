@@ -24,6 +24,7 @@ public sealed class QualityEvaluatorAssessmentWorkflowTests
     [InlineData("omitted-separator", QcDefectCategory.HardToParseSeam)]
     [InlineData("literal-newline", QcDefectCategory.HardToParseSeam)]
     [InlineData("misplaced-separator", QcDefectCategory.HardToParseSeam)]
+    [InlineData("unnatural-phrasing", QcDefectCategory.UnnaturalPhrasing)]
     [InlineData("formatting", QcDefectCategory.OtherNamedDefect)]
     [InlineData("garbage-output", QcDefectCategory.OtherNamedDefect)]
     [InlineData("fluency", QcDefectCategory.OtherNamedDefect)]

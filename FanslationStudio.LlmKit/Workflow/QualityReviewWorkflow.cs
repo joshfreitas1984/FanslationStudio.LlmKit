@@ -907,24 +907,37 @@ public static class QualityReviewWorkflow
         };
 
         string llmResponse;
+        string? stopReason;
         var llmStopwatch = Stopwatch.StartNew();
         try
         {
-            llmResponse = await TranslationService.TranslateMessagesAsync(client, config, modelConfig, messages, enableThinking: enableThinking);
+            (llmResponse, stopReason) = await TranslationService.TranslateMessagesWithStopReasonAsync(client, config, modelConfig, messages, enableThinking: enableThinking);
         }
         catch (Exception e) when (e is HttpRequestException or OperationCanceledException)
         {
             RecordLlmCall(timing, llmStopwatch);
             Console.WriteLine($"Quality review detection request error for '{rawText}': {e.Message}");
-            return new QcDetectionResult(false, []);
+            return new QcDetectionResult(false, [], QcDetectionFailureKind.RequestError, e.Message);
         }
         RecordLlmCall(timing, llmStopwatch);
 
         var detection = QcDetectionResponseParser.Parse(llmResponse);
-        if (!detection.Success)
-            Console.WriteLine($"Quality review: could not parse detection response for '{rawText}' - skipping. Raw response: {llmResponse}");
+        if (detection.Success)
+            return detection;
 
-        return detection;
+        // A "length" stop means the context/num_predict budget ran out mid-answer (e.g.
+        // "DEFECTS: HARD_TO_PARSE_SE") - not a model protocol violation, and the fix is headroom
+        // in the model's num_ctx, not prompt wording. Report it separately so it's diagnosable.
+        var truncated = string.Equals(stopReason, "length", StringComparison.OrdinalIgnoreCase);
+        Console.WriteLine(truncated
+            ? $"Quality review: detection response for '{rawText}' was truncated (stop reason 'length' - check num_ctx headroom) - skipping. Raw response: {llmResponse}"
+            : $"Quality review: could not parse detection response for '{rawText}' - skipping. Raw response: {llmResponse}");
+
+        return detection with
+        {
+            FailureKind = truncated ? QcDetectionFailureKind.Truncated : QcDetectionFailureKind.ParseError,
+            FailureDetail = llmResponse,
+        };
     }
 
     /// <summary>

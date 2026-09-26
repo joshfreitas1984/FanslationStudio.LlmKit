@@ -28,7 +28,9 @@ public enum QcDefectCategory
     LostIdiom,
 
     /// <summary>A term left untranslated/transliterated as Pinyin when it has a clear translatable
-    /// meaning.</summary>
+    /// meaning. One direction only - the opposite failure (a name/domain term convention keeps in
+    /// Pinyin instead rendered as an English gloss, e.g. an acupoint name) is <see
+    /// cref="OtherNamedDefect"/>, not this category.</summary>
     UntranslatedPinyin,
 
     /// <summary>An omitted subject/object/clause, or a dropped title/honorific next to a
@@ -73,4 +75,17 @@ public enum QcDefectCategory
     /// with no score - a genuine "ask a human" signal instead of forcing a low-confidence hunch to
     /// round up to a fully-committed named defect and fix.</summary>
     Uncertain,
+
+    /// <summary>TRANSLATION is grammatically valid and meaning-accurate but reads as mechanically
+    /// literal/non-idiomatic English that a native speaker would not actually write - e.g.
+    /// source-order word-for-word construction producing an awkward noun phrase ("Extra Max for
+    /// Inner Power obtained by the character" instead of "Max Inner Power Increased"). Distinct from
+    /// minor stylistic word-order/synonym preference (still not a defect - see the prompt's "DO NOT
+    /// flag" rule) and from <see cref="HardToParseSeam"/> (a fragment-stitching boundary issue, not
+    /// a whole-phrase construction issue) - only flag when the phrasing is different enough from
+    /// natural English that a player would visibly notice it's machine-translated. Deliberately left
+    /// off <see cref="Configuration.QualityReviewConfig.AutoAcceptDefectCategories"/> by default -
+    /// more subjective than the mostly factual/structural categories above, with no hand-validated
+    /// precision sample yet.</summary>
+    UnnaturalPhrasing,
 }
