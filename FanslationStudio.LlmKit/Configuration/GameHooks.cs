@@ -89,6 +89,17 @@ public class GameHooks
     public Func<TextFileToSplit, int?, string, bool>? CustomQcExclusionRule { get; set; }
 
     /// <summary>
+    /// Invoked once per still-safe split from <see cref="Workflow.TranslationWorkflow.UpdateSplit"/>
+    /// (the rules pass behind <see cref="Workflow.TranslationWorkflow.ApplyAllRulesToCurrentTranslation"/>
+    /// and <see cref="Workflow.TranslationWorkflow.TranslateLinesBruteForce"/>). Receives
+    /// (textFile, line, split) so a rule can key off the whole <see cref="TranslationLine.Raw"/> -
+    /// e.g. a dynamic string's call site - not just the split text. Return true to set
+    /// <see cref="TranslationSplit.SafeToTranslate"/> to false, which keeps the split out of
+    /// translation, QC and packaging. Left null (no-op) unless a caller opts in.
+    /// </summary>
+    public Func<TextFileToSplit, TranslationLine, TranslationSplit, bool>? CustomUnsafeToTranslateRule { get; set; }
+
+    /// <summary>
     /// Invoked once per packaged cell/line, at the end of <see cref="Utility.PackagingTextFixups.Apply"/>
     /// - i.e. after every standard, game-agnostic packaging-time fixup (hyphen-undo, literal-"\n"
     /// undo) has already run. Lets a game-specific project add its own deterministic packaging-time

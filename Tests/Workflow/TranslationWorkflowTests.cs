@@ -1,5 +1,10 @@
+using System.Collections.Concurrent;
 using System.Reflection;
+using System.Text.RegularExpressions;
+using FanslationStudio.LlmKit;
+using FanslationStudio.LlmKit.Configuration;
 using FanslationStudio.LlmKit.Support;
+using FanslationStudio.LlmKit.Utility;
 using FanslationStudio.LlmKit.Workflow;
 
 namespace Tests.Workflow;
@@ -28,5 +33,29 @@ public class TranslationWorkflowTests
         var result = (bool)method.Invoke(null, [preparedRaw, translated])!;
 
         Assert.Equal(expected, result);
+    }
+
+    [Theory(DisplayName = "CustomUnsafeToTranslateRule marks matching splits unsafe and leaves others alone")]
+    [InlineData("Mortal.Combat.CombatEnemyController/<SetData>d__24,MoveNext,253,圖片 ,[]", false)]
+    [InlineData("Mortal.Combat.CombatStatController/<ModifyStamina>d__266,MoveNext,97,圖片 ,[]", true)]
+    public void CustomUnsafeToTranslateRuleMarksSplitUnsafe(string raw, bool expectedSafe)
+    {
+        var split = new TranslationSplit { Split = 3, Text = "圖片 ", Translated = "Image" };
+        var line = new TranslationLine { Raw = raw, Splits = [split] };
+        var textFile = new TextFileToSplit { Path = "dynamicStrings.txt", TextFileType = TextFileType.DynamicStrings };
+        var config = new LlmConfig
+        {
+            Hooks = new GameHooks
+            {
+                CustomUnsafeToTranslateRule = (_, l, _) => l.Raw.StartsWith("Mortal.Combat.CombatEnemyController/<SetData>"),
+            },
+        };
+        // The non-matching case runs the rest of the rules pass, which needs a model entry.
+        config.Runtime.Models["Default"] = new ModelExecutionConfig();
+
+        TranslationWorkflow.UpdateSplit(new ConcurrentBag<string>(), line, split, textFile, config,
+            new Regex(LineValidation.ChineseCharPattern), new StringTokenReplacer());
+
+        Assert.Equal(expectedSafe, split.SafeToTranslate);
     }
 }

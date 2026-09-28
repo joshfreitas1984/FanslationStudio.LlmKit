@@ -153,6 +153,12 @@ public static class TranslationWorkflow
         Regex chineseCharRegex,
         StringTokenReplacer tokenReplacer)
     {
+        if (split.SafeToTranslate && config.Hooks?.CustomUnsafeToTranslateRule?.Invoke(textFile, line, split) == true)
+        {
+            split.SafeToTranslate = false;
+            return true;
+        }
+
         var translatedBeforeRules = split.Translated;
         var modified = UpdateSplitCore(logLines, split, textFile, config, chineseCharRegex, tokenReplacer);
 

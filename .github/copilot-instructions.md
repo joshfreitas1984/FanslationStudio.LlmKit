@@ -137,3 +137,6 @@ full design, including guidance for writing a new exclusion rule.
 - `GameHooks.CustomQcExclusionRule` — per-game rule deciding whether a column should be kept out of
   the quality review pass entirely, checked once per column before any QC LLM call (see
   `docs/features/translation-pipeline/quality-review-pass.md`).
+- `GameHooks.CustomUnsafeToTranslateRule` — per-game rule (with the whole `TranslationLine` in
+  scope) that marks a split `SafeToTranslate = false` during the rules pass (see
+  `docs/features/translation-pipeline/game-hooks.md`).
