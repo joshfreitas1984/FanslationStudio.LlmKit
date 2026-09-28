@@ -150,6 +150,12 @@ public static class GameFileHandlingBase
         to.QcRejectedCorrection = from.QcRejectedCorrection;
         to.QcFailureReason = from.QcFailureReason;
         to.QcQualityScore = from.QcQualityScore;
+        to.QcDefectCategory = from.QcDefectCategory;
+        to.QcDefectCategories = [.. from.QcDefectCategories];
+        // Must survive re-export like it survives ResetQcState, or the retry limit restarts from 0
+        // after every merge. Its baseline check still invalidates it on any upstream change.
+        to.QcRuleCheckFailureCount = from.QcRuleCheckFailureCount;
+        to.QcRuleCheckFailureBaseline = from.QcRuleCheckFailureBaseline;
     }
 
     public static List<string> CheckFileLinesMatch(string workingDirectory, TextFileToSplit[] textFiles)

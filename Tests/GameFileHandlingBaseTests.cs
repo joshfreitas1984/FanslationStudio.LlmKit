@@ -78,4 +78,60 @@ public class GameFileHandlingBaseTests
             Directory.Delete(dir, true);
         }
     }
+
+    [Theory(DisplayName = "Merge carries every Qc* field forward onto an unchanged split")]
+    [InlineData(false)] // line matched by Raw
+    [InlineData(true)]  // Raw changed - falls back to split-level matching
+    public async Task MergeFilesIntoTranslatedAsync_CarriesAllQcStateForward(bool rawChanged)
+    {
+        var dir = CreateWorkingDirectory();
+        try
+        {
+            var reviewed = new TranslationSplit(1, "大侠")
+            {
+                Translated = "Hero",
+                QcTranslated = "Great Hero",
+                QcStatus = QcStatus.Corrected,
+                QcReviewedText = "Hero",
+                FlaggedForQcReview = true,
+                QcRejectedCorrection = "Big Shrimp",
+                QcFailureReason = "reason",
+                QcQualityScore = 42,
+                QcDefectCategory = QcDefectCategory.UntranslatedPinyin,
+                QcDefectCategories = [QcDefectCategory.UntranslatedPinyin, QcDefectCategory.OtherNamedDefect],
+                QcRuleCheckFailureCount = 2,
+                QcRuleCheckFailureBaseline = "Great Hero",
+            };
+            var oldConverted = new List<TranslationLine> { new() { Raw = "1,大侠", Splits = [reviewed] } };
+            File.WriteAllText($"{dir}/Converted/Test.csv.yaml", YamlHelper.CreateSerializer().Serialize(oldConverted));
+
+            var freshExport = new List<TranslationLine>
+            {
+                new() { Raw = rawChanged ? "2,大侠" : "1,大侠", Splits = [new TranslationSplit(1, "大侠")] },
+            };
+            File.WriteAllText($"{dir}/Raw/Export/Test.csv.yaml", YamlHelper.CreateSerializer().Serialize(freshExport));
+
+            await GameFileHandlingBase.MergeFilesIntoTranslatedAsync(dir,
+                [new TextFileToSplit { Path = "Test.csv", PackageOutput = true }]);
+
+            var merged = YamlHelper.CreateDeserializer()
+                .Deserialize<List<TranslationLine>>(File.ReadAllText($"{dir}/Converted/Test.csv.yaml"))
+                .Single().Splits.Single();
+
+            Assert.Equal("Hero", merged.Translated);
+            Assert.Equal([QcDefectCategory.UntranslatedPinyin, QcDefectCategory.OtherNamedDefect], merged.QcDefectCategories);
+
+            // Guard against the next Qc* field being added without updating CopyQcState.
+            var qcProperties = typeof(TranslationSplit).GetProperties()
+                .Where(p => p.Name.StartsWith("Qc") || p.Name == nameof(TranslationSplit.FlaggedForQcReview))
+                .Where(p => p.PropertyType != typeof(List<QcDefectCategory>));
+            foreach (var property in qcProperties)
+                Assert.True(Equals(property.GetValue(reviewed), property.GetValue(merged)),
+                    $"{property.Name} was not carried forward by the merge");
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
 }
