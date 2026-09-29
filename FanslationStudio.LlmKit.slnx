@@ -3,5 +3,6 @@
     <File Path=".github/workflows/build.yml" />
   </Folder>
   <Project Path="FanslationStudio.LlmKit/FanslationStudio.LlmKit.csproj" />
+  <Project Path="FanslationStudio.LlmKit.Release/FanslationStudio.LlmKit.Release.csproj" />
   <Project Path="Tests/FanslationStudio.LlmKit.Tests.csproj" />
 </Solution>

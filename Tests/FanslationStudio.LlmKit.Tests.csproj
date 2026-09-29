@@ -25,6 +25,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\FanslationStudio.LlmKit\FanslationStudio.LlmKit.csproj" />
+    <ProjectReference Include="..\FanslationStudio.LlmKit.Release\FanslationStudio.LlmKit.Release.csproj" />
   </ItemGroup>
 
   <ItemGroup>
