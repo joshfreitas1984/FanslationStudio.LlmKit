@@ -67,6 +67,9 @@ public static class ReleasePackager
         var manifest = new ReleaseManifest
         {
             Version = options.Version,
+            GitHubRepo = options.GitHubRepo,
+            SteamAppId = options.SteamAppId,
+            PatchZipPrefix = options.ZipPrefix,
             Files = files,
             SeedOnly = ResolveSeedOnly(options.SeedOnly, files),
         };

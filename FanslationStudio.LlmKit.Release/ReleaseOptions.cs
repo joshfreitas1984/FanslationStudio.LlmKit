@@ -17,6 +17,10 @@ public class ReleaseOptions
     /// <summary>Zip name prefix; produces "&lt;prefix&gt;-&lt;version&gt;.zip".</summary>
     public required string ZipPrefix { get; init; }
 
+    /// <summary>Optional release metadata recorded in the manifest for the in-game updater ("owner/repo", Steam app ID).</summary>
+    public string? GitHubRepo { get; init; }
+    public int? SteamAppId { get; init; }
+
     public List<ReleaseMapping> Mappings { get; init; } = [];
 
     /// <summary>Staging-relative folders the project fully owns; deleted before mappings are copied.</summary>

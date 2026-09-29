@@ -69,6 +69,41 @@ public class ReleasePackagerTests : IDisposable
     }
 
     [Fact]
+    public void Package_RecordsUpdaterMetadataInManifest_WhenGiven()
+    {
+        Write("src/Layouts/a.yaml", "a");
+        var options = new ReleaseOptions
+        {
+            Version = "v1",
+            StagingFolder = Path.Combine(_root, "out", "Files"),
+            OutputFolder = Path.Combine(_root, "out"),
+            ZipPrefix = "Patch",
+            GitHubRepo = "o/r",
+            SteamAppId = 123,
+            Mappings = [new ReleaseMapping(Path.Combine(_root, "src", "Layouts"), "BepInEx/layouts")],
+        };
+
+        var json = File.ReadAllText(ReleasePackager.Package(options).ManifestPath);
+        var manifest = ReleaseManifest.FromJson(json);
+
+        Assert.Equal("o/r", manifest.GitHubRepo);
+        Assert.Equal(123, manifest.SteamAppId);
+        Assert.Equal("Patch", manifest.PatchZipPrefix);
+        Assert.Contains("\"gitHubRepo\": \"o/r\"", json);
+    }
+
+    [Fact]
+    public void Package_OmitsUpdaterMetadata_WhenNotGiven()
+    {
+        Write("src/Layouts/a.yaml", "a");
+
+        var json = File.ReadAllText(ReleasePackager.Package(Options()).ManifestPath);
+
+        Assert.DoesNotContain("gitHubRepo", json);
+        Assert.DoesNotContain("steamAppId", json);
+    }
+
+    [Fact]
     public void Package_RemovesConfiguredFiles()
     {
         Write("src/Layouts/a.yaml", "a");
@@ -98,6 +133,26 @@ public class ReleasePackagerTests : IDisposable
 
         Assert.Throws<InvalidOperationException>(() =>
             ReleasePackager.Package(Options(o => o.SeedOnly.Add("BepInEx/config/**"))));
+    }
+
+    [Theory]
+    [InlineData(System.Net.HttpStatusCode.OK, true)]
+    [InlineData(System.Net.HttpStatusCode.NotFound, false)]
+    [InlineData(System.Net.HttpStatusCode.Forbidden, null)]
+    public void TryReleaseExists_MapsGitHubAnswers_AndReturnsNullWhenUnsure(System.Net.HttpStatusCode status, bool? expected)
+    {
+        using var http = new HttpClient(new FixedStatusHandler(status));
+
+        Assert.Equal(expected, ReleasePublisher.TryReleaseExists("o/r", "installer", http));
+    }
+
+    class FixedStatusHandler(System.Net.HttpStatusCode status) : HttpMessageHandler
+    {
+        protected override HttpResponseMessage Send(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            new(status);
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(status));
     }
 
     [Fact]
@@ -144,12 +199,17 @@ public class ReleasePackagerTests : IDisposable
         Git("tag", "2026.01.01.00.00");
         Write("a.txt", "2");
         Git("commit", "-am", "new change");
+        // The rolling installer release's tag sorts above dated tags but is not a patch release.
+        Git("tag", "installer");
+        Write("a.txt", "3");
+        Git("commit", "-am", "newest change");
 
         var notes = GitReleaseNotes.Generate(_root)!;
 
         Assert.StartsWith("## Changes", notes);
         Assert.DoesNotContain("2026.01.01.00.00", notes);
         Assert.Contains("- new change (", notes);
+        Assert.Contains("- newest change (", notes);
         Assert.DoesNotContain("old change", notes);
     }
 

@@ -16,8 +16,9 @@ public static class GitReleaseNotes
         if (fetchTags)
             TryGit(repoFolder, "fetch", "--tags", "--quiet");
 
-        // Not `git describe`: it picks arbitrarily when several tags share a commit. Version-named tags sort by name.
-        var lastTag = Git(repoFolder, "tag", "--merged", "HEAD", "--sort=-version:refname")
+        // Not `git describe`: it picks arbitrarily when several tags share a commit. Version-named tags sort by name,
+        // and only tags starting with a digit count: the rolling "installer" release tag must never be "the last release".
+        var lastTag = Git(repoFolder, "tag", "--merged", "HEAD", "--list", "[0-9]*", "--sort=-version:refname")
             .Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim();
         var range = string.IsNullOrEmpty(lastTag) ? "HEAD" : $"{lastTag}..HEAD";
 

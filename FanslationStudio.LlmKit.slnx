@@ -4,5 +4,7 @@
   </Folder>
   <Project Path="FanslationStudio.LlmKit/FanslationStudio.LlmKit.csproj" />
   <Project Path="FanslationStudio.LlmKit.Release/FanslationStudio.LlmKit.Release.csproj" />
+  <Project Path="FanslationStudio.Installer.Core/FanslationStudio.Installer.Core.csproj" />
+  <Project Path="FanslationStudio.Installer.App/FanslationStudio.Installer.App.csproj" />
   <Project Path="Tests/FanslationStudio.LlmKit.Tests.csproj" />
 </Solution>

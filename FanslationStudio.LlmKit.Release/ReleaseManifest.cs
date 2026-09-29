@@ -19,23 +19,28 @@ public class ReleaseManifest
     public const int CurrentSchemaVersion = 1;
     public const string FileName = "release-manifest.json";
 
-    public static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = true,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        DefaultIgnoreCondition = JsonIgnoreCondition.Never,
-    };
-
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
     public string Version { get; set; } = "";
+
+    /// <summary>Release metadata so the in-game updater needs no per-game config. All optional.</summary>
+    public string? GitHubRepo { get; set; }
+    public int? SteamAppId { get; set; }
+    public string? PatchZipPrefix { get; set; }
+
     public List<ReleaseManifestFile> Files { get; set; } = [];
 
     /// <summary>Manifest paths only written by an installer/updater when missing, so user edits survive updates.</summary>
     public List<string> SeedOnly { get; set; } = [];
 
-    public string ToJson() => JsonSerializer.Serialize(this, JsonOptions);
+    public string ToJson() => JsonSerializer.Serialize(this, ReleaseJsonContext.Default.ReleaseManifest);
 
     public static ReleaseManifest FromJson(string json) =>
-        JsonSerializer.Deserialize<ReleaseManifest>(json, JsonOptions)
+        JsonSerializer.Deserialize(json, ReleaseJsonContext.Default.ReleaseManifest)
         ?? throw new InvalidDataException("Release manifest is empty.");
 }
+
+// Source-generated so the manifest reader works in trimmed/AOT-published installers.
+[JsonSourceGenerationOptions(WriteIndented = true, PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
+[JsonSerializable(typeof(ReleaseManifest))]
+internal partial class ReleaseJsonContext : JsonSerializerContext;

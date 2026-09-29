@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net.Http;
 
 namespace FanslationStudio.LlmKit.Release;
 
@@ -20,6 +21,40 @@ public static class ReleasePublisher
         if (!string.IsNullOrWhiteSpace(notes) && notes.Length <= MaxBodyChars)
             url += $"&body={Uri.EscapeDataString(notes)}";
         return url;
+    }
+
+    /// <summary>
+    /// Anonymous check (no credentials, so no account guessing) for whether a release with this tag exists.
+    /// True or false when GitHub answers; null when it can't be determined (offline, rate limited, private repo).
+    /// </summary>
+    public static bool? TryReleaseExists(string ownerAndRepo, string tag, HttpClient? http = null)
+    {
+        var owned = http == null;
+        http ??= new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get,
+                $"https://api.github.com/repos/{ownerAndRepo}/releases/tags/{Uri.EscapeDataString(tag)}");
+            request.Headers.UserAgent.ParseAdd("FanslationStudio-Release/1.0");
+            request.Headers.Accept.ParseAdd("application/vnd.github+json");
+
+            using var response = http.Send(request);
+            return response.StatusCode switch
+            {
+                System.Net.HttpStatusCode.OK => true,
+                System.Net.HttpStatusCode.NotFound => false,
+                _ => null,
+            };
+        }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            if (owned)
+                http.Dispose();
+        }
     }
 
     /// <summary>Opens a folder or URL with the shell. Returns false if it could not be opened.</summary>
@@ -57,6 +92,34 @@ public static class ReleasePublisher
 
             var (exit, _, err) = Run("gh", args, token.Trim());
             return exit == 0 ? null : $"gh release create failed: {err.Trim()}";
+        }
+        catch (Exception ex)
+        {
+            return $"gh unavailable: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Uploads assets to a rolling pre-release (created on first use, replaced in place afterwards) as
+    /// <paramref name="ghAccount"/>. Returns null on success, otherwise the reason to fall back to the browser.
+    /// </summary>
+    public static string? TryPublishRollingWithGh(string ownerAndRepo, string ghAccount, string tag, string title, IEnumerable<string> assets)
+    {
+        try
+        {
+            var (tokenExit, token, tokenErr) = Run("gh", ["auth", "token", "--user", ghAccount], null);
+            if (tokenExit != 0 || string.IsNullOrWhiteSpace(token))
+                return $"gh has no login for '{ghAccount}': {tokenErr.Trim()}";
+
+            var exists = Run("gh", ["release", "view", tag, "--repo", ownerAndRepo], token.Trim()).ExitCode == 0;
+
+            var args = exists
+                ? new List<string> { "release", "upload", tag, "--repo", ownerAndRepo, "--clobber" }
+                : new List<string> { "release", "create", tag, "--repo", ownerAndRepo, "--title", title, "--prerelease", "--notes", title };
+            args.AddRange(assets);
+
+            var (exit, _, err) = Run("gh", args, token.Trim());
+            return exit == 0 ? null : $"gh release {(exists ? "upload" : "create")} failed: {err.Trim()}";
         }
         catch (Exception ex)
         {
