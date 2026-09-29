@@ -43,6 +43,28 @@ public class InstallerCoreTests : IDisposable
     string ReadGame(string relative) => File.ReadAllText(Path.Combine(Game, relative));
 
     [Fact]
+    public void ApplyDoorstopSettings_WritesTheOverrideIntoDoorstopConfig()
+    {
+        Write("game/doorstop_config.ini", "[UnityMono]\ndll_search_path_override =\ndebug_enabled = false\n");
+
+        BepInExInstaller.ApplyDoorstopSettings(new BepInExPin { DllSearchPathOverride = @"BepInEx\core" }, Game);
+
+        Assert.Equal("[UnityMono]\ndll_search_path_override = \"BepInEx\\core\"\ndebug_enabled = false\n", ReadGame("doorstop_config.ini"));
+        // BepInEx.cfg comes from the patch release, never from the installer.
+        Assert.False(File.Exists(Path.Combine(Game, "BepInEx/config/BepInEx.cfg")));
+    }
+
+    [Fact]
+    public void ApplyDoorstopSettings_LeavesDoorstopAloneWithoutAnOverride()
+    {
+        Write("game/doorstop_config.ini", "dll_search_path_override =\n");
+
+        BepInExInstaller.ApplyDoorstopSettings(new BepInExPin(), Game);
+
+        Assert.Equal("dll_search_path_override =\n", ReadGame("doorstop_config.ini"));
+    }
+
+    [Fact]
     public void Apply_WritesFilesAndRecordsInstalledManifest()
     {
         var zip = BuildPatch("2026.01.01.00.00", new() { ["BepInEx/layouts/a.yaml"] = "a" });

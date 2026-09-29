@@ -15,6 +15,13 @@ public class BepInExPin
     public string Version { get; set; } = "";
     public string Url { get; set; } = "";
     public string Sha256 { get; set; } = "";
+
+    /// <summary>
+    /// Optional value for doorstop_config.ini's dll_search_path_override. Some Mono games ship their own MonoMod,
+    /// Cecil or Harmony in Managed; without "BepInEx\core" here BepInEx loads those older copies and fails in the
+    /// preloader. Empty leaves the stock config from the BepInEx zip alone.
+    /// </summary>
+    public string DllSearchPathOverride { get; set; } = "";
 }
 
 /// <summary>Per-game installer settings (installer.json). Read by the installer, the updater and PackageRelease.</summary>
