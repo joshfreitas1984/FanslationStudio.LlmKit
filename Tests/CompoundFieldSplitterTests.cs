@@ -484,6 +484,21 @@ public class CompoundFieldSplitterTests
             CompoundFieldSplitter.Reconstruct(template, translated));
     }
 
+    [Fact(DisplayName = "Reconstruct adds a space after a literal ASCII ':' label separator before a translated fragment")]
+    public void ReconstructAddsSpaceAfterColonLabelSeparator()
+    {
+        var (template, fragments) = CompoundFieldSplitter.Decompose("天赋:暴躁");
+
+        var translated = fragments.Select(f => f switch
+        {
+            "天赋" => "Talent",
+            "暴躁" => "Irritable",
+            _ => f,
+        }).ToList();
+
+        Assert.Equal("Talent: Irritable", CompoundFieldSplitter.Reconstruct(template, translated));
+    }
+
     [Fact(DisplayName = "Reconstruct does not insert a word-boundary space around a literal '\\n' escape sequence")]
     public void ReconstructDoesNotInsertSpaceAroundLiteralNewlineEscape()
     {

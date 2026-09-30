@@ -750,6 +750,13 @@ public static partial class CompoundFieldSplitter
         if (left.Value == '&' && char.IsLetterOrDigit(right.Value) && !IsCjkIdeograph(right.Value))
             return true;
 
+        // A literal ASCII ':' label separator (template "{0}:{1}" reconstructing "Talent" + "Irritable")
+        // needs the space English puts after a label colon ("Talent: Irritable"). Only a translated
+        // Latin LETTER on the right qualifies - digits are excluded so "{0}:{1}" time/ratio values
+        // like "10:30" stay tight, and untouched CJK on the right round-trips byte-for-byte.
+        if (left.Value == ':' && char.IsLetter(right.Value) && !IsCjkIdeograph(right.Value))
+            return true;
+
         return false;
     }
 
