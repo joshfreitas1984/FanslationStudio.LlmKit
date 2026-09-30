@@ -499,6 +499,15 @@ public class CompoundFieldSplitterTests
         Assert.Equal("Talent: Irritable", CompoundFieldSplitter.Reconstruct(template, translated));
     }
 
+    [Theory(DisplayName = "NormalizeLabelNumberSpacing spaces a glued label/number only when the source was CJK followed by a digit")]
+    [InlineData("意志4", "Willpower4", "Willpower 4")]
+    [InlineData("意志1", "Willpower 1", "Willpower 1")]
+    [InlineData("闪避0.04", "Dodge0.04", "Dodge 0.04")]
+    [InlineData("H2O", "H2O", "H2O")]
+    [InlineData("等级", "Level5", "Level5")]
+    public void NormalizeLabelNumberSpacingOnlyForCjkDigitSources(string source, string translated, string expected)
+        => Assert.Equal(expected, CompoundFieldSplitter.NormalizeLabelNumberSpacing(source, translated));
+
     [Fact(DisplayName = "Reconstruct does not insert a word-boundary space around a literal '\\n' escape sequence")]
     public void ReconstructDoesNotInsertSpaceAroundLiteralNewlineEscape()
     {

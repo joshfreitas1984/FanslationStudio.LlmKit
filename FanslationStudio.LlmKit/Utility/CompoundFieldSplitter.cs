@@ -762,6 +762,26 @@ public static partial class CompoundFieldSplitter
 
     private static bool IsCjkIdeograph(char c) => c is >= '\u4E00' and <= '\u9FFF';
 
+    private static readonly Regex CjkDigitRegex = new(@"[\u4E00-\u9FFF]\d", RegexOptions.Compiled);
+    private static readonly Regex LatinDigitRegex = new(@"[A-Za-z]\d", RegexOptions.Compiled);
+    private static readonly Regex LetterDigitGlueRegex = new(@"(?<=[A-Za-z])(?=\d)", RegexOptions.Compiled);
+
+    /// <summary>
+    /// Restores the space a stat-style label needs before its number ("Willpower4" -> "Willpower 4")
+    /// when the translator glued them together. Only applies when the SOURCE had a CJK ideograph
+    /// directly followed by a digit (e.g. "\u610F\u5FD74") and no Latin letter directly followed by a digit,
+    /// so genuine identifiers already present in the source ("H2O", "Lv1") are never split.
+    /// </summary>
+    public static string NormalizeLabelNumberSpacing(string source, string translated)
+    {
+        if (string.IsNullOrEmpty(translated)
+            || !CjkDigitRegex.IsMatch(source)
+            || LatinDigitRegex.IsMatch(source))
+            return translated;
+
+        return LetterDigitGlueRegex.Replace(translated, " ");
+    }
+
     private static readonly Regex EscapedBraceRegex = new(@"⟦[^⟦⟧]*⟧", RegexOptions.Compiled);
 
     // A restored "{n}"-style format placeholder's real runtime value (a number, date, or an

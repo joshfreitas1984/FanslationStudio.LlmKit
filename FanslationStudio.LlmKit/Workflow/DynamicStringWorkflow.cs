@@ -269,7 +269,7 @@ public static class DynamicStringWorkflow
                     return (null, PackagingFailureReason.RawFallback, null);
 
                 if (!string.IsNullOrEmpty(fragment.Translated))
-                    translatedFragments.Add(fragment.Translated);
+                    translatedFragments.Add(CompoundFieldSplitter.NormalizeLabelNumberSpacing(fragment.Text, fragment.Translated));
                 else if (!string.IsNullOrEmpty(fragment.Text))
                     return (null, PackagingFailureReason.RawFallback, null);
                 else
@@ -297,7 +297,7 @@ public static class DynamicStringWorkflow
         var effectiveTranslated = plainQcFresh && !plainQcRejected && !string.IsNullOrEmpty(split.QcTranslated) ? split.QcTranslated : split.Translated;
 
         if (!string.IsNullOrEmpty(effectiveTranslated) && !split.FlaggedForRetranslation && split.SafeToTranslate)
-            return (effectiveTranslated, plainQcRejected ? PackagingFailureReason.QcRejected : PackagingFailureReason.None, null);
+            return (CompoundFieldSplitter.NormalizeLabelNumberSpacing(split.Text, effectiveTranslated), plainQcRejected ? PackagingFailureReason.QcRejected : PackagingFailureReason.None, null);
 
         return (null, PackagingFailureReason.RawFallback, null);
     }
