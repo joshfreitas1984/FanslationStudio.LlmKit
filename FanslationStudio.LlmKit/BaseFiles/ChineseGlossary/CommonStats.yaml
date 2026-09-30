@@ -15,7 +15,9 @@
   direct: Defense
   literal: fang yu li
 - raw: 命中率
-  result: Accuracy
+  result: Hit Rate
+  allowalt:
+    - Accuracy
   direct: hit rate
   literal: ming zhong
 - raw: 气势
