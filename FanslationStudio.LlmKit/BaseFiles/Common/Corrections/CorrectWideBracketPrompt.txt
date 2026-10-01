@@ -1,0 +1,1 @@
+The original text contains the bracket `{0}`, which was removed. Keep the bracketed text as its own bracketed part of the translation, in the same position, and still translate its meaning, e.g. "（无趣）哎，..." becomes "(Bored) Ah, ...". Do not fold it into the sentence or leave it out.

@@ -9,7 +9,7 @@ OUTPUT REQUIREMENTS:
 - Never output alternatives, explanations, comments, analysis, requests, or instructions.
 - If correction context or formatting guidance is supplied, output only the corrected translation.
 - Never reproduce any instruction, example, or other text from this prompt; translate only the supplied source text.
-- Return exactly one translation and nothing else. Do not provide a second version, alternatives, brackets, labels, or commentary.
+- Return exactly one translation and nothing else. Do not provide a second version, alternatives, labels, or commentary. Bracketed text that is part of the source is not commentary; keep it.
 
 FORMAT PRESERVATION RULES:
 - Preserve all formatting exactly.
@@ -18,6 +18,7 @@ FORMAT PRESERVATION RULES:
 - Do not modify placeholders such as {variable}, %s, %d.
 - Preserve every literal placeholder, tag, separator, and token from the source exactly; never add, remove, or reorder them.
 - Preserve punctuation, parentheses (), and brackets [] exactly.
+- A bracketed phrase in the source, such as a leading mood/action/stage direction like （无趣） or (无趣), or a label like 【任务】, is part of the text, not a comment. Translate it and keep it in brackets at the same position, e.g. "（无趣）哎，……" becomes "(Bored) Ah, ...". Never drop it, and never merge it into the sentence.
 - If the source contains the two literal ASCII characters backslash and n (`\n`), output those same two characters at the corresponding position. Never replace them with an actual line break, remove them, or add one.
 - If the source contains an actual line break, preserve an actual line break at the same position.
 - Never create a tag, placeholder, separator, punctuation mark, or line break that is absent from the source.

@@ -329,13 +329,28 @@ public static partial class LineValidation
         }
 
         //Place holders - incase the model ditched them
-        var matches = PlaceholderPatternRegex().Matches(raw);
-        foreach (Match match in matches)
+        // Compared by per-token occurrence count so a duplicated/dropped repeat ("{0} ... {0}"
+        // reduced to one "{0}") and an invented extra ("{1}" when raw only has "{0}") are both caught.
+        var rawPlaceholderCounts = PlaceholderPatternRegex().Matches(raw)
+            .GroupBy(m => m.Value).ToDictionary(g => g.Key, g => g.Count());
+        var resultPlaceholderCounts = PlaceholderPatternRegex().Matches(result)
+            .GroupBy(m => m.Value).ToDictionary(g => g.Key, g => g.Count());
+
+        foreach (var (token, rawCount) in rawPlaceholderCounts)
         {
-            if (!result.Contains(match.Value))
+            if (resultPlaceholderCounts.GetValueOrDefault(token) < rawCount)
             {
                 response = false;
-                correctionPrompts.AddPromptWithValues(config, "CorrectRemovalPrompt", match.Value);
+                correctionPrompts.AddPromptWithValues(config, "CorrectRemovalPrompt", token);
+            }
+        }
+
+        foreach (var (token, resultCount) in resultPlaceholderCounts)
+        {
+            if (resultCount > rawPlaceholderCounts.GetValueOrDefault(token))
+            {
+                response = false;
+                correctionPrompts.AddPromptWithValues(config, "CorrectAdditionalPrompt", token);
             }
         }
 
@@ -445,6 +460,18 @@ public static partial class LineValidation
             correctionPrompts.AddPromptWithValues(config, "CorrectExplainationPrompt");
         }
 
+        // Wide brackets dropped from the translation. Each family lists what counts as "kept":
+        // the wide bracket itself, the ASCII form PrepareRaw normalises it to, or a natural swap.
+        var droppedBracket = FindDroppedWideBracket(raw, result);
+        if (droppedBracket != null)
+        {
+            response = false;
+            // Falls back to the generic removal prompt for custom prompt sets that predate this key.
+            correctionPrompts.AddPromptWithValues(config,
+                config.Prompts.ContainsKey("CorrectWideBracketPrompt") ? "CorrectWideBracketPrompt" : "CorrectRemovalPrompt",
+                droppedBracket);
+        }
+
         ////Alternatives
         if (result.Contains('/') && !raw.Contains('/'))
         {
@@ -514,6 +541,31 @@ public static partial class LineValidation
             Result = result,
             CorrectionPrompt = correctionPrompts.ToString(),
         };
+    }
+
+    private static readonly (string WideChars, string AcceptableInResult)[] WideBracketFamilies =
+    [
+        ("（）", "（）()"),
+        ("【】［］〔〕", "【】［］〔〕[]"),
+        ("「」『』", "「」『』\"'“”‘’"),
+        // 《》 (book-title marks) deliberately not checked: idiomatic English drops them
+        // ("the Taoist classic Zhuangzi"), so requiring them forces awkward translations.
+    ];
+
+    /// <summary>
+    /// Returns the first wide (CJK) bracket in <paramref name="raw"/> whose whole family has vanished
+    /// from <paramref name="result"/>, or null if none were dropped.
+    /// </summary>
+    public static string? FindDroppedWideBracket(string raw, string result)
+    {
+        foreach (var (wideChars, acceptable) in WideBracketFamilies)
+        {
+            var rawBracket = raw.FirstOrDefault(c => wideChars.Contains(c));
+            if (rawBracket != default && !result.Any(c => acceptable.Contains(c)))
+                return rawBracket.ToString();
+        }
+
+        return null;
     }
 
     public static List<string> FindMarkup(string input)

@@ -14,6 +14,7 @@ FORMAT PRESERVATION RULES:
 - Do not translate or modify anything inside <> brackets.
 - Do not modify placeholders such as {variable}, %s, %d.
 - Preserve punctuation, parentheses (), and brackets [] exactly.
+- A bracketed phrase in the source, such as a leading mood/action/stage direction like （无趣） or (无趣), or a label like 【任务】, is part of the text, not a comment. Translate it and keep it in brackets at the same position, e.g. "（无趣）哎，……" becomes "(Bored) Ah, ...". Never drop it, and never merge it into the sentence.
 - A \n where the text right before it ends in a comma (or no terminal punctuation) is just a
   UI line-wrap splitting one continuing sentence across two lines for chat-bubble/box width -
   translate it as a single, fluent sentence and feel free to drop or reposition that \n if the
