@@ -1,6 +1,7 @@
 using FanslationStudio.LlmKit;
 using FanslationStudio.LlmKit.Support;
 using FanslationStudio.LlmKit.Utility;
+using FanslationStudio.LlmKit.Workflow;
 
 namespace Tests.Workflow;
 
@@ -65,6 +66,21 @@ public class TranslationSchedulerTests : IDisposable
 
         Assert.Equal(["Hello", "Goodbye", "Hello", "Hello"], ReadConverted("A.txt").Select(l => l.Splits[0].Translated));
         Assert.Equal(["Goodbye"], ReadConverted("B.txt").Select(l => l.Splits[0].Translated));
+    }
+
+    [Fact]
+    public async Task BruteForce_ReusesCorpusAcrossPasses_AndTranslatesEverything()
+    {
+        // Brute force starts with a rules pass over existing Converted files - seed them untranslated.
+        Directory.CreateDirectory($"{_dir}/Converted");
+        foreach (var file in _files)
+            File.Copy($"{_dir}/Raw/Export/{file.Path}", $"{_dir}/Converted/{file.Path}.yaml");
+
+        await TranslationWorkflow.TranslateLinesBruteForce(_dir, _files);
+
+        Assert.Equal(["Hello", "Goodbye", "Hello", "Hello"], ReadConverted("A.txt").Select(l => l.Splits[0].Translated));
+        Assert.Equal(["Goodbye"], ReadConverted("B.txt").Select(l => l.Splits[0].Translated));
+        Assert.All(ReadConverted("A.txt"), l => Assert.False(l.Splits[0].FlaggedForRetranslation));
     }
 
     [Theory]

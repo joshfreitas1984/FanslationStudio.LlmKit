@@ -2,6 +2,7 @@
 using FanslationStudio.LlmKit.Support;
 using FanslationStudio.LlmKit.Utility;
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 
 namespace FanslationStudio.LlmKit.Workflow;
@@ -36,16 +37,21 @@ public static class TranslationWorkflow
             return;
         }
 
+        // Config and the deserialized corpus are loaded once and reused by every translate/clean
+        // pass below; each pass writes only the files it changed.
+        var context = BuildTranslationRuleContext(workingDirectory, hooks);
+        var corpus = TranslationCorpus.Load(workingDirectory, textFileToSplits, copyMissingFromExport: false);
+
         PrintSeparator();
-        int remaining = await UpdateCurrentTranslationLines(workingDirectory, false, textFileToSplits, hooks);
+        int remaining = await UpdateCurrentTranslationLines(workingDirectory, corpus, false, context);
         PrintSeparator();
 
         int iterations = 0;
         while (remaining > 0 && iterations < 30)
         {
-            await TranslationService.TranslateViaLlmAsync(workingDirectory, false, textFileToSplits, hooks);
+            await TranslationService.TranslateViaLlmAsync(context.Config, corpus, false);
             PrintSeparator();
-            remaining = await UpdateCurrentTranslationLines(workingDirectory, false, textFileToSplits, hooks);
+            remaining = await UpdateCurrentTranslationLines(workingDirectory, corpus, false, context);
             PrintSeparator();
             iterations++;
         }
@@ -59,13 +65,18 @@ public static class TranslationWorkflow
 
     private static async Task<int> UpdateCurrentTranslationLines(string workingDirectory, bool resetFlag, TextFileToSplit[] textFileToSplits, GameHooks? hooks)
     {
-        var context = BuildTranslationRuleContext(workingDirectory, hooks);
+        var corpus = TranslationCorpus.Load(workingDirectory, textFileToSplits, copyMissingFromExport: false);
+        return await UpdateCurrentTranslationLines(workingDirectory, corpus, resetFlag, BuildTranslationRuleContext(workingDirectory, hooks));
+    }
+
+    private static async Task<int> UpdateCurrentTranslationLines(string workingDirectory, TranslationCorpus corpus, bool resetFlag, TranslationRuleContext context)
+    {
         var totalRecordsModded = 0;
         var logLines = new ConcurrentBag<string>();
 
-        await FileIteration.IterateTranslatedFilesInParallelAsync(workingDirectory, textFileToSplits, async (outputFile, textFile, fileLines) =>
+        await Parallel.ForEachAsync(corpus.Files, new ParallelOptions { MaxDegreeOfParallelism = FileIteration.MaxParallelFiles }, async (file, _) =>
         {
-            int recordsModded = await ProcessFileAsync(outputFile, textFile, fileLines, resetFlag, logLines, context);
+            int recordsModded = await ProcessFileAsync(file.OutputFile, file.TextFile, file.Lines, resetFlag, logLines, context);
             Interlocked.Add(ref totalRecordsModded, recordsModded);
         });
 
@@ -82,9 +93,7 @@ public static class TranslationWorkflow
     private static TranslationRuleContext BuildTranslationRuleContext(string workingDirectory, GameHooks? hooks)
     {
         var config = ConfigurationExtensions.GetConfiguration(workingDirectory, hooks);
-        var chineseCharRegex = new Regex(LineValidation.ChineseCharPattern, RegexOptions.Compiled);
-
-        return new TranslationRuleContext(config, chineseCharRegex);
+        return new TranslationRuleContext(config, LineValidation.ChineseCharPatternCompiled);
     }
 
     private static async Task<int> ProcessFileAsync(
@@ -96,11 +105,10 @@ public static class TranslationWorkflow
         TranslationRuleContext context)
     {
         int recordsModded = 0;
-        bool isFullFileRetrans = false;
 
         Parallel.ForEach(fileLines, line =>
         {
-            int lineModded = ProcessLine(line, textFile, isFullFileRetrans, resetFlag, logLines, context);
+            int lineModded = ProcessLine(line, textFile, resetFlag, logLines, context);
             Interlocked.Add(ref recordsModded, lineModded);
         });
 
@@ -117,7 +125,6 @@ public static class TranslationWorkflow
     private static int ProcessLine(
         TranslationLine line,
         TextFileToSplit textFile,
-        bool isFullFileRetrans,
         bool resetFlag,
         ConcurrentBag<string> logLines,
         TranslationRuleContext context)
@@ -129,13 +136,6 @@ public static class TranslationWorkflow
         {
             if (resetFlag)
                 split.ResetFlags(false);
-
-            if (isFullFileRetrans)
-            {
-                split.FlaggedForRetranslation = true;
-                modded++;
-                continue;
-            }
 
             if (UpdateSplit(logLines, line, split, textFile, context.Config, context.ChineseCharRegex, tokenReplacer))
                 modded++;
@@ -200,9 +200,6 @@ public static class TranslationWorkflow
 
         if (TryApplyGameSpecificRepair(logLines, split, textFile, config) is bool gameSpecificResult)
             return gameSpecificResult;
-
-        if (TryFlagAllCapsTranslation(split, preparedRaw))
-            return true;
 
         return ApplyTranslationRules(logLines, config, split, textFile, preparedRaw);
     }
@@ -371,39 +368,29 @@ public static class TranslationWorkflow
         if (!textFile.EnableGlossary)
             return false;
 
-        foreach (var manual in config.Runtime.ManualTranslations)
-        {
-            if (split.Text != manual.Raw)
-                continue;
-
-            if (split.Translated != manual.Result)
-            {
-                logLines.Add($"Manually Translated {textFile.Path} \n{split.Text}\n{split.Translated}");
-                split.Translated = LineValidation.CleanupLineBeforeSaving(LineValidation.PrepareResult(preparedRaw, manual.Result, config.Hooks, textFile, split.Split), split.Text, textFile, new StringTokenReplacer());
-                split.ResetFlags();
-                return true;
-            }
-
+        if (!ManualTranslationsByRaw(config).TryGetValue(split.Text, out var manual))
             return false;
-        }
 
-        return false;
+        if (split.Translated == manual.Result)
+            return false;
+
+        logLines.Add($"Manually Translated {textFile.Path} \n{split.Text}\n{split.Translated}");
+        split.Translated = LineValidation.CleanupLineBeforeSaving(LineValidation.PrepareResult(preparedRaw, manual.Result, config.Hooks, textFile, split.Split), split.Text, textFile, new StringTokenReplacer());
+        split.ResetFlags();
+        return true;
     }
 
-    private static bool TryFlagAllCapsTranslation(TranslationSplit split, string preparedRaw)
-    {
-        // things like "I..." flag this and its annoying
-        //if (!string.IsNullOrEmpty(split.Translated) 
-        //    && split.Translated.Length > 1
-        //    && split.Translated.ToUpper() == split.Translated)
-        //{
-        //    split.FlaggedForRetranslation = true;
-        //    split.FlaggedMistranslation = "All caps";
-        //    return true;
-        //}
+    private static readonly ConditionalWeakTable<List<GlossaryLine>, Dictionary<string, GlossaryLine>> ManualTranslationIndex = [];
 
-        return false;
-    }
+    /// <summary>First manual translation per raw text, built once per loaded config.</summary>
+    private static Dictionary<string, GlossaryLine> ManualTranslationsByRaw(LlmConfig config) =>
+        ManualTranslationIndex.GetValue(config.Runtime.ManualTranslations, manuals =>
+        {
+            var index = new Dictionary<string, GlossaryLine>();
+            foreach (var manual in manuals)
+                index.TryAdd(manual.Raw, manual);
+            return index;
+        });
 
     private static bool TryFlagEmptyTranslation(TranslationSplit split, string preparedRaw)
     {
@@ -487,8 +474,7 @@ public static class TranslationWorkflow
         // hallucination, missing ellipsis, missing required token, any game-specific
         // CustomColumnValidator, and the generic structural check. A new rule added there applies
         // here and to QualityReviewWorkflow's QC gate/rule-check without anything more to edit.
-        var translated2 = StringTokenReplacer.CleanTranslatedForApplyRules(split.Translated);
-        var ruleResult = EvaluateRules(config, modelConfig, preparedRaw, split.Text, translated2, textFile, split.Split);
+        var ruleResult = EvaluateRules(config, modelConfig, preparedRaw, split.Text, split.Translated, textFile, split.Split);
 
         if (ruleResult.MistranslatedGlossaryTerms.Count > 0)
         {
@@ -773,6 +759,16 @@ public static class TranslationWorkflow
     /// never asked for it - and no other glossary line mapping to the same Result is present in
     /// <paramref name="preparedRaw"/> to explain the occurrence.
     /// </summary>
+    private static readonly ConcurrentDictionary<string, Regex> WholeWordRegexCache = new();
+
+    /// <summary>
+    /// Case-insensitive whole-word matcher for a literal glossary term, cached per term. Lookarounds
+    /// rather than <c>\b</c> so a term starting/ending in punctuation (e.g. "Elder (Retired)") still
+    /// matches.
+    /// </summary>
+    private static Regex WholeWordRegex(string term) =>
+        WholeWordRegexCache.GetOrAdd(term, t => new Regex($@"(?<!\w){Regex.Escape(t)}(?!\w)", RegexOptions.IgnoreCase));
+
     private static bool IsGlossaryHallucination(GlossaryLine item, List<GlossaryLine> allGlossaryLines, string preparedRaw, string translated, TextFileToSplit textFile)
     {
         if (preparedRaw.Contains(item.Raw) || !translated.Contains(item.Result))
@@ -788,8 +784,7 @@ public static class TranslationWorkflow
             return false;
 
         // Regex matches on terms with ... match incorrectly
-        var wordPattern = $"\\b{item.Result}\\b";
-        if (!Regex.IsMatch(translated, wordPattern, RegexOptions.IgnoreCase))
+        if (!WholeWordRegex(item.Result).IsMatch(translated))
             return false;
 
         // Check for Alternatives
@@ -860,80 +855,68 @@ public static class TranslationWorkflow
 
     public static async Task ResetAllFlags(string workingDirectory, TextFileToSplit[] textFiles)
     {
-        var serializer = YamlHelper.CreateSerializer();
-
-        await FileIteration.IterateTranslatedFilesInParallelAsync(workingDirectory,
-            textFiles,
-            async (outputFile, textFileToTranslate, fileLines) =>
+        await MutateSplitsAsync(workingDirectory, textFiles, split =>
         {
-            foreach (var line in fileLines)
-                foreach (var split in line.Splits)
-                    // Reset all the retrans flags
-                    split.ResetFlags(false);
+            var hadFlags = split.FlaggedForRetranslation
+                || !string.IsNullOrEmpty(split.FlaggedMistranslation)
+                || !string.IsNullOrEmpty(split.FlaggedHallucination);
 
-            await FileHelper.WriteAllTextWithRetryAsync(outputFile, serializer.Serialize(fileLines));
-        });
+            // Reset all the retrans flags
+            split.ResetFlags(false);
+            return hadFlags;
+        }, logWrites: false);
     }
 
     public static async Task SetSplitAsInvalid(string workingDirectory,
         TextFileToSplit[] textFiles,
         List<string> badStrings)
     {
-        var serializer = YamlHelper.CreateSerializer();
-
-        await FileIteration.IterateTranslatedFilesInParallelAsync(workingDirectory,
-            textFiles,
-            async (outputFile, textFileToTranslate, fileLines) =>
-        {
-            var recordsModded = 0;
-
-            foreach (var line in fileLines)
-                foreach (var split in line.Splits)
-                {
-                    if (badStrings.Any(s => split.Text.Contains(s)))
-                    {
-                        split.FlaggedForRetranslation = true;
-                        split.FlaggedMistranslation = "Bad Character";
-                        recordsModded++;
-                    }
-                }
-
-            await FileHelper.WriteAllTextWithRetryAsync(outputFile, serializer.Serialize(fileLines));
-            Console.WriteLine($"Writing {recordsModded} records to {outputFile}");
-        });
+        await MutateSplitsAsync(workingDirectory, textFiles, split =>
+            badStrings.Any(s => split.Text.Contains(s)) && FlagAsBadCharacter(split));
     }
 
     public static async Task SetSplitAsInvalidByRegex(string workingDirectory,
         TextFileToSplit[] textFiles,
         List<string> badPatterns)
     {
-        var serializer = YamlHelper.CreateSerializer();
+        var regexes = badPatterns.Select(p => new Regex(p)).ToList();
 
-        await FileIteration.IterateTranslatedFilesInParallelAsync(workingDirectory,
-            textFiles,
-            async (outputFile, textFileToTranslate, fileLines) =>
-        {
-            var recordsModded = 0;
-
-            foreach (var line in fileLines)
-                foreach (var split in line.Splits)
-                {
-                    if (badPatterns.Any(p => Regex.IsMatch(split.Text, p)))
-                    {
-                        split.FlaggedForRetranslation = true;
-                        split.FlaggedMistranslation = "Bad Character";
-                        recordsModded++;
-                    }
-                }
-
-            await FileHelper.WriteAllTextWithRetryAsync(outputFile, serializer.Serialize(fileLines));
-            Console.WriteLine($"Writing {recordsModded} records to {outputFile}");
-        });
+        await MutateSplitsAsync(workingDirectory, textFiles, split =>
+            regexes.Any(r => r.IsMatch(split.Text)) && FlagAsBadCharacter(split));
     }
 
     public static async Task CleanUpSomeRegexes(string workingDirectory,
         TextFileToSplit[] textFiles,
         List<(string pattern, string replacement)> regex)
+    {
+        var replacements = regex.Select(r => (Regex: new Regex(r.pattern), r.replacement)).ToList();
+
+        await MutateSplitsAsync(workingDirectory, textFiles, split =>
+        {
+            if (!replacements.Any(r => r.Regex.IsMatch(split.Translated)))
+                return false;
+
+            var original = split.Translated;
+            foreach (var (pattern, replacement) in replacements)
+                split.Translated = pattern.Replace(split.Translated, replacement);
+
+            return split.Translated != original;
+        });
+    }
+
+    private static bool FlagAsBadCharacter(TranslationSplit split)
+    {
+        split.FlaggedForRetranslation = true;
+        split.FlaggedMistranslation = "Bad Character";
+        return true;
+    }
+
+    /// <summary>
+    /// Applies <paramref name="mutate"/> to every split of every converted file (files in parallel)
+    /// and writes back only the files where it reported a change.
+    /// </summary>
+    private static async Task MutateSplitsAsync(string workingDirectory, TextFileToSplit[] textFiles,
+        Func<TranslationSplit, bool> mutate, bool logWrites = true)
     {
         var serializer = YamlHelper.CreateSerializer();
 
@@ -945,22 +928,16 @@ public static class TranslationWorkflow
 
             foreach (var line in fileLines)
                 foreach (var split in line.Splits)
-                {
+                    if (mutate(split))
+                        recordsModded++;
 
-                    // Replace using pattern and replacement
-                    if (regex.Any(r => Regex.IsMatch(split.Translated, r.pattern)))
-                    {
-                        var original = split.Text;
-                        foreach (var (pattern, replacement) in regex)
-                        {
-                            split.Translated = Regex.Replace(split.Translated, pattern, replacement);
-                            recordsModded++;
-                        }
-                    }
-                }
+            if (recordsModded == 0)
+                return;
 
             await FileHelper.WriteAllTextWithRetryAsync(outputFile, serializer.Serialize(fileLines));
-            Console.WriteLine($"Writing {recordsModded} records to {outputFile}");
+
+            if (logWrites)
+                Console.WriteLine($"Writing {recordsModded} records to {outputFile}");
         });
     }
 }
