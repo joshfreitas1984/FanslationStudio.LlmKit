@@ -1,4 +1,5 @@
-﻿using System.Diagnostics.CodeAnalysis;
+﻿using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using System.Xml.Linq;
 using YamlDotNet.Core;
 using YamlDotNet.Serialization;
@@ -10,27 +11,28 @@ namespace FanslationStudio.LlmKit.Utility;
 
 public class YamlHelper
 {
-    public static ISerializer CreateSerializer()
-    {
-        return new SerializerBuilder()
-           .WithNamingConvention(CamelCaseNamingConvention.Instance)
-           .WithTypeInspector(inner => new DefaultExcludingTypeInspector(inner))
-           .Build();
-    }
+    // Built YamlDotNet serializers/deserializers are stateless and thread-safe, so one shared
+    // instance avoids redoing builder/type-inspector setup at every call site.
+    private static readonly ISerializer SharedSerializer = new SerializerBuilder()
+        .WithNamingConvention(CamelCaseNamingConvention.Instance)
+        .WithTypeInspector(inner => new DefaultExcludingTypeInspector(inner))
+        .Build();
 
-    public static IDeserializer CreateDeserializer()
-    {
-        return new DeserializerBuilder()
-            .WithNamingConvention(CamelCaseNamingConvention.Instance)
-            .IgnoreUnmatchedProperties()
-            .Build();
-    }
+    private static readonly IDeserializer SharedDeserializer = new DeserializerBuilder()
+        .WithNamingConvention(CamelCaseNamingConvention.Instance)
+        .IgnoreUnmatchedProperties()
+        .Build();
+
+    public static ISerializer CreateSerializer() => SharedSerializer;
+
+    public static IDeserializer CreateDeserializer() => SharedDeserializer;
 }
 
 public class DefaultExcludingTypeInspector : TypeInspectorSkeleton
 {
     private readonly ITypeInspector _innerTypeInspector;
-    private readonly Dictionary<Type, object> _defaultInstances = new Dictionary<Type, object>();
+    // Shared by every concurrent Serialize call on the cached serializer - must be thread-safe.
+    private readonly ConcurrentDictionary<Type, object> _defaultInstances = new();
 
     public DefaultExcludingTypeInspector(ITypeInspector innerTypeInspector)
     {

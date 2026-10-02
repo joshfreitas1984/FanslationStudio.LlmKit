@@ -6,6 +6,10 @@ namespace FanslationStudio.LlmKit.Utility;
 
 public static class LlmHelpers
 {
+    // JsonSerializerOptions caches type metadata per instance - allocating one per request (as
+    // before) rebuilt that cache on every LLM call. Compact output; the wire format needs no indent.
+    private static readonly JsonSerializerOptions RequestJsonOptions = new();
+
     public static object GenerateSystemPrompt(string? systemPrompt)
     {
         return new { role = "system", content = systemPrompt };
@@ -68,7 +72,7 @@ public static class LlmHelpers
                     options[param.Key] = param.Value;
             requestBody.options = options;
 
-            return JsonSerializer.Serialize(requestBody, new JsonSerializerOptions { WriteIndented = true });
+            return JsonSerializer.Serialize(requestBody, RequestJsonOptions);
         }
         else
         {

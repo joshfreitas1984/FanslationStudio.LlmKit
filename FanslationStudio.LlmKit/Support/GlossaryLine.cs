@@ -38,34 +38,45 @@ public class GlossaryLine
         Result = result;
     }
 
+    /// <summary>
+    /// Fenced block of glossary entries whose raw text appears in <paramref name="raw"/>, or
+    /// <see cref="string.Empty"/> when nothing matched - callers skip the glossary section entirely
+    /// in that case instead of sending an empty block.
+    /// </summary>
     public static string AppendPromptsFor(string raw, List<GlossaryLine> glossaryLines, string outputFile)
     {
-        var prompt = new StringBuilder();
-
-        prompt.AppendLine("```");
+        StringBuilder? prompt = null;
 
         foreach (var line in glossaryLines)
         {
-            //Exclusions and Targetted Glossary
-            if (line.OnlyOutputFiles.Count > 0 && !line.OnlyOutputFiles.Contains(outputFile))
-                continue;
-            else if (line.ExcludeOutputFiles.Count > 0 && line.ExcludeOutputFiles.Contains(outputFile))
+            if (!line.AppliesToFile(outputFile))
                 continue;
 
+            string? matched = null;
             if (raw.Contains(line.Raw))
-                prompt.AppendLine(ToPromptString(line.Raw, line.Result, line.AllowedAlternatives));
+                matched = line.Raw;
             else if (line.RawSimplified != string.Empty && raw.Contains(line.RawSimplified))
-                prompt.AppendLine(ToPromptString(line.RawSimplified, line.Result, line.AllowedAlternatives));
+                matched = line.RawSimplified;
             else if (line.RawTraditional != string.Empty && raw.Contains(line.RawTraditional))
-                prompt.AppendLine(ToPromptString(line.RawTraditional, line.Result, line.AllowedAlternatives));
+                matched = line.RawTraditional;
+
+            if (matched == null)
+                continue;
+
+            prompt ??= new StringBuilder().AppendLine("```");
+            prompt.AppendLine(ToPromptString(matched, line.Result, line.AllowedAlternatives));
         }
 
-        prompt.AppendLine("```");
+        return prompt == null ? string.Empty : prompt.AppendLine("```").ToString();
+    }
 
-        if (prompt.Length > 0)
-            return prompt.ToString();
-        else
-            return string.Empty;
+    /// <summary>Applies the "only"/"exclude" output-file scoping for this entry.</summary>
+    public bool AppliesToFile(string outputFile)
+    {
+        if (OnlyOutputFiles.Count > 0 && !OnlyOutputFiles.Contains(outputFile))
+            return false;
+
+        return ExcludeOutputFiles.Count == 0 || !ExcludeOutputFiles.Contains(outputFile);
     }
 
     public static string ToPromptString(string raw, string translated, List<string>? alternatives)

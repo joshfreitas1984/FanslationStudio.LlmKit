@@ -27,6 +27,13 @@ public class FileIteration
         }
     }
 
+    /// <summary>
+    /// Upper bound on files loaded/processed at once - every file's whole deserialized line list
+    /// is held in memory while its action runs, so an unbounded fan-out held the entire corpus at
+    /// once on large projects.
+    /// </summary>
+    public static int MaxParallelFiles { get; set; } = Math.Max(2, Environment.ProcessorCount);
+
     public static async Task IterateTranslatedFilesInParallelAsync(string workingDirectory,
         TextFileToSplit[] textFiles,
         Func<string, TextFileToSplit, List<TranslationLine>, Task> performActionAsync)
@@ -34,8 +41,9 @@ public class FileIteration
         var deserializer = YamlHelper.CreateDeserializer();
         string outputPath = $"{workingDirectory}/Converted";
 
-        var tasks = textFiles
-            .Select(async textFileToTranslate =>
+        await Parallel.ForEachAsync(textFiles,
+            new ParallelOptions { MaxDegreeOfParallelism = MaxParallelFiles },
+            async (textFileToTranslate, _) =>
             {
                 var outputFile = $"{outputPath}/{textFileToTranslate.Path}.yaml";
 
@@ -48,7 +56,5 @@ public class FileIteration
                 if (performActionAsync != null)
                     await performActionAsync(outputFile, textFileToTranslate, fileLines);
             });
-
-        await Task.WhenAll(tasks);
     }
 }

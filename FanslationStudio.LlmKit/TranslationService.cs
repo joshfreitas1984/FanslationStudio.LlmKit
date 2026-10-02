@@ -12,7 +12,7 @@ using YamlDotNet.Serialization;
 
 namespace FanslationStudio.LlmKit;
 
-public static class TranslationService
+public static partial class TranslationService
 {
     public const int BatchlessLog = 25;
     public const int BatchlessBuffer = 25;
@@ -1434,9 +1434,13 @@ public static class TranslationService
 
         if (splitFile.EnableGlossary)
         {
-            basePrompt.AppendLine("");
-            basePrompt.AppendLine(config.Prompts["BaseGlossaryPrompt"]);
-            basePrompt.AppendLine(GlossaryLine.AppendPromptsFor(raw, glossaryLines, splitFile.Path));
+            var glossaryPrompt = GlossaryLine.AppendPromptsFor(raw, glossaryLines, splitFile.Path);
+            if (glossaryPrompt.Length > 0)
+            {
+                basePrompt.AppendLine("");
+                basePrompt.AppendLine(config.Prompts["BaseGlossaryPrompt"]);
+                basePrompt.AppendLine(glossaryPrompt);
+            }
         }
 
         if (splitFile.EnableBasePrompts)
@@ -1491,41 +1495,51 @@ public static class TranslationService
         // Generate based on what would have been created
         var requestData = LlmHelpers.GenerateLlmRequestData(modelToUse, messages, enableThinking);
 
-        // Send correction & Get result
-        HttpContent content = new StringContent(requestData, Encoding.UTF8, "application/json");
-
         try
         {
-            // Set Bearer token if required and not already set
-            var requiresApiKey = modelToUse.ApiKeyRequired ?? false;
+            // A fresh HttpRequestMessage per send - the HttpClient is shared by every concurrent
+            // worker, so auth must never be set via its DefaultRequestHeaders (not thread-safe, and
+            // a model that needs no key would otherwise race one that does).
+            HttpRequestMessage BuildRequest()
+            {
+                var request = new HttpRequestMessage(HttpMethod.Post, modelToUse.Url)
+                {
+                    Content = new StringContent(requestData, Encoding.UTF8, "application/json")
+                };
 
-            if (requiresApiKey)
-                client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", modelToUse.ApiKey);
-            else
-                client.DefaultRequestHeaders.Authorization = null;
+                if (modelToUse.ApiKeyRequired ?? false)
+                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", modelToUse.ApiKey);
 
-            HttpResponseMessage response = await client.PostAsync(modelToUse.Url, content);
-            string responseBody = await response.Content.ReadAsStringAsync();
+                return request;
+            }
 
-            if ((int)response.StatusCode == 429)
+            async Task<(int Status, string? Reason, string Body)> SendAsync()
+            {
+                using var request = BuildRequest();
+                using var response = await client.SendAsync(request);
+                return ((int)response.StatusCode, response.ReasonPhrase, await response.Content.ReadAsStringAsync());
+            }
+
+            var (status, reasonPhrase, responseBody) = await SendAsync();
+
+            if (status == 429)
             {
                 // Too Many Requests - simple exponential backoff
-                int retryDelay = 5000; // start with 2 seconds
-                int maxDelay = 60000; // max 30 seconds
+                int retryDelay = 5000;
+                int maxDelay = 60000;
                 int retries = 0;
                 var backoffStopwatch = Stopwatch.StartNew();
-                while ((int)response.StatusCode == 429 && retries < 5)
+                while (status == 429 && retries < 5)
                 {
                     Console.WriteLine($"Received 429 Too Many Requests. Backing off attempt {retries + 1}/5, waiting {retryDelay}ms...");
                     await Task.Delay(retryDelay);
                     retryDelay = Math.Min(retryDelay * 2, maxDelay);
-                    response = await client.PostAsync(modelToUse.Url, content);
-                    responseBody = await response.Content.ReadAsStringAsync();
+                    (status, reasonPhrase, responseBody) = await SendAsync();
                     retries++;
                 }
 
                 if (retries > 0)
-                    Console.WriteLine($"429 backoff finished after {retries} attempt(s), {backoffStopwatch.ElapsedMilliseconds}ms blocked, final status {(int)response.StatusCode}.");
+                    Console.WriteLine($"429 backoff finished after {retries} attempt(s), {backoffStopwatch.ElapsedMilliseconds}ms blocked, final status {status}.");
             }
 
             // EnsureSuccessStatusCode()'s own message is just "... 400 (Bad Request)" with no body -
@@ -1533,12 +1547,12 @@ public static class TranslationService
             // responseBody, which would otherwise be read and immediately discarded. Every caller
             // catches HttpRequestException and logs e.Message, so folding the body in here is the
             // difference between a diagnosable error and a guessing game.
-            if (!response.IsSuccessStatusCode)
-                throw new HttpRequestException($"Response status code does not indicate success: {(int)response.StatusCode} ({response.ReasonPhrase}). Body: {responseBody}");
+            if (status is < 200 or > 299)
+                throw new HttpRequestException($"Response status code does not indicate success: {status} ({reasonPhrase}). Body: {responseBody}");
 
             using var jsonDoc = JsonDocument.Parse(responseBody);
 
-            var isOpenAiShape = responseBody.Contains("\"choices\":");
+            var isOpenAiShape = jsonDoc.RootElement.TryGetProperty("choices", out _);
             var messageElement = isOpenAiShape
                 ? jsonDoc.RootElement.GetProperty("choices")[0].GetProperty("message")
                 : jsonDoc.RootElement.GetProperty("message");
@@ -1594,7 +1608,9 @@ public static class TranslationService
         if (string.IsNullOrEmpty(input))
             return input;
 
-        // Regex to remove <think>...</think> tags and their content, including multiline
-        return Regex.Replace(input, @"<think>.*?</think>\n\n", string.Empty, RegexOptions.Singleline | RegexOptions.IgnoreCase);
+        return ThinkTagsRegex().Replace(input, string.Empty);
     }
+
+    [GeneratedRegex(@"<think>.*?</think>\n\n", RegexOptions.Singleline | RegexOptions.IgnoreCase)]
+    private static partial Regex ThinkTagsRegex();
 }

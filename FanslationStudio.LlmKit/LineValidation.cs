@@ -16,6 +16,15 @@ public static partial class LineValidation
     // Compiled / source-generated regexes — one instance shared across all calls
     public static Regex ChineseCharPatternCompiled => ChineseCharRegex();
 
+    /// <summary>True if <paramref name="input"/> contains any CJK unified ideograph. Prefer this
+    /// over <c>Regex.IsMatch(input, ChineseCharPattern)</c> - same answer, without the
+    /// <c>.*</c> wrappers' backtracking or the static Regex cache lookup.</summary>
+    public static bool ContainsCjk(string? input) => !string.IsNullOrEmpty(input) && CjkCharRegex().IsMatch(input);
+
+    /// <summary>True if <paramref name="input"/> contains a <c>{...}</c> placeholder whose name
+    /// is CJK text (see <see cref="ChinesePlaceholderPattern"/>).</summary>
+    public static bool ContainsChinesePlaceholder(string? input) => !string.IsNullOrEmpty(input) && ChinesePlaceholderRegex().IsMatch(input);
+
     // LLM meta-commentary/instruction-leak signatures - the model narrating its own
     // translation process instead of just returning the translation   
     private static readonly string[] InvalidPhrases =
@@ -166,7 +175,7 @@ public static partial class LineValidation
                     result = result.Replace(" ", "");
                 else if (textFile.NameCleanupRoutines2)
                 {
-                    if (!ChineseCharRegex().IsMatch(input))
+                    if (!CjkCharRegex().IsMatch(input))
                     {
                         var splits = result.Split(" ", StringSplitOptions.RemoveEmptyEntries);
                         switch (splits.Length)
@@ -436,7 +445,7 @@ public static partial class LineValidation
             correctionPrompts.AddPromptWithValues(config, "CorrectAdditionalPrompt", "\\n");
         }
 
-        if (ChineseCharRegex().IsMatch(result) && !ChinesePlaceholderRegex().IsMatch(result))
+        if (CjkCharRegex().IsMatch(result) && !ChinesePlaceholderRegex().IsMatch(result))
         {
             response = false;
             correctionPrompts.AddPromptWithValues(config, "CorrectChinesePrompt");
@@ -803,6 +812,9 @@ public static partial class LineValidation
     [GeneratedRegex(ChineseCharPattern)]
     private static partial Regex ChineseCharRegex();
 
+    [GeneratedRegex(@"\p{IsCJKUnifiedIdeographs}")]
+    private static partial Regex CjkCharRegex();
+
     [GeneratedRegex(ChinesePlaceholderPattern)]
     private static partial Regex ChinesePlaceholderRegex();
 
@@ -811,6 +823,9 @@ public static partial class LineValidation
 
     [GeneratedRegex(@"(<[^>]+>).*(</[^>]+>)")]
     private static partial Regex EncaseColorTagRegex();
+
+    [GeneratedRegex(@"[。！？!?.]\s*\n")]
+    private static partial Regex StructuralNewlineBreakRegex();
 
     [GeneratedRegex(@"\d")]
     private static partial Regex DigitRegex();
