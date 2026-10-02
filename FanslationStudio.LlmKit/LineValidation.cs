@@ -546,10 +546,10 @@ public static partial class LineValidation
     private static readonly (string WideChars, string AcceptableInResult)[] WideBracketFamilies =
     [
         ("（）", "（）()"),
-        ("【】［］〔〕", "【】［］〔〕[]"),
-        ("「」『』", "「」『』\"'“”‘’"),
-        // 《》 (book-title marks) deliberately not checked: idiomatic English drops them
-        // ("the Taoist classic Zhuangzi"), so requiring them forces awkward translations.
+        //("【】［］〔〕", "【】［］〔〕[]"),
+        // 《》 (book-title marks) and 「」『』 (corner brackets) deliberately not checked: idiomatic English
+        // drops them ("the Taoist classic Zhuangzi", Command: Verbal Assault), so requiring them forces
+        // awkward translations and endless retries.
     ];
 
     /// <summary>

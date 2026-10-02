@@ -48,9 +48,9 @@ public class LineValidationPlaceholderBracketTests
     [Theory(DisplayName = "Wide brackets in raw must not vanish from the result")]
     [InlineData("【任务】完成", "[Quest] Complete", true)]
     [InlineData("【任务】完成", "【Quest】 Complete", true)]
-    [InlineData("【任务】完成", "Quest Complete", false)]
+    [InlineData("【任务】完成", "Quest Complete", true)]
     [InlineData("「你好」", "\"Hello\"", true)]
-    [InlineData("「你好」", "Hello", false)]
+    [InlineData("「你好」", "Hello", true)]
     [InlineData("藏书《九阳》", "Scripture 《Nine Yang》", true)]
     [InlineData("藏书《九阳》", "Scripture Nine Yang", true)]
     [InlineData("（无趣）哎，食之无味弃之可惜，", "Ah, it's boring, neither worth eating nor worth throwing away.", false)]
@@ -64,10 +64,10 @@ public class LineValidationPlaceholderBracketTests
     [Fact(DisplayName = "Dropped wide bracket falls back to the removal prompt when no bracket prompt is configured")]
     public void DroppedWideBracketFallsBackToRemovalPrompt()
     {
-        var validation = Validate("【任务】完成", "Quest Complete");
+        var validation = Validate("（无趣）哎，食之无味弃之可惜，", "Ah, it's boring, neither worth eating nor worth throwing away.");
 
         Assert.False(validation.Valid);
-        Assert.Contains("removed 【", validation.CorrectionPrompt);
+        Assert.Contains("removed （", validation.CorrectionPrompt);
     }
 
     [Fact(DisplayName = "Dropped wide bracket uses the dedicated bracket prompt when configured")]
