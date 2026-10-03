@@ -28,13 +28,22 @@ public static class QcVerificationResponseParser
         if (!QcDefectCategoryTokens.TryParseList(unresolvedMatch.Groups[1].Value, out var unresolved))
             return new QcVerificationResult(false, [], [], 0);
 
-        // UNRESOLVED must be a subset of what was actually confirmed - a verifier naming a category
-        // that was never part of CONFIRMED DEFECTS is a protocol violation, not a real signal.
-        if (unresolved.Any(category => !confirmedDefects.Contains(category)))
-            return new QcVerificationResult(false, [], [], 0);
-
         if (!QcDefectCategoryTokens.TryParseList(newDefectsMatch.Groups[1].Value, out var newDefects))
             return new QcVerificationResult(false, [], [], 0);
+
+        // UNRESOLVED must be a subset of what was actually confirmed - a verifier naming a category
+        // that was never part of CONFIRMED DEFECTS is a protocol violation, not a real signal. With
+        // an EVIDENCE line (BaseQualityReviewVerificationEvidencePrompt) the claim carries a quote
+        // FilterByEvidence checks, so it is kept as a new defect instead of discarding a clear rejection.
+        var unconfirmed = unresolved.Where(category => !confirmedDefects.Contains(category)).ToList();
+        if (unconfirmed.Count > 0)
+        {
+            if (!EvidenceLineRegex.IsMatch(response))
+                return new QcVerificationResult(false, [], [], 0);
+
+            unresolved = unresolved.Except(unconfirmed).ToList();
+            newDefects = newDefects.Concat(unconfirmed).Distinct().ToList();
+        }
 
         // \d+ can still overflow int - a run of digits that long is far past the 0-100 scale anyway.
         var score = int.TryParse(scoreMatch.Groups[1].Value, out var parsedScore) ? Math.Clamp(parsedScore, 0, 100) : 100;

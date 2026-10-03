@@ -69,6 +69,20 @@ public sealed class QcVerificationEvidenceTests
         Assert.Equal(85, filtered.Score);
     }
 
+    [Fact(DisplayName = "With EVIDENCE, an unconfirmed UNRESOLVED category is a new defect, not a parse failure")]
+    public void Parse_UnconfirmedUnresolvedWithEvidence_BecomesNewDefect()
+    {
+        // Real reply from the gold set's MEANING_REVERSAL row (confirmed: OTHER_NAMED_DEFECT), 2026-10-04.
+        var result = QcVerificationResponseParser.Parse(
+            "UNRESOLVED: MEANING_REVERSAL\nNEW_DEFECTS: NONE\nEVIDENCE: MEANING_REVERSAL: \"放我顾师弟走\"\nSCORE: 45",
+            [QcDefectCategory.OtherNamedDefect]);
+
+        Assert.True(result.Success);
+        Assert.Empty(result.UnresolvedDefects);
+        Assert.Equal([QcDefectCategory.MeaningReversal], result.NewDefects);
+        Assert.False(QcVerificationResponseParser.FilterByEvidence(result, "大！当！家！放我顾师弟走，饶你不死。", "...").Accepted);
+    }
+
     [Fact(DisplayName = "A claim with no evidence entry is kept")]
     public void FilterByEvidence_KeepsClaimWithoutEntry()
     {
