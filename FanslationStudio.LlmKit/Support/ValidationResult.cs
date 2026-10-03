@@ -8,6 +8,13 @@ public class ValidationResult
     public bool RequiresSentenceBySentenceCorrection = false;
 
     /// <summary>
+    /// Descriptions of failed checks that add no <see cref="CorrectionPrompt"/> (e.g. an invalid
+    /// phrase or a length blow-up), so a caller reporting why a candidate failed never gets a blank
+    /// reason. Diagnostic-only - never sent to a model.
+    /// </summary>
+    public List<string> SilentFailures = new();
+
+    /// <summary>
     /// Set by <see cref="FanslationStudio.LlmKit.TranslationService.TranslateSplitAsync"/> when a
     /// split still failed after its normal <see cref="Configuration.LlmConfig.RetryCount"/> budget
     /// was exhausted and it was re-attempted against

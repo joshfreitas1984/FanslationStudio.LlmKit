@@ -13,7 +13,8 @@ public sealed record QcVerificationResult(
     bool Success,
     IReadOnlyList<QcDefectCategory> UnresolvedDefects,
     IReadOnlyList<QcDefectCategory> NewDefects,
-    int Score)
+    int Score,
+    IReadOnlyDictionary<QcDefectCategory, string>? Evidence = null)
 {
     public bool AllResolved => UnresolvedDefects.Count == 0;
     public bool IntroducedNewDefect => NewDefects.Count > 0;

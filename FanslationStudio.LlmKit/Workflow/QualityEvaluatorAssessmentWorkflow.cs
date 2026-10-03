@@ -86,7 +86,7 @@ public static class QualityEvaluatorAssessmentWorkflow
     /// model-swap cost (measured separately - see the sibling swap-cost benchmark) and mirrors the
     /// "batch by phase" production shape this whole test exists to justify or rule out.
     /// </summary>
-    private static async Task RunCorrectionGenerationComparisonAsync(
+    internal static async Task RunCorrectionGenerationComparisonAsync(
         LlmConfig config,
         HttpClient client,
         QualityEvaluatorAssessmentConfig settings,
@@ -151,74 +151,51 @@ public static class QualityEvaluatorAssessmentWorkflow
                     result.GenerationElapsedMilliseconds = stopwatch.ElapsedMilliseconds;
                     if (result.ProposedCorrection == null)
                         result.ActualCorrectionSafety = "NoCorrectionProduced";
-                    WriteYamlAtomically(resultPath, report);
-                }
-
-                config.Runtime.Models = new Dictionary<string, ModelExecutionConfig> { [settings.JudgeModelName] = judgeModel };
-                foreach (var result in report.Results.Where(r => r.ProposedCorrection != null && r.ActualCorrectionSafety == null))
-                {
-                    var (verdict, elapsedMilliseconds) = await JudgeCorrectionAsync(config, judgeModel, client, result);
-                    result.VerificationElapsedMilliseconds = elapsedMilliseconds;
-                    ApplyJudgeVerdict(result, verdict, config.QualityReview.MinAcceptableScore);
-                    result.InitialCorrectionSafety = result.ActualCorrectionSafety;
-                    WriteYamlAtomically(resultPath, report);
-                }
-
-                // Mirrors GetLlmVerdictAsync's calls 4/5 repair loop: a row verify rejected goes back
-                // through the SAME corrector model's GetCorrectionRepairAsync (never the judge - a
-                // model never authors its own grade), then the judge re-verifies against the FULL
-                // original confirmed set again (never a shrinking list), up to MaxScoreRepairIterations
-                // times. Each iteration is its own two-phase pass (repair with only the corrector
-                // resident, then reverify with only the judge resident) so repeated iterations still
-                // cost ~2 swaps each for the WHOLE batch, not per row - see the Twenty-second round's
-                // swap-cost finding this design depends on.
-                if (settings.EnableRepairLoop)
-                {
-                    var maxRepairAttempts = Math.Max(0, config.QualityReview.MaxScoreRepairIterations);
-                    for (var attempt = 0; attempt < maxRepairAttempts; attempt++)
+                    else
                     {
-                        var needsRepair = report.Results.Where(r => r.ActualCorrectionSafety == "Harmful" && r.UnresolvedDefectCategories.Count > 0).ToList();
-                        if (needsRepair.Count == 0)
-                            break;
-                        Console.WriteLine($"Correction generation: {correctorModelName} repair attempt {attempt + 1}/{maxRepairAttempts} for {needsRepair.Count} row(s)");
-
-                        config.Runtime.Models = new Dictionary<string, ModelExecutionConfig> { [correctorModelName] = correctorModel };
-                        foreach (var result in needsRepair)
-                        {
-                            var sample = MaskSample(config, result.Source, result.CurrentTranslation);
-                            var maskedPrevious = sample.Mask(result.ProposedCorrection!);
-
-                            var targetDefects = result.UnresolvedDefectCategories.Select(ParseCategory).Distinct().ToList();
-                            var stopwatch = Stopwatch.StartNew();
-                            var repaired = await QualityReviewWorkflow.GetCorrectionRepairAsync(
-                                config, correctorModel, client, result.SampleId, sample.MaskedRaw, sample.MaskedTranslated,
-                                sample.GlossaryPrompt, targetDefects, maskedPrevious, null);
-                            stopwatch.Stop();
-                            result.RepairAttemptsUsed++;
-                            result.RepairElapsedMilliseconds = (result.RepairElapsedMilliseconds ?? 0) + stopwatch.ElapsedMilliseconds;
-                            if (repaired == null)
-                                // Corrector couldn't improve on the previous attempt - same as
-                                // production, stop repairing this row and keep the last verified
-                                // candidate/verdict (still Harmful) as final. Clearing
-                                // UnresolvedDefectCategories (rather than removing a dictionary
-                                // entry) is what excludes it from the next attempt's needsRepair
-                                // filter, and survives a crash/resume since it's persisted.
-                                result.UnresolvedDefectCategories = [];
-                            else
-                                result.ProposedCorrection = repaired;
-                            WriteYamlAtomically(resultPath, report);
-                        }
-
-                        config.Runtime.Models = new Dictionary<string, ModelExecutionConfig> { [settings.JudgeModelName] = judgeModel };
-                        foreach (var result in needsRepair.Where(r => r.UnresolvedDefectCategories.Count > 0))
-                        {
-                            var (verdict, elapsedMilliseconds) = await JudgeCorrectionAsync(config, judgeModel, client, result);
-                            result.VerificationElapsedMilliseconds += elapsedMilliseconds;
-                            ApplyJudgeVerdict(result, verdict, config.QualityReview.MinAcceptableScore);
-                            WriteYamlAtomically(resultPath, report);
-                        }
+                        result.GateFailure = CheckGate(config, correctorModel, result);
+                        if (result.GateFailure != null)
+                            result.InitialCorrectionSafety = RejectedByGate;
                     }
+                    WriteYamlAtomically(resultPath, report);
                 }
+
+                // Mirrors QualityReviewConfig.PreVerificationGateEnabled: a draft the validation
+                // gate rejects is never judged - it is repaired against the gate's reason below, or
+                // (no repair loop / budget) recorded as RejectedByGate, which production's final
+                // gate would do too.
+                await JudgePendingAsync(config, client, settings.JudgeModelName, judgeModel, report, resultPath, report.Results, recordInitial: true);
+
+                // Mirrors GetLlmVerdictAsync's gate/verify/repair loop: a row the gate or the judge
+                // rejected goes back through the SAME corrector model's GetCorrectionRepairAsync
+                // (never the judge - a model never authors its own grade) with the gate's reason or
+                // the judge's evidence quotes, then through the gate and the judge again against
+                // the FULL original confirmed set, until RepairAttemptsUsed reaches
+                // MaxScoreRepairIterations. A repair that returns NONE or the same text stops the
+                // row. Each iteration is a two-phase pass (repair with only the corrector resident,
+                // then judge with only the judge resident) so repeated iterations still cost ~2
+                // swaps for the WHOLE batch, not per row - see the Twenty-second round's swap-cost
+                // finding this design depends on.
+                var maxRepairAttempts = settings.EnableRepairLoop ? Math.Max(0, config.QualityReview.MaxScoreRepairIterations) : 0;
+                for (var attempt = 0; attempt < maxRepairAttempts; attempt++)
+                {
+                    var needsRepair = report.Results.Where(r => r.RepairAttemptsUsed < maxRepairAttempts && NeedsRepair(r)).ToList();
+                    if (needsRepair.Count == 0)
+                        break;
+                    Console.WriteLine($"Correction generation: {correctorModelName} repair attempt {attempt + 1}/{maxRepairAttempts} for {needsRepair.Count} row(s)");
+
+                    config.Runtime.Models = new Dictionary<string, ModelExecutionConfig> { [correctorModelName] = correctorModel };
+                    foreach (var result in needsRepair)
+                    {
+                        await RepairAsync(config, client, correctorModel, result);
+                        WriteYamlAtomically(resultPath, report);
+                    }
+
+                    await JudgePendingAsync(config, client, settings.JudgeModelName, judgeModel, report, resultPath, needsRepair, recordInitial: false);
+                }
+
+                foreach (var result in report.Results.Where(r => r.ActualCorrectionSafety == null && r.GateFailure != null))
+                    result.ActualCorrectionSafety = RejectedByGate;
 
                 report.Status = "completed";
                 report.CompletedAtUtc = DateTime.UtcNow;
@@ -293,9 +270,100 @@ public static class QualityEvaluatorAssessmentWorkflow
         result.ParseSuccess = verdict.Success;
         result.VerificationScore = verdict.Score;
         result.ActualCorrectionSafety = ClassifyCorrectionSafety(verdict, minAcceptableScore);
-        result.UnresolvedDefectCategories = result.ActualCorrectionSafety == "Harmful"
-            ? verdict.UnresolvedDefects.Concat(verdict.NewDefects).Distinct().Select(c => c.ToString()).ToList()
+        var toFix = result.ActualCorrectionSafety == "Harmful"
+            ? verdict.UnresolvedDefects.Concat(verdict.NewDefects).Distinct().ToList()
             : [];
+        result.UnresolvedDefectCategories = toFix.Select(QcDefectCategoryTokens.ToToken).ToList();
+        result.VerifierEvidence = QualityReviewWorkflow.FormatVerifierEvidence(verdict, toFix);
+    }
+
+    /// <summary>A gold row's outcome when its draft fails the validation gate and is never repaired into a passing one.</summary>
+    internal const string RejectedByGate = "RejectedByGate";
+
+    /// <summary>
+    /// Bump when the correction-generation pipeline changes what a row's result means, so a saved
+    /// Results.yaml from the old pipeline is discarded instead of resumed or reported as current.
+    /// 2: pre-verification gate, evidence-guided repairs, no-op repair stop, wire-token target categories.
+    /// </summary>
+    internal const int CorrectionGenerationPipelineVersion = 2;
+
+    /// <summary>Gold rows have no output file; rule checks see an empty-path CSV file, as glossary scoping does in <see cref="MaskSample"/>.</summary>
+    private static readonly TextFileToSplit GoldTextFile = new() { Path = string.Empty, TextFileType = TextFileType.RawCsv };
+
+    /// <summary>The production pre-verification gate (<see cref="QualityReviewWorkflow.BuildCandidateValidator"/>) on <paramref name="result"/>'s current draft.</summary>
+    private static string? CheckGate(LlmConfig config, ModelExecutionConfig model, CorrectionGenerationResult result)
+    {
+        var sample = MaskSample(config, result.Source, result.CurrentTranslation);
+        var validator = QualityReviewWorkflow.BuildCandidateValidator(
+            config, model, result.Source, result.CurrentTranslation, sample.TokenReplacer, GoldTextFile, 0);
+        return validator?.Invoke(sample.Mask(result.ProposedCorrection!));
+    }
+
+    /// <summary>A gate failure with an actionable reason, or a judge rejection naming what to fix.</summary>
+    private static bool NeedsRepair(CorrectionGenerationResult result) =>
+        result.ActualCorrectionSafety == null && !string.IsNullOrWhiteSpace(result.GateFailure)
+        || result.ActualCorrectionSafety == "Harmful" && result.UnresolvedDefectCategories.Count > 0;
+
+    /// <summary>
+    /// One repair call for <paramref name="result"/>: against the gate's reason when the draft failed
+    /// the gate (all confirmed categories as targets), otherwise against the judge's unresolved/new
+    /// categories and evidence. A NONE or unchanged answer ends the row's repairs, exactly as in
+    /// <see cref="QualityReviewWorkflow.GetLlmVerdictAsync"/>; a new draft is re-gated and left unjudged.
+    /// </summary>
+    private static async Task RepairAsync(LlmConfig config, HttpClient client, ModelExecutionConfig correctorModel, CorrectionGenerationResult result)
+    {
+        var sample = MaskSample(config, result.Source, result.CurrentTranslation);
+        var maskedPrevious = sample.Mask(result.ProposedCorrection!);
+        var gateFailure = result.GateFailure;
+        var targetDefects = gateFailure != null
+            ? result.ConfirmedDefectCategories.Select(ParseCategory).Distinct().ToList()
+            : result.UnresolvedDefectCategories.Select(QcDefectCategoryTokens.Parse).Distinct().ToList();
+
+        var stopwatch = Stopwatch.StartNew();
+        var repaired = await QualityReviewWorkflow.GetCorrectionRepairAsync(
+            config, correctorModel, client, result.SampleId, sample.MaskedRaw, sample.MaskedTranslated,
+            sample.GlossaryPrompt, targetDefects, maskedPrevious, null,
+            ruleCheckFailure: gateFailure, verifierEvidence: gateFailure == null ? result.VerifierEvidence : null);
+        stopwatch.Stop();
+        result.RepairAttemptsUsed++;
+        result.RepairElapsedMilliseconds = (result.RepairElapsedMilliseconds ?? 0) + stopwatch.ElapsedMilliseconds;
+
+        if (repaired == null || string.Equals(repaired, maskedPrevious, StringComparison.Ordinal))
+        {
+            // Nothing further to attempt: a gate failure stays one (finalized as RejectedByGate after
+            // the loop); a judged row keeps its Harmful verdict and leaves the repair queue.
+            if (gateFailure != null)
+                result.ActualCorrectionSafety = RejectedByGate;
+            result.UnresolvedDefectCategories = [];
+            return;
+        }
+
+        result.ProposedCorrection = repaired;
+        result.ActualCorrectionSafety = null;
+        result.UnresolvedDefectCategories = [];
+        result.VerifierEvidence = null;
+        result.GateFailure = CheckGate(config, correctorModel, result);
+    }
+
+    /// <summary>
+    /// Judges every row in <paramref name="rows"/> that has a gate-passing, not-yet-judged draft, with
+    /// only the judge model resident. <paramref name="recordInitial"/> marks the first pass, whose
+    /// outcome is kept as <see cref="CorrectionGenerationResult.InitialCorrectionSafety"/>.
+    /// </summary>
+    private static async Task JudgePendingAsync(
+        LlmConfig config, HttpClient client, string judgeModelName, ModelExecutionConfig judgeModel,
+        CorrectionGenerationReportFile report, string resultPath, IEnumerable<CorrectionGenerationResult> rows, bool recordInitial)
+    {
+        config.Runtime.Models = new Dictionary<string, ModelExecutionConfig> { [judgeModelName] = judgeModel };
+        foreach (var result in rows.Where(r => r.ProposedCorrection != null && r.ActualCorrectionSafety == null && r.GateFailure == null))
+        {
+            var (verdict, elapsedMilliseconds) = await JudgeCorrectionAsync(config, judgeModel, client, result);
+            result.VerificationElapsedMilliseconds = (result.VerificationElapsedMilliseconds ?? 0) + elapsedMilliseconds;
+            ApplyJudgeVerdict(result, verdict, config.QualityReview.MinAcceptableScore);
+            if (recordInitial && result.InitialCorrectionSafety == null)
+                result.InitialCorrectionSafety = result.ActualCorrectionSafety;
+            WriteYamlAtomically(resultPath, report);
+        }
     }
 
     /// <summary>Unscored (no parseable verdict), Harmful (rejected, or accepted below
@@ -358,6 +426,7 @@ public static class QualityEvaluatorAssessmentWorkflow
                 && existing.CorrectorModelName == correctorModelName
                 && existing.JudgeModelName == judgeModelName
                 && existing.GoldSetFingerprint == fingerprint
+                && existing.PipelineVersion == CorrectionGenerationPipelineVersion
                 && existing.Results.Count == pool.Count)
             {
                 return existing;
@@ -368,6 +437,7 @@ public static class QualityEvaluatorAssessmentWorkflow
             CorrectorModelName = correctorModelName,
             JudgeModelName = judgeModelName,
             GoldSetFingerprint = fingerprint,
+            PipelineVersion = CorrectionGenerationPipelineVersion,
             Results = pool.Select(item => new CorrectionGenerationResult
             {
                 SampleId = item.SampleId,
@@ -912,8 +982,18 @@ public static class QualityEvaluatorAssessmentWorkflow
         public int? VerificationScore { get; set; }
         public long? VerificationElapsedMilliseconds { get; set; }
 
-        /// <summary>Safe/Harmful/Unscored/NoCorrectionProduced, or null while phase B hasn't run yet.</summary>
+        /// <summary>Safe/Harmful/Unscored/NoCorrectionProduced/RejectedByGate, or null while not yet judged.</summary>
         public string? ActualCorrectionSafety { get; set; }
+
+        /// <summary>
+        /// The validation gate's reason for rejecting the current draft (see
+        /// <see cref="QualityReviewConfig.PreVerificationGateEnabled"/>), or null when it passes. Persisted
+        /// so a resumed run knows which rows still need a gate repair instead of a judge call.
+        /// </summary>
+        public string? GateFailure { get; set; }
+
+        /// <summary>The judge's evidence quotes for <see cref="UnresolvedDefectCategories"/>, sent to the next repair.</summary>
+        public string? VerifierEvidence { get; set; }
 
         /// <summary>
         /// The FIRST verify call's outcome, captured before any repair loop runs (only meaningfully
@@ -942,6 +1022,10 @@ public static class QualityEvaluatorAssessmentWorkflow
         public string JudgeModelName { get; set; } = string.Empty;
         public string Status { get; set; } = "running";
         public string GoldSetFingerprint { get; set; } = string.Empty;
+
+        /// <summary>See <see cref="CorrectionGenerationPipelineVersion"/>; 0 for a file written before it existed.</summary>
+        public int PipelineVersion { get; set; }
+
         public DateTime? CompletedAtUtc { get; set; }
 
         /// <summary>
@@ -969,10 +1053,11 @@ public static class QualityEvaluatorAssessmentWorkflow
                 SafeCount = scored.Count(r => r.ActualCorrectionSafety == "Safe"),
                 HarmfulCount = scored.Count(r => r.ActualCorrectionSafety == "Harmful"),
                 UnscoredCount = scored.Count(r => r.ActualCorrectionSafety == "Unscored"),
+                RejectedByGateCount = scored.Count(r => r.ActualCorrectionSafety == RejectedByGate),
                 SafeRate = scored.Count == 0 ? 0 : scored.Count(r => r.ActualCorrectionSafety == "Safe") / (double)scored.Count,
                 InitialSafeRate = initialScored.Count == 0 ? 0 : initialScored.Count(r => r.InitialCorrectionSafety == "Safe") / (double)initialScored.Count,
                 RepairedRowCount = repaired.Count,
-                RepairRescuedCount = repaired.Count(r => r.InitialCorrectionSafety == "Harmful" && r.ActualCorrectionSafety == "Safe"),
+                RepairRescuedCount = repaired.Count(r => r.InitialCorrectionSafety != "Safe" && r.ActualCorrectionSafety == "Safe"),
                 RepairStillHarmfulCount = repaired.Count(r => r.ActualCorrectionSafety == "Harmful"),
                 AverageRepairAttempts = repaired.Count == 0 ? 0 : repaired.Average(r => r.RepairAttemptsUsed),
                 AverageGenerationMilliseconds = Results.Count(r => r.GenerationElapsedMilliseconds.HasValue) == 0
@@ -995,13 +1080,16 @@ public static class QualityEvaluatorAssessmentWorkflow
         public int HarmfulCount { get; set; }
         public int UnscoredCount { get; set; }
 
+        /// <summary>Rows whose final draft still failed the validation gate - production would reject the correction outright.</summary>
+        public int RejectedByGateCount { get; set; }
+
         /// <summary>Final safe rate - after the repair loop, when enabled. Identical to InitialSafeRate when EnableRepairLoop is false.</summary>
         public double SafeRate { get; set; }
 
         /// <summary>Safe rate of the FIRST draft, before any repair attempt.</summary>
         public double InitialSafeRate { get; set; }
 
-        /// <summary>Rows that entered the repair loop at least once (initially Harmful).</summary>
+        /// <summary>Rows that entered the repair loop at least once (judged Harmful, or rejected by the gate).</summary>
         public int RepairedRowCount { get; set; }
 
         /// <summary>Of the repaired rows, how many ended up Safe - the repair loop's actual rescue rate.</summary>

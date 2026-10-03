@@ -107,7 +107,7 @@ public static class QualityReviewWorkflow
     /// real line break rather than SOURCE/TRANSLATION's literal "\n", and an earlier single-line-
     /// anchored version of this regex silently truncated those. <see cref="ContainsLeakedProtocolText"/>
     /// still independently guards the original leak concern this regex was narrowed to prevent. See
-    /// "Postmortems" (bug #2) in `docs/quality-review-pass-architecture.md` (FanslationStudio.LlmKit).
+    /// "Postmortems" (bug #2) in `docs/investigations/quality-review-postmortems.md` (FanslationStudio.LlmKit).
     /// </summary>
     private static readonly Regex CorrectedLineRegex = new(@"^\s*CORRECTED:\s*(.*)$", RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Singleline | RegexOptions.Compiled);
 
@@ -380,6 +380,41 @@ public static class QualityReviewWorkflow
         LlmHelpers.GenerateUserPrompt(userPrompt),
     ];
 
+    /// <summary>
+    /// Makes <paramref name="candidate"/> use SOURCE's line-break form. The correction prompts ask for a
+    /// literal two-character "\n", which is right for game text that stores it that way but wrong for
+    /// text with real line breaks (the candidate would show a literal "\n" in game), and a model also
+    /// sometimes answers with a real break for literal-"\n" text. Unchanged when SOURCE uses both forms
+    /// or neither.
+    /// </summary>
+    internal static string MatchSourceNewlines(string candidate, string source)
+    {
+        var sourceHasReal = source.Contains('\n');
+        var sourceHasLiteral = source.Contains("\\n");
+
+        if (sourceHasReal && !sourceHasLiteral && candidate.Contains("\\n"))
+            return candidate.Replace("\\n", "\n");
+
+        if (sourceHasLiteral && !sourceHasReal && candidate.Contains('\n'))
+            return candidate.Replace("\r\n", "\n").Replace("\n", "\\n");
+
+        return candidate;
+    }
+
+    /// <summary>
+    /// The VERIFIER EVIDENCE line for a repair: <paramref name="verification"/>'s quotes for the
+    /// <paramref name="targetDefects"/> being repaired, or null when it has none (evidence off, or no
+    /// quote for those categories).
+    /// </summary>
+    internal static string? FormatVerifierEvidence(QcVerificationResult verification, IEnumerable<QcDefectCategory> targetDefects)
+    {
+        var entries = verification.Evidence?
+            .Where(entry => targetDefects.Contains(entry.Key))
+            .Select(entry => $"{QcDefectCategoryTokens.ToToken(entry.Key)}: \"{entry.Value}\"")
+            .ToList();
+        return entries is { Count: > 0 } ? string.Join(" | ", entries) : null;
+    }
+
     private static string FormatDefectTokens(IEnumerable<QcDefectCategory> categories) =>
         string.Join(", ", categories.Select(QcDefectCategoryTokens.ToToken));
 
@@ -454,6 +489,34 @@ public static class QualityReviewWorkflow
     /// caller's own tokenReplacer; splitRaw stays the untouched rawText, matching what the Translated
     /// path passes for the same parameter.
     /// </summary>
+    /// <summary>
+    /// The <see cref="GetLlmVerdictAsync"/> candidate validator for
+    /// <see cref="QualityReviewConfig.PreVerificationGateEnabled"/> (null when it is off): restores a
+    /// masked candidate with <paramref name="tokenReplacer"/> (the one that masked this text), runs the
+    /// same post-LLM repair as the accept path, then <see cref="EvaluateQcCandidate"/>. A candidate equal
+    /// to <paramref name="effectiveTranslated"/> passes - the accept path treats it as "no change".
+    /// </summary>
+    internal static Func<string, string?>? BuildCandidateValidator(
+        LlmConfig config,
+        ModelExecutionConfig modelConfig,
+        string rawText,
+        string effectiveTranslated,
+        StringTokenReplacer tokenReplacer,
+        TextFileToSplit textFile,
+        int split)
+    {
+        if (!config.QualityReview.PreVerificationGateEnabled)
+            return null;
+
+        return maskedCandidate =>
+        {
+            var restored = LineValidation.PrepareResult(rawText, tokenReplacer.Restore(maskedCandidate), config.Hooks, textFile, split);
+            return restored == effectiveTranslated
+                ? null
+                : EvaluateQcCandidate(config, modelConfig, rawText, restored, effectiveTranslated, textFile, split)?.Trim();
+        };
+    }
+
     private static string? EvaluateQcCandidate(
         LlmConfig config,
         ModelExecutionConfig modelConfig,
@@ -730,7 +793,7 @@ public static class QualityReviewWorkflow
     /// A review pass's outcome counters and periodic progress log. Every dispatched work item counts
     /// toward the processed count, Skipped included, so the progress log's denominator reflects real
     /// "N left" progress rather than going quiet for long stretches whenever most columns are
-    /// already-fresh Skips (see docs/quality-review-pass-architecture.md's "Progress logging" section).
+    /// already-fresh Skips (see docs/features/translation-pipeline/quality-review-pass.md's "Progress logging" section).
     /// </summary>
     private sealed class QcRunProgress(int totalCount, QcTimingStats timing)
     {
@@ -896,8 +959,12 @@ public static class QualityReviewWorkflow
         // actually runs a fresh verdict (a cache miss) records time; every other thread racing the
         // same key just awaits the same in-flight Task and correctly contributes nothing (see
         // ReviewLlmCache's doc comment for the Lazy dedup).
+        // A cached verdict shared by another column used that column's validator; the final gate
+        // below is still this column's own.
+        var candidateValidator = BuildCandidateValidator(config, modelConfig, rawText, effectiveTranslated, tokenReplacer, item.File.TextFile, anchor.Split);
+
         var verdict = await reviewCache.GetOrAdd(cacheKey, _ => new Lazy<Task<LlmVerdict>>(
-            () => GetLlmVerdictAsync(config, modelConfig, client, rawText, maskedRaw, maskedTranslated, glossaryPrompt, timing))).Value;
+            () => GetLlmVerdictAsync(config, modelConfig, client, rawText, maskedRaw, maskedTranslated, glossaryPrompt, timing, candidateValidator))).Value;
 
         if (!verdict.Success)
             // Either the request errored, or the response didn't parse - leave the column's Qc
@@ -968,7 +1035,7 @@ public static class QualityReviewWorkflow
         // cleared the validation gate above, so a low verdict.Score is just the model's own
         // (frequently miscalibrated) confidence, not a sign the correction is wrong - re-rolling on
         // it used to discard known-good fixes for a coin-flip re-answer. See "Postmortems" (bug #3)
-        // in `docs/quality-review-pass-architecture.md` (FanslationStudio.LlmKit).
+        // in `docs/investigations/quality-review-postmortems.md` (FanslationStudio.LlmKit).
         ClearRuleCheckFailureHistory(anchor);
         anchor.QcStatus = QcStatus.Corrected;
         anchor.QcTranslated = correctedResult;
@@ -1009,7 +1076,7 @@ public static class QualityReviewWorkflow
         // retry and the column ends up flagged with QcTranslated still empty, same as if nothing
         // had been done), while forcing false retries/flags on fine translations elsewhere. A
         // genuine model miss on this defect shape is inherent LLM noise (see
-        // docs/quality-review-pass-architecture.md's postmortems) - triage it like any other
+        // docs/investigations/quality-review-postmortems.md's postmortems) - triage it like any other
         // low-precision category (WriteTriageReportAsync/hand-review), don't try to force-correct
         // it in code.
         if (TryRetryForLowScore(config, anchor, effectiveTranslated, verdict.Score ?? 100, textFile))
@@ -1066,7 +1133,7 @@ public static class QualityReviewWorkflow
     ///
     /// Deliberately NOT used by the accepted-Corrected path anymore - retrying there discarded an
     /// already-validated correction for nothing but a low self-reported score (see "Postmortems"
-    /// bug #3 in `docs/quality-review-pass-architecture.md`, FanslationStudio.LlmKit). A Passed
+    /// bug #3 in `docs/investigations/quality-review-postmortems.md`, FanslationStudio.LlmKit). A Passed
     /// column has nothing to lose by retrying here - there's no correction to discard, just a
     /// re-review of the same already-accepted <see cref="TranslationSplit.Translated"/>.
     ///
@@ -1098,6 +1165,9 @@ public static class QualityReviewWorkflow
         return true;
     }
 
+    /// <summary>The assistant-message prefix sent when <see cref="QualityReviewConfig.DetectionPrefillEnabled"/> is on.</summary>
+    internal const string DetectionReplyPrefill = "DEFECTS:";
+
     /// <summary>
     /// Calls 1 and 2 both use this - a plain, independent multi-defect detection call with no
     /// knowledge of any other call's findings. Call 1 is the first invocation; call 2 is a SECOND,
@@ -1123,13 +1193,16 @@ public static class QualityReviewWorkflow
         bool enableThinking = false)
     {
         var messages = BuildQcMessages(modelConfig, "BaseQualityReviewPrompt", BuildQcUserPrompt(maskedRaw, maskedTranslated, glossaryPrompt));
+        var prefill = config.QualityReview.DetectionPrefillEnabled;
+        if (prefill)
+            messages.Add(LlmHelpers.GenerateAssistantPrompt(DetectionReplyPrefill));
 
         var response = await SendQcCallAsync(client, config, WithDetectionTemperature(config, modelConfig), messages, timing, "detection", rawText, enableThinking);
         if (!response.Success)
             return new QcDetectionResult(false, [], QcDetectionFailureKind.RequestError, response.Error);
 
         var (llmResponse, stopReason) = (response.Content, response.StopReason);
-        var detection = QcDetectionResponseParser.Parse(llmResponse);
+        var detection = QcDetectionResponseParser.Parse(llmResponse, assumeDefectsPrefix: prefill);
         if (detection.Success)
             return detection;
 
@@ -1320,7 +1393,7 @@ public static class QualityReviewWorkflow
 
             var badWordMatches = TranslationWorkflow.FindBadWordMatches(correctedRaw);
             if (badWordMatches.Count == 0 || attempt >= maxInlineRetries)
-                return correctedRaw;
+                return MatchSourceNewlines(correctedRaw, maskedRaw);
 
             Console.WriteLine($"Quality review: correction for '{rawText}' matched the bad-words list ({string.Join(", ", badWordMatches)}) - inline retry {attempt + 1}/{maxInlineRetries}.");
             TranslationService.AddCorrectionMessages(
@@ -1365,7 +1438,8 @@ public static class QualityReviewWorkflow
         string maskedRaw,
         string maskedTranslated,
         string glossaryPrompt,
-        QcTimingStats? timing = null)
+        QcTimingStats? timing = null,
+        Func<string, string?>? candidateValidator = null)
     {
         var call1 = await DetectDefectsAsync(config, modelConfig, client, rawText, maskedRaw, maskedTranslated, glossaryPrompt, timing);
         if (!call1.Success)
@@ -1425,6 +1499,24 @@ public static class QualityReviewWorkflow
 
         for (var repairAttempt = 0; ; repairAttempt++)
         {
+            // QualityReviewConfig.PreVerificationGateEnabled: a candidate the validation gate would
+            // reject is never verified - repair it against the gate's own reason instead. Score 0 on
+            // the exits below is never used: ReviewColumnAsync's final gate rejects the candidate.
+            var gateFailure = candidateValidator?.Invoke(candidate);
+            if (gateFailure != null)
+            {
+                // A blank reason gives the repair nothing to act on.
+                if (repairAttempt >= maxRepairAttempts || string.IsNullOrWhiteSpace(gateFailure))
+                    return new LlmVerdict(true, 0, candidate, Primary(namedDefects), BuildFindings(namedDefects));
+
+                var gateRepaired = await GetCorrectionRepairAsync(config, modelConfig, client, rawText, maskedRaw, maskedTranslated, glossaryPrompt, namedDefects, candidate, timing, gateFailure);
+                if (gateRepaired == null || string.Equals(gateRepaired, candidate, StringComparison.Ordinal))
+                    return new LlmVerdict(true, 0, candidate, Primary(namedDefects), BuildFindings(namedDefects));
+
+                candidate = gateRepaired;
+                continue;
+            }
+
             // Call 4 always verifies against the FULL confirmed set, never a shrinking "still open"
             // list - so a repair attempt that regresses an already-fixed defect is caught, not
             // silently missed.
@@ -1443,8 +1535,16 @@ public static class QualityReviewWorkflow
                 // validation rules) decide whether it's actually usable.
                 return new LlmVerdict(true, verification.Score, candidate, Primary(toFix), BuildFindings(toFix));
 
-            var repaired = await GetCorrectionRepairAsync(config, modelConfig, client, rawText, maskedRaw, maskedTranslated, glossaryPrompt, toFix, candidate, timing);
+            var repaired = await GetCorrectionRepairAsync(config, modelConfig, client, rawText, maskedRaw, maskedTranslated, glossaryPrompt, toFix, candidate, timing,
+                verifierEvidence: FormatVerifierEvidence(verification, toFix));
             if (repaired == null)
+                return new LlmVerdict(true, verification.Score, candidate, Primary(toFix), BuildFindings(toFix));
+
+            // A repair that hands the candidate back unchanged cannot move the verdict: re-verifying
+            // identical text repeats the same rejection and the next repair repeats the same no-op.
+            // Stop here and let the last verification stand, exactly as for a failed repair above.
+            // (Measured 2026-10-03: 13 of 21 repairs on a defect-heavy batch were no-ops.)
+            if (string.Equals(repaired, candidate, StringComparison.Ordinal))
                 return new LlmVerdict(true, verification.Score, candidate, Primary(toFix), BuildFindings(toFix));
 
             candidate = repaired;
@@ -1533,7 +1633,10 @@ public static class QualityReviewWorkflow
         var userPrompt = BuildQcUserPrompt(maskedRaw, maskedTranslated, glossaryPrompt,
             ("CONFIRMED DEFECTS", FormatDefectTokens(confirmedDefects)),
             ("PROPOSED CORRECTION", proposedCorrectionMasked));
-        var messages = BuildQcMessages(modelConfig, "BaseQualityReviewVerificationPrompt", userPrompt);
+        var useEvidence = config.QualityReview.VerificationEvidenceEnabled
+            && modelConfig.Prompts.ContainsKey("BaseQualityReviewVerificationEvidencePrompt");
+        var messages = BuildQcMessages(modelConfig,
+            useEvidence ? "BaseQualityReviewVerificationEvidencePrompt" : "BaseQualityReviewVerificationPrompt", userPrompt);
 
         var response = await SendQcCallAsync(client, config, modelConfig, messages, timing, "verification", rawText, config.QualityReview.VerificationThinkingEnabled);
         if (!response.Success)
@@ -1545,7 +1648,7 @@ public static class QualityReviewWorkflow
         if (!result.Success)
             Console.WriteLine($"Quality review: could not parse verification response for '{rawText}' - treating as unscored. Raw response: {llmResponse}");
 
-        return result;
+        return useEvidence ? QcVerificationResponseParser.FilterByEvidence(result, maskedRaw, proposedCorrectionMasked) : result;
     }
 
     /// <summary>
@@ -1556,7 +1659,11 @@ public static class QualityReviewWorkflow
     /// all of them together - never re-derives the confirmed set, never scores, single job. The loop
     /// always sends its result back through <see cref="GetVerificationVerdictAsync"/>, verified
     /// against the FULL original confirmed set again, before trusting it (this call never grades its
-    /// own rewrite).
+    /// own rewrite). <paramref name="ruleCheckFailure"/>, when given, is the validation gate's reason
+    /// for rejecting <paramref name="previousAttemptMasked"/> (see
+    /// <see cref="QualityReviewConfig.PreVerificationGateEnabled"/>), sent as a RULE CHECK FAILURE line;
+    /// <paramref name="verifierEvidence"/> is the verifier's quotes for the target defects (see
+    /// <see cref="QualityReviewConfig.VerificationEvidenceEnabled"/>), sent as a VERIFIER EVIDENCE line.
     ///
     /// Returns null - not a distinguishable "keep trying" signal - on a request error, an unparseable
     /// response, leaked protocol text, or an explicit <c>CORRECTED: NONE</c> (call 5 couldn't improve
@@ -1573,19 +1680,29 @@ public static class QualityReviewWorkflow
         string glossaryPrompt,
         IReadOnlyList<QcDefectCategory> targetDefects,
         string previousAttemptMasked,
-        QcTimingStats? timing = null)
+        QcTimingStats? timing = null,
+        string? ruleCheckFailure = null,
+        string? verifierEvidence = null)
     {
-        var userPrompt = BuildQcUserPrompt(maskedRaw, maskedTranslated, glossaryPrompt,
+        var fields = new List<(string, string)>
+        {
             ("TARGET DEFECTS", FormatDefectTokens(targetDefects)),
-            ("PREVIOUS ATTEMPT", previousAttemptMasked));
+            ("PREVIOUS ATTEMPT", previousAttemptMasked),
+        };
+        if (ruleCheckFailure != null)
+            fields.Add(("RULE CHECK FAILURE", ruleCheckFailure));
+        if (verifierEvidence != null)
+            fields.Add(("VERIFIER EVIDENCE", verifierEvidence));
+        var userPrompt = BuildQcUserPrompt(maskedRaw, maskedTranslated, glossaryPrompt, [.. fields]);
         var messages = BuildQcMessages(modelConfig, "BaseQualityReviewCorrectionRepairPrompt", userPrompt);
 
         var response = await SendQcCallAsync(client, config, modelConfig, messages, timing, "repair", rawText);
         if (!response.Success)
             return null;
 
-        return ParseCorrectionResponse(response.Content,
+        var repaired = ParseCorrectionResponse(response.Content,
             $"Quality review: repair correction for '{rawText}' contains leaked QC-protocol text - keeping previous attempt.");
+        return repaired == null ? null : MatchSourceNewlines(repaired, maskedRaw);
     }
 
     /// <summary>
@@ -1879,7 +1996,7 @@ public static class QualityReviewWorkflow
         {
             // Structurally clean - mirrors ReviewColumnAsync's fix: a low QcQualityScore is not
             // grounds to wake an already-validated Corrected column back up (see "Postmortems"
-            // bug #3, docs/quality-review-pass-architecture.md). Just tidy up the retry counters.
+            // bug #3, docs/investigations/quality-review-postmortems.md). Just tidy up the retry counters.
             var hadFailureHistory = ClearRuleCheckFailureHistory(anchor);
             return (changed || hadFailureHistory, needsRetry: false, gaveUp: false);
         }
@@ -1912,7 +2029,7 @@ public static class QualityReviewWorkflow
     /// Only called for a <see cref="QcStatus.Passed"/> column now (see <see cref="ApplyRulesToQcColumn"/>'s
     /// early return and its own Corrected-column branch) - a Corrected column's already-validated
     /// QcTranslated is no longer woken up purely for a low score (see "Postmortems" bug #3,
-    /// docs/quality-review-pass-architecture.md). A Passed column has nothing of its own to lose by
+    /// docs/investigations/quality-review-postmortems.md). A Passed column has nothing of its own to lose by
     /// retrying, though: if <paramref name="anchor"/>'s current
     /// <see cref="TranslationSplit.QcQualityScore"/> is still below
     /// <see cref="Configuration.QualityReviewConfig.MinAcceptableScore"/>, wakes it up
@@ -2049,7 +2166,7 @@ public static class QualityReviewWorkflow
     /// <see cref="TranslationSplit.Translated"/> changed, never whether the model/prompt that
     /// produced an existing <see cref="QcStatus.Passed"/>/<see cref="QcStatus.Corrected"/> verdict
     /// did, so a prompt/model change alone would otherwise never trigger a re-review of anything
-    /// already reviewed. See docs/quality-review-pass-architecture.md's "Postmortems" section for
+    /// already reviewed. See docs/investigations/quality-review-postmortems.md's "Postmortems" section for
     /// the case that prompted adding this: a fix to the omitted-subject QC rule and to a low-score-
     /// discard retry bug both mean a PRIOR verdict may be less trustworthy than its stored status
     /// suggests, with nothing about the column's own text having changed to signal that.
@@ -2610,7 +2727,7 @@ public static class QualityReviewWorkflow
     /// project, DragonHierOverLlm repo, for the "stratify by DEFECT category" triage plan this
     /// feeds). Intended to be wired into a consuming repo's own workflow test file as a one-line
     /// wrapper run right after that repo's own "find flagged" step - see
-    /// docs/quality-review-pass-architecture.md's "Wiring this into a new project" section.
+    /// docs/features/translation-pipeline/quality-review-pass.md's "Wiring this into a new project" section.
     /// </summary>
     public static async Task WriteTriageReportAsync(string workingDirectory, TextFileToSplit[] textFiles, GameHooks? hooks = null)
     {
@@ -2646,7 +2763,7 @@ public static class QualityReviewWorkflow
     /// calling an LLM itself - the actual fixes (QC prompt wording, a glossary rule,
     /// <c>qualityReview.minAcceptableScore</c>) are small and judgment-heavy enough that a human
     /// should read the examples and apply the change themselves rather than have an LLM edit prompt
-    /// files unsupervised. See docs/quality-review-pass-architecture.md's "Wiring this into a new
+    /// files unsupervised. See docs/features/translation-pipeline/quality-review-pass.md's "Wiring this into a new
     /// project" section for how to call this from a consuming repo.
     /// </summary>
     public static async Task WriteFixPromptsAsync(string workingDirectory, TextFileToSplit[] textFiles, GameHooks? hooks = null, int examplesPerCluster = 8)

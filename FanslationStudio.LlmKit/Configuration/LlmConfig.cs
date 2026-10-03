@@ -181,7 +181,11 @@ public class QualityEvaluatorAssessmentConfig
     /// (<see cref="Workflow.QualityReviewWorkflow.GetLlmVerdictAsync"/>'s calls 4/5) instead of a
     /// single verify-only pass: a rejected draft goes back through the SAME corrector model's
     /// <see cref="Workflow.QualityReviewWorkflow.GetCorrectionRepairAsync"/>, then <see cref="JudgeModelName"/>
-    /// re-verifies, up to <see cref="QualityReviewConfig.MaxScoreRepairIterations"/> times - answering
+    /// re-verifies, up to <see cref="QualityReviewConfig.MaxScoreRepairIterations"/> repairs per row.
+    /// Like production, a draft the validation gate rejects is repaired against the gate's reason before
+    /// any verify call (<see cref="QualityReviewConfig.PreVerificationGateEnabled"/>), judge evidence
+    /// reaches the repair (<see cref="QualityReviewConfig.VerificationEvidenceEnabled"/>), and an
+    /// unchanged repair stops the row. Answering
     /// whether a cheap corrector's higher initial failure rate is rescued by repair, not just how
     /// often its first draft succeeds. Written to a separate `CorrectionGenerationWithRepair` output
     /// directory so single-shot and repair-loop numbers are never conflated. Default false preserves

@@ -269,18 +269,36 @@ public static partial class LineValidation
         if (result.Contains('\r') && !raw.Contains('\r'))
             result = result.Replace("\r\n", "\n").Replace('\r', '\n');
 
-        if (string.IsNullOrEmpty(raw))
-            response = false;
+        var silentFailures = new List<string>();
 
-        if (InvalidPhrases.Any(phrase => result.IndexOf(phrase, StringComparison.OrdinalIgnoreCase) >= 0))
+        if (string.IsNullOrEmpty(raw))
+        {
             response = false;
+            silentFailures.Add("The source text is empty.");
+        }
+
+        // A phrase the source itself contains (e.g. "\U" in a "C:\Users\..." path) is not model chatter.
+        var invalidPhrase = InvalidPhrases.FirstOrDefault(phrase =>
+            result.IndexOf(phrase, StringComparison.OrdinalIgnoreCase) >= 0
+            && raw.IndexOf(phrase, StringComparison.OrdinalIgnoreCase) < 0);
+        if (invalidPhrase != null)
+        {
+            response = false;
+            silentFailures.Add($"Contains the invalid phrase '{invalidPhrase}'.");
+        }
 
         // 99% chance its gone crazy with hallucinations
         if (result.Length > 50 && raw.Length <= 4)
+        {
             response = false;
+            silentFailures.Add("Result is far too long for a source of 4 characters or fewer.");
+        }
 
         if (result.Length > raw.Length * 15)
+        {
             response = false;
+            silentFailures.Add("Result is more than 15 times longer than the source.");
+        }
 
         // Small source with 'or' is usually an alternative
         if ((result.Contains(" or") || result.Contains("(or"))
@@ -419,11 +437,13 @@ public static partial class LineValidation
         if (result.Contains("<color") && raw.Contains("</color>") && !result.Contains("</color>"))
         {
             response = false;
+            silentFailures.Add("A <color> tag is opened but never closed.");
         }
         // Color invalidation - if it has a end tag but no start tag
         if (result.Contains("</color") && raw.Contains("<color") && !result.Contains("<color"))
         {
             response = false;
+            silentFailures.Add("A </color> tag is closed but never opened.");
         }
 
         // Random additions
@@ -456,7 +476,8 @@ public static partial class LineValidation
                 Valid = response,
                 Result = result,
                 CorrectionPrompt = correctionPrompts.ToString(),
-                RequiresSentenceBySentenceCorrection = true
+                RequiresSentenceBySentenceCorrection = true,
+                SilentFailures = silentFailures,
             };
             return validationResult;
         }
@@ -518,7 +539,10 @@ public static partial class LineValidation
             if ((raw.Length == 1 && result.Length > 6)
                 || (raw.Length == 2 && result.Length > 12)
                 || (raw.Length == 3 && result.Length > 17))
+            {
                 response = false;
+                silentFailures.Add("Result is too long for a short name.");
+            }
         }
 
         if (hooks?.CustomColumnValidator != null)
@@ -549,6 +573,7 @@ public static partial class LineValidation
             Valid = response,
             Result = result,
             CorrectionPrompt = correctionPrompts.ToString(),
+            SilentFailures = silentFailures,
         };
     }
 

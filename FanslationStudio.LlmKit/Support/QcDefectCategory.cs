@@ -66,7 +66,7 @@ public enum QcDefectCategory
 
     /// <summary>Model believes something about the translation may be off but isn't confident
     /// enough to name a specific category or draft a fix it trusts - see
-    /// docs/quality-review-pass-architecture.md postmortem #9. Unlike every other non-<see
+    /// docs/investigations/quality-review-postmortems.md postmortem #9. Unlike every other non-<see
     /// cref="None"/> category, this one is never paired with a real <c>CORRECTED</c> fix (call 1's
     /// drafted text, if any, is discarded - see <c>QualityReviewWorkflow.GetLlmVerdictAsync</c>),
     /// never runs two-stage verification (there is nothing to grade), is never eligible for

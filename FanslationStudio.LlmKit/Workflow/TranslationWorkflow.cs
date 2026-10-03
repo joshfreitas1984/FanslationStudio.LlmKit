@@ -575,7 +575,7 @@ public static class TranslationWorkflow
     /// <summary>
     /// True when <paramref name="translated"/> dropped a negative-number sign ("-0.5%" -> "0.5%")
     /// that <paramref name="preparedRaw"/> has - a real observed QC-correction quirk (see
-    /// docs/quality-review-pass-architecture.md) where a stat/buff tooltip's leading "-" before a
+    /// docs/features/translation-pipeline/quality-review-pass.md) where a stat/buff tooltip's leading "-" before a
     /// percentage got silently stripped while the rest of the line was accepted as a valid
     /// correction. Compares counts rather than exact positions since a fragment can legitimately
     /// reorder clauses around a number - what must never happen is the raw text having MORE
@@ -653,7 +653,10 @@ public static class TranslationWorkflow
             : null;
         var customValidatorReason = config.Hooks?.CustomColumnValidator?.Invoke(textFile, column, splitRaw, candidate);
         var validation = LineValidation.CheckTransalationSuccessful(modelConfig, splitRaw, candidate, textFile, config.Hooks, column);
-        var structuralReason = validation.Valid ? null : validation.CorrectionPrompt;
+        var structuralReason = validation.Valid ? null
+            : !string.IsNullOrWhiteSpace(validation.CorrectionPrompt) ? validation.CorrectionPrompt
+            : validation.SilentFailures.Count > 0 ? string.Join(" ", validation.SilentFailures)
+            : "Failed structural validation.";
 
         return new RuleCheckResult(
             mistranslatedGlossaryTerms,

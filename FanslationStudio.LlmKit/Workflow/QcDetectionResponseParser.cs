@@ -9,9 +9,16 @@ public static class QcDetectionResponseParser
         @"^\s*DEFECTS:\s*(.*?)\s*$",
         RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Compiled);
 
-    public static QcDetectionResult Parse(string response)
+    /// <param name="assumeDefectsPrefix">
+    /// The reply was pre-filled with <c>DEFECTS:</c> (see <see cref="Configuration.QualityReviewConfig.DetectionPrefillEnabled"/>),
+    /// and a server may return only the continuation (<c>NONE</c>) or the whole line. A response
+    /// with no <c>DEFECTS:</c> line is then parsed as if it had one.
+    /// </param>
+    public static QcDetectionResult Parse(string response, bool assumeDefectsPrefix = false)
     {
         var match = DefectsLineRegex.Match(response);
+        if (!match.Success && assumeDefectsPrefix)
+            match = DefectsLineRegex.Match("DEFECTS: " + response.Trim());
         if (!match.Success)
             return new QcDetectionResult(false, []);
 

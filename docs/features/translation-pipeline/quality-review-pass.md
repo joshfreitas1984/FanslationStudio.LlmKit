@@ -40,7 +40,8 @@ already-serialized YAML:
   not a calibrated absolute metric — a small/local model's self-rating is inherently noisy.
 - `QcDefectCategory` (`Support/QcDefectCategory.cs` enum: `Unknown` / `None` / `GarbledNumber` /
   `DomainTerm` / `LostIdiom` / `UntranslatedPinyin` / `DroppedContent` / `HardToParseSeam` /
-  `OtherNamedDefect`) — the `DEFECT:` category the model names alongside `SCORE:`, parsed from the
+  `OtherNamedDefect` / `MeaningReversal` / `DroppedStutter` / `Uncertain` / `UnnaturalPhrasing`) — the
+  `DEFECT:` category the model names alongside `SCORE:`, parsed from the
   same response (see step 6 below). `Unknown` (the default) means either "never reviewed" or a
   response that predates the DEFECT-first prompt — same "not yet reviewed" convention as
   `QcQualityScore` being `null`. Exists specifically so a large flagged set can be triaged/policed
@@ -501,6 +502,11 @@ rather than merely waste a reviewer's time on a non-issue. That's a project-spec
 made when deciding what goes into `autoAcceptDefectCategories` - this library only provides the
 mechanism, not the policy.
 
+`UnnaturalPhrasing` (meaning-accurate but mechanically literal/non-idiomatic phrasing that none of the
+other categories cover) starts outside `autoAcceptDefectCategories` like every new category does - it is
+inherently more subjective than the mostly factual/structural categories above, so it needs its own
+hand-validated precision sample (step 2) before it can be considered for auto-accept.
+
 **`MeaningReversal`** (added after a downstream real-production case - see
 `docs/investigations/tests/qc-qualityscore-noise-investigation.md`, DragonHierOverLlm repo,
 sampleId `8a1f6e0c9d723bb4`) is a deliberate exception to the "let the hand-validated sample decide"
@@ -515,67 +521,56 @@ rendering - the single highest-consequence miss shape, since it reads fluently a
 SOURCE at the same time. If a future project wants to revisit this, do so explicitly and
 deliberately, not via the same precision-sampling loop used for the other categories.
 
-## Two-stage DEFECT verification and scoring (always-on)
+## Detection, correction, verification and repair (the five-call flow)
 
-**Stale-doc note**: this section previously described the feature as gated by a
-`qualityReview.twoStageVerificationEnabled` config flag. That flag no longer exists in
-`QualityReviewConfig`/`Config.yaml`, and `GetVerificationVerdictAsync`/`GetCorrectionRepairAsync`
-are called unconditionally whenever call 1 names a defect - the feature became the permanent
-architecture rather than an opt-in variant, and this doc wasn't updated at the time. The paragraph
-below describing "when `twoStageVerificationEnabled` is false" is dead - there is no such path in
-current code. Left in place for now rather than rewritten wholesale; re-derive the exact removal
-commit from git history if the full migration story is needed.
+`GetLlmVerdictAsync` runs up to five kinds of call per (source, translation, glossary) key, each with a
+single job, so no call ever grades text it wrote:
 
-**Call 1 never scores** - it only drafts `DEFECT`/`CORRECTED`.
-Scoring, defect confirmation, and (when needed) repair are three separate, single-purpose calls, so
-that no call ever grades a fix it wrote itself:
-
-1. **Call 1** (`GetLlmVerdictAsync`) - drafts `DEFECT` + `CORRECTED` only.
-2. **Call 2** (`GetVerificationVerdictAsync`) - only runs for a named DEFECT (never
-   `NONE`/`Unknown`). Shown SOURCE, the *original* TRANSLATION (never a repair attempt's own
-   reasoning), the claimed `DEFECT` token, and the current candidate as `PROPOSED CORRECTION` (call
-   1's draft, or a later repair attempt) - confirms/rejects/recategorizes the claim and grades
-   *that specific candidate*, never drafting one itself:
+1. **Detection, calls 1/2** (`DetectDefectsAsync`, `BaseQualityReviewPrompt.txt`) - names defects only
+   (`DEFECTS: NONE` or a category list); never corrects or scores. Call 2 is a second independent
+   detection, merged as a union, and only runs when `doubledDetectionEnabled` is true.
+   `detectionTemperature` overrides the model temperature for these calls, and `detectionPrefillEnabled`
+   pre-fills the reply with `DEFECTS:`. Nothing found: the column passes with score 100 and no more calls.
+   Only `UNCERTAIN`: flagged for a human, no correction attempted.
+2. **Correction, call 3** (`GenerateCorrectionAsync`, `BaseQualityReviewCorrectionPrompt.txt`) - one
+   `CORRECTED:` line fixing every confirmed category together.
+3. **Pre-verification gate** (`preVerificationGateEnabled`, default true) - the candidate goes through the
+   column's validation gate (`EvaluateQcCandidate`, the same check the accept path runs). A failure
+   skips verification and goes straight to a repair told the gate's reason as `RULE CHECK FAILURE`.
+4. **Verification, call 4** (`GetVerificationVerdictAsync`, `BaseQualityReviewVerificationPrompt.txt`) -
+   judges the candidate against SOURCE, the original TRANSLATION and the full confirmed set:
    ```
-   DEFECT: <NONE if CLAIMED DEFECT doesn't hold up, the same token if it does, or a different DEFECT token if miscategorized>
-   SCORE: <0-100, irrelevant if DEFECT is NONE>
+   UNRESOLVED: <NONE or confirmed categories still unfixed>
+   NEW_DEFECTS: <NONE or categories the candidate introduces>
+   SCORE: <0-100; given as 0 on a rejection, by design>
    ```
-3. **Call 3** (`GetCorrectionRepairAsync`) - only runs when call 2's score is below
-   `minAcceptableScore` and repair attempts remain (bounded by `maxScoreRepairIterations`, default
-   2). Given the *confirmed* defect and the current low-scoring candidate, writes ONE improved
-   `CORRECTED` targeting only that defect - no score, no re-derivation:
-   ```
-   CORRECTED: <an improved fix, or NONE if it can't do better than the previous attempt>
-   ```
+   Accepted only when both lists are `NONE`. With `verificationEvidenceEnabled`, the
+   `BaseQualityReviewVerificationEvidencePrompt.txt` variant adds an `EVIDENCE:` line quoting the text
+   each claim is about; a claim whose quote is not in SOURCE (or, except DROPPED_CONTENT, the candidate)
+   is dropped by `QcVerificationResponseParser.FilterByEvidence`.
+5. **Repair, call 5** (`GetCorrectionRepairAsync`, `BaseQualityReviewCorrectionRepairPrompt.txt`) - one
+   improved `CORRECTED:` for the unresolved/new categories (plus `RULE CHECK FAILURE` / `VERIFIER EVIDENCE`
+   lines when available), or `NONE`. The new candidate goes back through the gate and verification.
 
-`FinalizeVerdictAsync` is the loop: score via call 2 → if `DEFECT: NONE`, done (fixed `Score = 100`,
-matching the same "nothing's wrong" convention used for call 1's own `NONE`); if the score clears
-`minAcceptableScore` or repair attempts are exhausted, accept the current candidate; otherwise repair
-via call 3 and **loop back to call 2 to re-score the new candidate - every iteration, not just the
-first**, so nothing ever grades its own rewrite, including across repairs. Deliberately reuses the
-exact `DEFECT:`/`SCORE:`/`CORRECTED:` vocabulary call 1 already produces reliably rather than
-distinct labels per call - call 2 uses the same labels as the other QC calls,
-and a real production response came back `VERDICAT:` (a one-off model typo of a label it had never
-been asked to produce before), silently falling back to call 1's own verdict every time it happened.
+The gate/verify/repair loop runs at most `maxScoreRepairIterations` repairs (gate repairs count). It
+stops early when a repair returns the candidate unchanged, returns `NONE`, or the gate reason is blank;
+the last candidate is then returned with the last verification's score, and `ReviewColumnAsync`'s own
+final gate and `minAcceptableScore` decide whether it is accepted, flagged, or rejected. Every
+correction/repair is first normalised to SOURCE's line-break form (`MatchSourceNewlines`: real breaks
+vs a literal `\n`).
 
-`GetLlmVerdictAsync`'s own `DEFECT: NONE` (nothing to correct at all) skips call 2 and call 3
-entirely, regardless of this flag - fixed `Score = 100`, no extra calls, since there's nothing to
-score or repair.
+The QC evaluator's correction-generation comparison (`QualityEvaluatorAssessmentWorkflow`, with
+`qualityEvaluatorAssessment.enableRepairLoop`) runs the same loop over gold rows, with a separate
+corrector and judge model: gate first (a draft that never passes is reported as `RejectedByGate`, not
+judged), gate reason / judge evidence into the repair, at most `maxScoreRepairIterations` repairs per
+row, and an unchanged repair stops the row. Its `Results.yaml` carries a `PipelineVersion`; a file from an
+older pipeline is discarded and re-run rather than resumed.
 
-**When `twoStageVerificationEnabled` is false, or either `BaseQualityReviewVerificationPrompt` or
-`BaseQualityReviewCorrectionRepairPrompt` is missing for the model**, a column call 1 corrects is
-still accepted (the same validation gate applies either way) but with `Score = null` -
-`TranslationSplit.QcQualityScore` stays unset and `FlaggedForQcReview` is always `true`. There is no
-fallback self-score to use in this case, since call 1 was never asked to produce one - this is a
-so disabling two-stage verification leaves corrected columns unscored and flagged for review.
-
-Cost: up to `maxScoreRepairIterations + 1` calls to call 2, interleaved with up to
-`maxScoreRepairIterations` calls to call 3 - but only for columns call 1 flags with a named defect
-(~10-15% of a corpus in practice), and zero extra calls for everything else (call 1 no longer spends
-any reasoning on a score nobody will use for those either). Prompt files:
-`BaseQualityReviewVerificationPrompt.txt` and `BaseQualityReviewCorrectionRepairPrompt.txt`, one per
-model family (`BaseFiles/<preset>/Prompts/`), loaded/merged exactly like `BaseQualityReviewPrompt.txt`
-- see "Prompts: per-model-family, not a shared/generic file" below. Off by default (`false`).
+If the model has no verification or repair prompt, a corrected column is accepted with `Score = null`
+and always flagged. Cost: a defective column costs detection + correction + one verification, plus a
+repair and re-check per rejected round; clean columns cost detection only. Measured costs and the
+reasons verification rejects are in `docs/investigations/quality-review-postmortems.md` ("Correction
+cost").
 
 ## Configuration (`Configuration/QualityReviewConfig.cs`)
 
@@ -600,18 +595,20 @@ model family (`BaseFiles/<preset>/Prompts/`), loaded/merged exactly like `BaseQu
   hand-validated as low-precision enough that packaging should trust `QcTranslated` wholesale
   despite a low score, instead of holding the column back for human review. See "DEFECT categories
   and per-category policy" below.
-- `twoStageVerificationEnabled` (bool, default false) — controls the entire scoring/repair pipeline
-  for any column call 1 flags with a named DEFECT: call 1 never self-scores, so this flag decides
-  whether call 2/3 run to produce a real score/repair, or whether the column is instead accepted
-  with `QcQualityScore: null` and always flagged. See "Two-stage DEFECT verification and scoring"
-  above.
-- `maxScoreRepairIterations` (int, default 2) — bounds how many times call 3
-  (`GetCorrectionRepairAsync`) attempts to improve a correction call 2 scored too low, re-scoring via
-  call 2 after each attempt. Only meaningful when `twoStageVerificationEnabled` is true. See
-  "Two-stage DEFECT verification and scoring" above.
+- `doubledDetectionEnabled` (bool, default true) — runs detection twice and merges the results (union).
+- `detectionTemperature` (double?, default null) — temperature for the detection calls only.
+- `detectionPrefillEnabled` (bool, default true) — pre-fills the detection reply with `DEFECTS:`.
+- `maxScoreRepairIterations` (int, default 2) — the most repair calls one column's gate/verify/repair
+  loop may spend, gate repairs included. See "Detection, correction, verification and repair" above.
+- `preVerificationGateEnabled` (bool, default true) — runs the validation gate on each correction/
+  repair candidate before verifying it; a failing candidate skips verification and is repaired with
+  the gate's reason as a `RULE CHECK FAILURE` line.
+- `verificationEvidenceEnabled` (bool, default false) — verifies with the evidence prompt variant and
+  drops rejections whose quoted evidence is not in SOURCE/the candidate; surviving quotes reach the
+  repair as `VERIFIER EVIDENCE`.
 - `verificationThinkingEnabled` (bool, default false) — runs call 2 (`GetVerificationVerdictAsync`)
   with Ollama's `think` mode on instead of production's normal thinking-off default. Only affects
-  call 2 (never call 1 or call 3), and only when `twoStageVerificationEnabled` is true. See
+  verification (call 4). See
   "Verification-call thinking" below.
 
 ## Verification-call thinking (opt-in, `verificationThinkingEnabled`)
