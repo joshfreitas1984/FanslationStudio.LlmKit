@@ -79,7 +79,7 @@ public static class GlossaryWorkflow
             for (int j = i + 1; j < allEntries.Length; j++)
             {
                 var (e1, e2) = (allEntries[i], allEntries[j]);
-                if (AreSimilar(e1.Raw, e2.Raw) && e1.Result != e2.Result)
+                if (e1.Result != e2.Result && AreSimilar(e1.Raw, e2.Raw))
                     similar.Add($"- raw1: \"{e1.Raw}\" result1: \"{e1.Result}\"\n  raw2: \"{e2.Raw}\" result2: \"{e2.Result}\"");
             }
 
@@ -90,20 +90,23 @@ public static class GlossaryWorkflow
     {
         var conflicts = new HashSet<string>();
 
+        // Only bad-translation entries can be the contained side, so resolve their variants once.
+        var checkingEntries = allEntries
+            .Select((entry, index) => (Entry: entry, Index: index))
+            .Where(x => x.Entry.CheckForBadTranslation)
+            .Select(x => (x.Entry, x.Index, Variants: GetVariants(x.Entry).ToArray()))
+            .ToArray();
+
         for (int i = 0; i < allEntries.Length; i++)
-            for (int j = 0; j < allEntries.Length; j++)
+            foreach (var (checkingEntry, j, variants) in checkingEntries)
             {
-                if (i == j) 
+                if (i == j)
                     continue;
 
                 var baseEntry = allEntries[i];
-                var checkingEntry = allEntries[j];
-
-                if (!checkingEntry.CheckForBadTranslation) continue;
 
                 // Check if baseEntry's raw contains any variant of checkingEntry
-                var matchedVariant = GetVariants(checkingEntry)
-                    .FirstOrDefault(v => baseEntry.Raw != v && baseEntry.Raw.Contains(v));
+                var matchedVariant = variants.FirstOrDefault(v => baseEntry.Raw != v && baseEntry.Raw.Contains(v));
 
                 // If there's no containment or if it has an allowed translation, skip because its not a conflict
                 if (matchedVariant is null || HasCompatibleTranslation(baseEntry, checkingEntry)) 
@@ -160,7 +163,15 @@ public static class GlossaryWorkflow
         if (str1.Trim() == str2.Trim()) return true;
 
         var maxLength = Math.Max(str1.Length, str2.Length);
-        return maxLength > 0 && (double)LevenshteinDistance(str1, str2) / maxLength <= 0.2;
+        if (maxLength == 0)
+            return false;
+
+        // The edit distance is at least the length difference, so skip computing it when that
+        // alone already exceeds the threshold.
+        if ((double)Math.Abs(str1.Length - str2.Length) / maxLength > 0.2)
+            return false;
+
+        return (double)LevenshteinDistance(str1, str2) / maxLength <= 0.2;
     }
 
     private static int LevenshteinDistance(string s1, string s2)

@@ -1,5 +1,4 @@
-﻿using System.Diagnostics;
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 
 namespace FanslationStudio.LlmKit.Workflow;
 
@@ -33,29 +32,18 @@ public class SymlinkWorkflow
             Directory.Delete(destination, true);
         }
 
-        // Run mklink command to create a symbolic link
-        string command = $"/C mklink /D \"{destination}\" \"{source}\"";
-        ProcessStartInfo psi = new ProcessStartInfo("cmd.exe", command)
+        // Directory symlink at destination pointing to source (the equivalent of mklink /D);
+        // source is stored as given, so a relative source stays relative to the link.
+        try
         {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            Verb = "runas" // Run as administrator
-        };
+            Directory.CreateSymbolicLink(destination, source);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            throw new Exception("Error: " + e.Message, e);
+        }
 
-        Process process = new Process { StartInfo = psi };
-        process.Start();
-
-        string output = process.StandardOutput.ReadToEnd();
-        string error = process.StandardError.ReadToEnd();
-        process.WaitForExit();
-
-        // Display output or error
-        if (!string.IsNullOrEmpty(output))
-            Console.WriteLine("Success: " + output);
-        if (!string.IsNullOrEmpty(error))
-            throw new Exception("Error: " + error);
+        Console.WriteLine($"Success: symbolic link created for {destination} <<===>> {source}");
     }
 }
 

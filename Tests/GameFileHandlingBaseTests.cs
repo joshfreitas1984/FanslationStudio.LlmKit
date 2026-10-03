@@ -134,4 +134,102 @@ public class GameFileHandlingBaseTests
             Directory.Delete(dir, true);
         }
     }
+
+    private static async Task<List<TranslationLine>> MergeAsync(string path, List<TranslationLine> converted, List<TranslationLine> export)
+    {
+        var dir = CreateWorkingDirectory();
+        try
+        {
+            File.WriteAllText($"{dir}/Converted/{path}.yaml", YamlHelper.CreateSerializer().Serialize(converted));
+            File.WriteAllText($"{dir}/Raw/Export/{path}.yaml", YamlHelper.CreateSerializer().Serialize(export));
+
+            await GameFileHandlingBase.MergeFilesIntoTranslatedAsync(dir, [new TextFileToSplit { Path = path, PackageOutput = true }]);
+
+            return YamlHelper.CreateDeserializer().Deserialize<List<TranslationLine>>(File.ReadAllText($"{dir}/Converted/{path}.yaml"));
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    private static TranslationSplit Done(int split, int subIndex, string text, string translated, string splitPath = "") =>
+        new(split, subIndex, text) { Translated = translated, SplitPath = splitPath };
+
+    [Fact(DisplayName = "Merge matches a duplicated Raw or RawIndex against its first converted occurrence")]
+    public async Task MergeFilesIntoTranslatedAsync_DuplicateLineKeysUseFirstOccurrence()
+    {
+        var converted = new List<TranslationLine>
+        {
+            new() { Raw = "1,大侠", Splits = [Done(1, 0, "大侠", "First")] },
+            new() { Raw = "1,大侠", Splits = [Done(1, 0, "大侠", "Second")] },
+            new() { RawIndex = "7", Raw = "{}", Splits = [Done(0, 0, "名字", "First Name", "Name")] },
+            new() { RawIndex = "7", Raw = "{ }", Splits = [Done(0, 0, "名字", "Second Name", "Name")] },
+        };
+        var export = new List<TranslationLine>
+        {
+            new() { Raw = "1,大侠", Splits = [new TranslationSplit(1, "大侠")] },
+            new() { RawIndex = "7", Raw = "{changed}", Splits = [new TranslationSplit(0, "名字") { SplitPath = "Name" }] },
+        };
+
+        var merged = await MergeAsync("Dupes.csv", converted, export);
+
+        Assert.Equal("First", merged[0].Splits[0].Translated);
+        Assert.Equal("First Name", merged[1].Splits[0].Translated);
+    }
+
+    [Fact(DisplayName = "Merge split-level fallback prefers the most specific key, then the earliest converted split")]
+    public async Task MergeFilesIntoTranslatedAsync_FallbackPrefersSpecificKeyThenFirstOccurrence()
+    {
+        var converted = new List<TranslationLine>
+        {
+            new() { Raw = "old-a", Splits = [Done(5, 0, "甲", "Loose A"), Done(9, 0, "乙", "Loose B1")] },
+            new() { Raw = "old-b", Splits = [Done(9, 0, "乙", "Loose B2"), Done(1, 0, "甲", "Exact A1"), Done(1, 0, "甲", "Exact A2")] },
+            new() { Raw = "old-c", Splits = [Done(0, 1, "丙", "Path loose", "Desc"), Done(0, 3, "丙", "Path exact 1", "Desc")] },
+            new() { Raw = "old-d", Splits = [Done(0, 3, "丙", "Path exact 2", "Desc"), Done(0, 3, "丙", "Wrong path", "Name")] },
+        };
+        var export = new List<TranslationLine>
+        {
+            new()
+            {
+                Raw = "new",
+                Splits =
+                [
+                    new TranslationSplit(1, 0, "甲"),
+                    new TranslationSplit(2, 0, "乙"),
+                    new TranslationSplit(0, 3, "丙") { SplitPath = "Desc" },
+                    new TranslationSplit(0, 7, "丙") { SplitPath = "Desc" },
+                    new TranslationSplit(0, 0, "丙") { SplitPath = "Other" },
+                    new TranslationSplit(3, 0, "丁"),
+                ],
+            },
+        };
+
+        var merged = (await MergeAsync("Fallback.csv", converted, export)).Single().Splits;
+
+        Assert.Equal("Exact A1", merged[0].Translated);    // (Split, SubIndex, Text) beats an earlier Text-only match
+        Assert.Equal("Loose B1", merged[1].Translated);    // Text-only: first in converted order
+        Assert.Equal("Path exact 1", merged[2].Translated); // (SplitPath, SubIndex, Text) beats an earlier (SplitPath, Text)
+        Assert.Equal("Path loose", merged[3].Translated);   // (SplitPath, Text): first in converted order
+        Assert.Equal("", merged[4].Translated);             // a SplitPath split never falls back to Text-only
+        Assert.Equal("", merged[5].Translated);
+    }
+
+    [Fact(DisplayName = "Merge within a matched line prefers the most specific split key, then the earliest split")]
+    public async Task MergeFilesIntoTranslatedAsync_MatchedLinePrefersSpecificSplitKey()
+    {
+        var converted = new List<TranslationLine>
+        {
+            new() { Raw = "row", Splits = [Done(4, 0, "甲", "Loose"), Done(1, 0, "甲", "Exact"), Done(1, 0, "甲", "Exact later")] },
+        };
+        var export = new List<TranslationLine>
+        {
+            new() { Raw = "row", Splits = [new TranslationSplit(1, 0, "甲"), new TranslationSplit(2, 0, "甲")] },
+        };
+
+        var merged = (await MergeAsync("Matched.csv", converted, export)).Single().Splits;
+
+        Assert.Equal("Exact", merged[0].Translated);
+        Assert.Equal("Loose", merged[1].Translated);
+    }
 }

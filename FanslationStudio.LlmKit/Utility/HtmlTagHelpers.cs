@@ -4,7 +4,7 @@ namespace FanslationStudio.LlmKit.Utility;
 
 public record TagValidationResult(bool IsValid, HashSet<string> MissingTags, HashSet<string> ExtraTags);
 
-public static class HtmlTagHelpers
+public static partial class HtmlTagHelpers
 {
     public static TagValidationResult ValidateTags(string raw, string translated, bool allowMissingColors)
     {
@@ -53,8 +53,7 @@ public static class HtmlTagHelpers
     private static HashSet<string> ExtractTagsWithAttributes(string input, bool updateSizes)
     {
         var tags = new HashSet<string>();
-        var regex = new Regex(@"<(/?\w+\s*[^>]*)>");
-        foreach (Match match in regex.Matches(input))
+        foreach (Match match in TagWithAttributesRegex().Matches(input))
         {
             var tag = match.Groups[1].Value;
 
@@ -73,8 +72,7 @@ public static class HtmlTagHelpers
     public static List<string> ExtractTagsListWithAttributes(string input, params string[] ignore)
     {
         var tags = new List<string>();
-        var regex = new Regex(@"<(\w+\s*[^/>]*)>");
-        foreach (Match match in regex.Matches(input))
+        foreach (Match match in OpeningTagWithAttributesRegex().Matches(input))
         {
             var tagValue = match.Groups[1].Value;
             if (!ignore.Any(i => tagValue.StartsWith(i)))
@@ -91,8 +89,11 @@ public static class HtmlTagHelpers
     // purposes - confirmed necessary the hard way: without the escape-sequence half of this, the
     // trailing "n" of a literal "\n" was being treated as a real Latin letter, inserting a spurious
     // space between "\n" and the CJK/translated text that followed it.
-    private static readonly Regex TrailingTagsRegex = new(@"(?:<\/?[A-Za-z][^<>]*>|\\[nrt])+$", RegexOptions.Compiled);
-    private static readonly Regex LeadingTagsRegex = new(@"^(?:<\/?[A-Za-z][^<>]*>|\\[nrt])+", RegexOptions.Compiled);
+    [GeneratedRegex(@"(?:<\/?[A-Za-z][^<>]*>|\\[nrt])+$")]
+    private static partial Regex TrailingTagsRegex();
+
+    [GeneratedRegex(@"^(?:<\/?[A-Za-z][^<>]*>|\\[nrt])+")]
+    private static partial Regex LeadingTagsRegex();
 
     /// <summary>
     /// Returns the last *visible* character of <paramref name="s"/> - i.e. skipping any run of
@@ -104,14 +105,14 @@ public static class HtmlTagHelpers
     /// </summary>
     public static char? EffectiveTrailingChar(string s)
     {
-        var stripped = TrailingTagsRegex.Replace(s, string.Empty);
+        var stripped = TrailingTagsRegex().Replace(s, string.Empty);
         return stripped.Length > 0 ? stripped[^1] : null;
     }
 
     /// <summary>Leading-edge counterpart to <see cref="EffectiveTrailingChar"/>.</summary>
     public static char? EffectiveLeadingChar(string s)
     {
-        var stripped = LeadingTagsRegex.Replace(s, string.Empty);
+        var stripped = LeadingTagsRegex().Replace(s, string.Empty);
         return stripped.Length > 0 ? stripped[0] : null;
     }
 
@@ -124,24 +125,21 @@ public static class HtmlTagHelpers
     /// </summary>
     public static (string Core, string TrailingMarkup) SplitTrailingMarkup(string s)
     {
-        var match = TrailingTagsRegex.Match(s);
+        var match = TrailingTagsRegex().Match(s);
         return match.Success ? (s[..match.Index], s[match.Index..]) : (s, string.Empty);
     }
 
     /// <summary>Leading-edge counterpart to <see cref="SplitTrailingMarkup"/>.</summary>
     public static (string LeadingMarkup, string Core) SplitLeadingMarkup(string s)
     {
-        var match = LeadingTagsRegex.Match(s);
+        var match = LeadingTagsRegex().Match(s);
         return match.Success ? (match.Value, s[match.Length..]) : (string.Empty, s);
     }
 
     public static string TrimHtmlTagsInContent(string input)
     {
-        // Regular expression to match HTML tags and remove extra spaces, including self-closing tags
-        var tagPattern = new Regex(@"<\s*(\w+)(.*?)\s*/?>");
-
         // Replace each tag by trimming unnecessary spaces inside the tag
-        return tagPattern.Replace(input, match =>
+        return LooseTagRegex().Replace(input, match =>
         {
             var tagName = match.Groups[1].Value;
             var attributes = match.Groups[2].Value.Trim();
@@ -155,5 +153,14 @@ public static class HtmlTagHelpers
                 : $"<{tagName}{(string.IsNullOrEmpty(attributes) ? "" : " " + attributes)}>";
         });
     }
-}
 
+    [GeneratedRegex(@"<(/?\w+\s*[^>]*)>")]
+    private static partial Regex TagWithAttributesRegex();
+
+    [GeneratedRegex(@"<(\w+\s*[^/>]*)>")]
+    private static partial Regex OpeningTagWithAttributesRegex();
+
+    // Matches HTML tags with extra spaces, including self-closing tags.
+    [GeneratedRegex(@"<\s*(\w+)(.*?)\s*/?>")]
+    private static partial Regex LooseTagRegex();
+}
