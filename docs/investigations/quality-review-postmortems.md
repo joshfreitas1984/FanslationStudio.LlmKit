@@ -93,6 +93,33 @@ second, looks like a successful run). Always delete the model's output directory
 config change, or at minimum check `Results.yaml`'s timestamp against the relevant prompt commit
 before drawing a conclusion from it.
 
+## Detection latency: num_ctx, not prompt length (2026-10-03)
+
+QC per-call latency had crept up after the 2026-09-26 prompt revisions. A like-for-like A/B on the
+DragonHierOverLlm gold set (Qwen38 `UD-IQ4_XS`, single detection, temperature 0, 226 calls each)
+separated the two suspects:
+
+| Detection prompt | num_ctx | Median | Mean | p95 |
+|---|---|---|---|---|
+| current (19KB) | 8192 | 873ms | 1060ms | 1791ms |
+| older (13KB) | 8192 | 752ms | 820ms | 1278ms |
+| current | 6144 | 694ms | 801ms | 1086ms |
+| older | 4096 | 577ms | 685ms | 889ms |
+
+- **The larger context was the main cost.** The same prompt was ~20% faster at 6144 than at 8192,
+  with no loss in recall or precision. The prompt growth cost ~14% at a fixed context. At 8192, the
+  16GB card sat at ~15.8GB used, and the Ollama runner crashed once mid-run.
+- **The detection system prompt is nearly the whole context.** `BaseQualityReviewPrompt.txt` alone
+  measured 4585 tokens. Across all ~43k QC columns of the corpus, the per-row part (source, translation
+  and glossary) was 87 tokens at p50 and 193 at p90, with a maximum of 865 (worst full prompt 5450). The
+  glossary block is too small to be worth trimming. Shrinking the context further means shrinking the
+  system prompt.
+- `num_ctx` for the Qwen38 preset is now 6144. `QualityReviewWorkflow.CheckDetectionContextBudgetAsync`
+  runs at the start of every review pass. It measures the pass's five longest detection prompts via
+  Ollama's `prompt_eval_count` (generating one token) and fails fast if any would leave less than
+  `DetectionAnswerReserveTokens` free. Previously, a prompt edit that outgrew the context only showed
+  up mid-run as 400s and truncated answers (Unscored rows).
+
 ## Follow-up guidance
 
 When a new QC defect is found, record the reproduction, affected model/prompt, observed output,

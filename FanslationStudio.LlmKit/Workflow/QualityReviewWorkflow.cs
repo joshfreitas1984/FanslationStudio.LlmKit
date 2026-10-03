@@ -640,6 +640,8 @@ public static class QualityReviewWorkflow
         using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(300) };
         var reviewCache = new ReviewLlmCache();
 
+        await CheckDetectionContextBudgetAsync(config, modelConfig, client, LongestDetectionUserPrompts(config, workItems));
+
         await Parallel.ForEachAsync(workItems, new ParallelOptions { MaxDegreeOfParallelism = maxConcurrency }, async (item, _) =>
         {
             var outcome = await ReviewColumnAsync(config, modelConfig, client, item, reviewCache, timing);
@@ -1152,22 +1154,130 @@ public static class QualityReviewWorkflow
     /// otherwise). A copy - the shared model config is also used by the correction calls, which keep
     /// the model's own temperature.
     /// </summary>
-    internal static ModelExecutionConfig WithDetectionTemperature(LlmConfig config, ModelExecutionConfig modelConfig)
-    {
-        if (config.QualityReview.DetectionTemperature is not { } temperature || modelConfig.ModelParams == null)
-            return modelConfig;
+    internal static ModelExecutionConfig WithDetectionTemperature(LlmConfig config, ModelExecutionConfig modelConfig) =>
+        config.QualityReview.DetectionTemperature is { } temperature && modelConfig.ModelParams != null
+            ? WithModelParam(modelConfig, "temperature", temperature)
+            : modelConfig;
 
-        return new ModelExecutionConfig
+    /// <summary>A copy of <paramref name="modelConfig"/> with one <c>modelParams</c> entry replaced.</summary>
+    private static ModelExecutionConfig WithModelParam(ModelExecutionConfig modelConfig, string name, object value) => new()
+    {
+        ApiKey = modelConfig.ApiKey,
+        ApiKeyRequired = modelConfig.ApiKeyRequired,
+        EnableThinking = modelConfig.EnableThinking,
+        Url = modelConfig.Url,
+        Model = modelConfig.Model,
+        Prompts = modelConfig.Prompts,
+        ModelParams = new Dictionary<string, object>(modelConfig.ModelParams ?? new Dictionary<string, object>()) { [name] = value },
+    };
+
+    /// <summary>How many of a pass's longest detection prompts <see cref="CheckDetectionContextBudgetAsync"/> measures.</summary>
+    private const int ContextBudgetProbeCount = 5;
+
+    /// <summary>Tokens kept free under <c>num_ctx</c> for the detection answer (a DEFECTS line is ~10-30).</summary>
+    internal const int DetectionAnswerReserveTokens = 128;
+
+    /// <summary>
+    /// The <see cref="ContextBudgetProbeCount"/> longest detection user prompts (by UTF-8 bytes, which
+    /// tracks tokens far better than chars for mixed Chinese/English) among <paramref name="workItems"/>,
+    /// built exactly as <see cref="ReviewColumnAsync"/> builds them. Shortlisted on raw + translated
+    /// size first, since the glossary scan is too slow to run over every column of a full pass.
+    /// </summary>
+    private static List<string> LongestDetectionUserPrompts(LlmConfig config, List<QcWorkItem> workItems) =>
+        workItems
+            .Select(item => (Item: item, Translated: item.Column.ComputeEffectiveTranslated()))
+            .OrderByDescending(x => Encoding.UTF8.GetByteCount(x.Item.Column.RawText) + Encoding.UTF8.GetByteCount(x.Translated))
+            .Take(ContextBudgetProbeCount * 10)
+            .Select(x =>
+            {
+                var tokenReplacer = new StringTokenReplacer();
+                var glossaryPrompt = GlossaryLine.AppendPromptsFor(x.Item.Column.RawText, config.Runtime.GlossaryLines, x.Item.File.TextFile.Path);
+                return BuildQcUserPrompt(tokenReplacer.Replace(x.Item.Column.RawText), tokenReplacer.Replace(x.Translated), glossaryPrompt);
+            })
+            .Distinct()
+            .OrderByDescending(Encoding.UTF8.GetByteCount)
+            .Take(ContextBudgetProbeCount)
+            .ToList();
+
+    /// <summary>
+    /// Fail-fast guard before a review pass: gets the exact token count of each of
+    /// <paramref name="userPrompts"/> as a full detection prompt (Ollama's <c>prompt_eval_count</c>,
+    /// generating one token) and throws if any would not fit <c>num_ctx</c> with
+    /// <see cref="DetectionAnswerReserveTokens"/> to spare. Otherwise a prompt edit that outgrows the
+    /// context only shows up mid-run as 400s and truncated answers (Unscored rows). Skipped for a
+    /// non-Ollama endpoint or no configured <c>num_ctx</c>; a probe that can't get an answer only
+    /// warns, since the pass's own calls will surface that. See
+    /// docs/investigations/quality-review-postmortems.md.
+    /// </summary>
+    internal static async Task CheckDetectionContextBudgetAsync(LlmConfig config, ModelExecutionConfig modelConfig, HttpClient client, IReadOnlyList<string> userPrompts)
+    {
+        if (userPrompts.Count == 0
+            || modelConfig.Url?.Contains("/api/chat", StringComparison.OrdinalIgnoreCase) != true
+            || modelConfig.ModelParams?.GetValueOrDefault("num_ctx")?.ToString() is not { } numCtxText
+            || !int.TryParse(numCtxText, out var numCtx))
+            return;
+
+        var probeModel = WithModelParam(WithDetectionTemperature(config, modelConfig), "num_predict", 1);
+        var largest = 0;
+        foreach (var userPrompt in userPrompts)
         {
-            ApiKey = modelConfig.ApiKey,
-            ApiKeyRequired = modelConfig.ApiKeyRequired,
-            EnableThinking = modelConfig.EnableThinking,
-            Url = modelConfig.Url,
-            Model = modelConfig.Model,
-            Prompts = modelConfig.Prompts,
-            ModelParams = new Dictionary<string, object>(modelConfig.ModelParams) { ["temperature"] = temperature },
-        };
+            var requestData = LlmHelpers.GenerateLlmRequestData(probeModel, BuildQcMessages(probeModel, "BaseQualityReviewPrompt", userPrompt));
+            using var request = new HttpRequestMessage(HttpMethod.Post, probeModel.Url)
+            {
+                Content = new StringContent(requestData, Encoding.UTF8, "application/json"),
+            };
+            if (probeModel.ApiKeyRequired ?? false)
+                request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", probeModel.ApiKey);
+
+            string body;
+            bool success;
+            try
+            {
+                using var response = await client.SendAsync(request);
+                success = response.IsSuccessStatusCode;
+                body = await response.Content.ReadAsStringAsync();
+            }
+            catch (Exception e) when (e is HttpRequestException or OperationCanceledException)
+            {
+                Console.WriteLine($"Quality review: context check skipped - probe request failed: {e.Message}");
+                return;
+            }
+
+            if (body.Contains("exceed_context_size", StringComparison.OrdinalIgnoreCase))
+                throw ContextBudgetExceeded(numCtx, $"the server rejected it as over the context size ({body.Trim()})");
+
+            int? promptTokens = null;
+            if (success)
+            {
+                try
+                {
+                    using var json = System.Text.Json.JsonDocument.Parse(body);
+                    if (json.RootElement.TryGetProperty("prompt_eval_count", out var count) && count.TryGetInt32(out var value))
+                        promptTokens = value;
+                }
+                catch (System.Text.Json.JsonException)
+                {
+                }
+            }
+
+            if (promptTokens == null)
+            {
+                Console.WriteLine($"Quality review: context check skipped - no prompt_eval_count in probe response: {body.Trim()}");
+                return;
+            }
+
+            largest = Math.Max(largest, promptTokens.Value);
+        }
+
+        Console.WriteLine($"Quality review: largest detection prompt is {largest} tokens of num_ctx {numCtx} ({numCtx - largest} spare, {DetectionAnswerReserveTokens} reserved for the answer).");
+
+        if (largest + DetectionAnswerReserveTokens > numCtx)
+            throw ContextBudgetExceeded(numCtx, $"it measured {largest} tokens, leaving under {DetectionAnswerReserveTokens} for the answer");
     }
+
+    private static InvalidOperationException ContextBudgetExceeded(int numCtx, string detail) => new(
+        $"Quality review: the longest detection prompt in this pass does not fit num_ctx {numCtx} - {detail}. " +
+        "Shrink BaseQualityReviewPrompt.txt or raise the QC model's num_ctx before running QC.");
 
     /// <summary>
     /// Call 3 - writes ONE correction addressing every category in <paramref name="confirmedDefects"/>
