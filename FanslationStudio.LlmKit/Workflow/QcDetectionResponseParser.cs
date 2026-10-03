@@ -19,24 +19,10 @@ public static class QcDetectionResponseParser
         if (value.Equals("NONE", StringComparison.OrdinalIgnoreCase))
             return new QcDetectionResult(true, []);
 
-        var findings = new List<QcDefectFinding>();
-        foreach (var token in value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            if (token.Equals("NONE", StringComparison.OrdinalIgnoreCase))
-                return new QcDetectionResult(false, []);
-
-            var category = QcDefectCategoryTokens.Parse(token);
-            if (category is QcDefectCategory.Unknown or QcDefectCategory.None)
-                return new QcDetectionResult(false, []);
-
-            if (findings.Any(finding => finding.Category == category))
-                return new QcDetectionResult(false, []);
-
-            findings.Add(new QcDefectFinding(category));
-        }
-
-        if (findings.Count == 0)
+        if (!QcDefectCategoryTokens.TryParseList(value, out var categories))
             return new QcDetectionResult(false, []);
+
+        var findings = categories.Select(category => new QcDefectFinding(category)).ToList();
 
         // UNCERTAIN is a genuine "something's off but not confident enough to name it" signal -
         // never collapse it into an empty/clean result the way NONE is, and never let it stand

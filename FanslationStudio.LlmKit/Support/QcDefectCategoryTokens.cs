@@ -43,4 +43,36 @@ public static class QcDefectCategoryTokens
         QcDefectCategory.UnnaturalPhrasing => "UNNATURAL_PHRASING",
         _ => throw new ArgumentOutOfRangeException(nameof(category), category, "QcDefectCategory.Unknown has no wire token."),
     };
+
+    /// <summary>
+    /// Parses a comma-separated token list as every QC response line that names defects uses it
+    /// (detection's DEFECTS:, verification's UNRESOLVED:/NEW_DEFECTS:). A value that is exactly
+    /// <c>NONE</c> succeeds with an empty list; otherwise every token must be a distinct, real
+    /// category - <c>NONE</c> mixed into a list, an unrecognised token, or a duplicate is a protocol
+    /// violation and fails the whole list, as does a list with no tokens at all.
+    /// </summary>
+    public static bool TryParseList(string value, out List<QcDefectCategory> categories)
+    {
+        categories = [];
+        var trimmed = value.Trim();
+        if (trimmed.Equals("NONE", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        foreach (var token in trimmed.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (token.Equals("NONE", StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            var category = Parse(token);
+            if (category is QcDefectCategory.Unknown or QcDefectCategory.None)
+                return false;
+
+            if (categories.Contains(category))
+                return false;
+
+            categories.Add(category);
+        }
+
+        return categories.Count > 0;
+    }
 }

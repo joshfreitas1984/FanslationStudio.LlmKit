@@ -25,7 +25,7 @@ public static class QcVerificationResponseParser
         if (!unresolvedMatch.Success || !newDefectsMatch.Success || !scoreMatch.Success)
             return new QcVerificationResult(false, [], [], 0);
 
-        if (!TryParseCategoryList(unresolvedMatch.Groups[1].Value, out var unresolved))
+        if (!QcDefectCategoryTokens.TryParseList(unresolvedMatch.Groups[1].Value, out var unresolved))
             return new QcVerificationResult(false, [], [], 0);
 
         // UNRESOLVED must be a subset of what was actually confirmed - a verifier naming a category
@@ -33,35 +33,11 @@ public static class QcVerificationResponseParser
         if (unresolved.Any(category => !confirmedDefects.Contains(category)))
             return new QcVerificationResult(false, [], [], 0);
 
-        if (!TryParseCategoryList(newDefectsMatch.Groups[1].Value, out var newDefects))
+        if (!QcDefectCategoryTokens.TryParseList(newDefectsMatch.Groups[1].Value, out var newDefects))
             return new QcVerificationResult(false, [], [], 0);
 
-        var score = Math.Clamp(int.Parse(scoreMatch.Groups[1].Value), 0, 100);
+        // \d+ can still overflow int - a run of digits that long is far past the 0-100 scale anyway.
+        var score = int.TryParse(scoreMatch.Groups[1].Value, out var parsedScore) ? Math.Clamp(parsedScore, 0, 100) : 100;
         return new QcVerificationResult(true, unresolved, newDefects, score);
-    }
-
-    private static bool TryParseCategoryList(string value, out List<QcDefectCategory> categories)
-    {
-        categories = [];
-        var trimmed = value.Trim();
-        if (trimmed.Equals("NONE", StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        foreach (var token in trimmed.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            if (token.Equals("NONE", StringComparison.OrdinalIgnoreCase))
-                return false;
-
-            var category = QcDefectCategoryTokens.Parse(token);
-            if (category is QcDefectCategory.Unknown or QcDefectCategory.None)
-                return false;
-
-            if (categories.Contains(category))
-                return false;
-
-            categories.Add(category);
-        }
-
-        return categories.Count > 0;
     }
 }

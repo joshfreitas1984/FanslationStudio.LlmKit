@@ -42,6 +42,9 @@ public static class QualityEvaluatorAssessmentWorkflow
         var fingerprint = Fingerprint(goldSet);
         var configuredModels = new Dictionary<string, ModelExecutionConfig>(config.Runtime.Models);
         var reports = new List<EvaluatorSummary>();
+        // One client for the whole run - auth is per request (see TranslationService), so swapping
+        // the resident model between phases never needs a fresh client.
+        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(300) };
 
         foreach (var modelName in modelNames.Distinct(StringComparer.OrdinalIgnoreCase))
         {
@@ -51,7 +54,7 @@ public static class QualityEvaluatorAssessmentWorkflow
                 throw new InvalidOperationException($"QC evaluator model '{modelName}' has no BaseQualityReviewPrompt.");
 
             Console.WriteLine($"QC evaluator assessment: {modelName}");
-            var report = await RunModelAsync(config, modelName, model, goldSet, fingerprint, outputDirectory);
+            var report = await RunModelAsync(config, client, modelName, model, goldSet, fingerprint, outputDirectory);
             reports.Add(report.ToSummary());
         }
 
@@ -65,7 +68,7 @@ public static class QualityEvaluatorAssessmentWorkflow
         });
 
         if (settings.CorrectorModelNames.Count > 0)
-            await RunCorrectionGenerationComparisonAsync(config, settings, goldSet, fingerprint, outputDirectory, configuredModels);
+            await RunCorrectionGenerationComparisonAsync(config, client, settings, goldSet, fingerprint, outputDirectory, configuredModels);
     }
 
     /// <summary>
@@ -85,6 +88,7 @@ public static class QualityEvaluatorAssessmentWorkflow
     /// </summary>
     private static async Task RunCorrectionGenerationComparisonAsync(
         LlmConfig config,
+        HttpClient client,
         QualityEvaluatorAssessmentConfig settings,
         GoldSet goldSet,
         string fingerprint,
@@ -132,66 +136,32 @@ public static class QualityEvaluatorAssessmentWorkflow
             {
                 Console.WriteLine($"Correction generation: {correctorModelName} drafting, {settings.JudgeModelName} judging ({report.Results.Count} rows)");
 
-                using (var client = new HttpClient { Timeout = TimeSpan.FromSeconds(300) })
+                config.Runtime.Models = new Dictionary<string, ModelExecutionConfig> { [correctorModelName] = correctorModel };
+                foreach (var result in report.Results.Where(r => !r.GenerationAttempted))
                 {
-                    config.Runtime.Models = new Dictionary<string, ModelExecutionConfig> { [correctorModelName] = correctorModel };
-                    foreach (var result in report.Results.Where(r => !r.GenerationAttempted))
-                    {
-                        var tokenReplacer = new StringTokenReplacer();
-                        var glossaryPrompt = GlossaryLine.AppendPromptsFor(result.Source, config.Runtime.GlossaryLines, string.Empty);
-                        var maskedRaw = tokenReplacer.Replace(result.Source);
-                        var maskedTranslated = tokenReplacer.Replace(result.CurrentTranslation);
-                        var confirmedDefects = result.ConfirmedDefectCategories.Select(ParseCategory).Distinct().ToList();
+                    var sample = MaskSample(config, result.Source, result.CurrentTranslation);
+                    var confirmedDefects = result.ConfirmedDefectCategories.Select(ParseCategory).Distinct().ToList();
 
-                        var stopwatch = Stopwatch.StartNew();
-                        result.ProposedCorrection = await QualityReviewWorkflow.GenerateCorrectionAsync(
-                            config, correctorModel, client, result.SampleId, maskedRaw, maskedTranslated,
-                            glossaryPrompt, confirmedDefects, null);
-                        stopwatch.Stop();
-                        result.GenerationAttempted = true;
-                        result.GenerationElapsedMilliseconds = stopwatch.ElapsedMilliseconds;
-                        if (result.ProposedCorrection == null)
-                            result.ActualCorrectionSafety = "NoCorrectionProduced";
-                        WriteYamlAtomically(resultPath, report);
-                    }
+                    var stopwatch = Stopwatch.StartNew();
+                    result.ProposedCorrection = await QualityReviewWorkflow.GenerateCorrectionAsync(
+                        config, correctorModel, client, result.SampleId, sample.MaskedRaw, sample.MaskedTranslated,
+                        sample.GlossaryPrompt, confirmedDefects, null);
+                    stopwatch.Stop();
+                    result.GenerationAttempted = true;
+                    result.GenerationElapsedMilliseconds = stopwatch.ElapsedMilliseconds;
+                    if (result.ProposedCorrection == null)
+                        result.ActualCorrectionSafety = "NoCorrectionProduced";
+                    WriteYamlAtomically(resultPath, report);
                 }
 
-                using (var client = new HttpClient { Timeout = TimeSpan.FromSeconds(300) })
+                config.Runtime.Models = new Dictionary<string, ModelExecutionConfig> { [settings.JudgeModelName] = judgeModel };
+                foreach (var result in report.Results.Where(r => r.ProposedCorrection != null && r.ActualCorrectionSafety == null))
                 {
-                    config.Runtime.Models = new Dictionary<string, ModelExecutionConfig> { [settings.JudgeModelName] = judgeModel };
-                    foreach (var result in report.Results.Where(r => r.ProposedCorrection != null && r.ActualCorrectionSafety == null))
-                    {
-                        var tokenReplacer = new StringTokenReplacer();
-                        var glossaryPrompt = GlossaryLine.AppendPromptsFor(result.Source, config.Runtime.GlossaryLines, string.Empty);
-                        var maskedRaw = tokenReplacer.Replace(result.Source);
-                        var maskedTranslated = tokenReplacer.Replace(result.CurrentTranslation);
-                        var maskedCorrection = tokenReplacer.Replace(result.ProposedCorrection!);
-                        var confirmedDefects = result.ConfirmedDefectCategories.Select(ParseCategory).Distinct().ToList();
-
-                        var stopwatch = Stopwatch.StartNew();
-                        var verdict = await QualityReviewWorkflow.GetVerificationVerdictAsync(
-                            config, judgeModel, client, result.SampleId, maskedRaw, maskedTranslated,
-                            glossaryPrompt, confirmedDefects, maskedCorrection);
-                        stopwatch.Stop();
-                        result.VerificationElapsedMilliseconds = stopwatch.ElapsedMilliseconds;
-                        result.ParseSuccess = verdict.Success;
-                        result.VerificationScore = verdict.Score;
-                        result.ActualCorrectionSafety = !verdict.Success
-                            ? "Unscored"
-                            : !verdict.Accepted
-                                ? "Harmful"
-                                : verdict.Score >= config.QualityReview.MinAcceptableScore ? "Safe" : "Harmful";
-                        result.InitialCorrectionSafety = result.ActualCorrectionSafety;
-                        // Persisted on the result itself (not a local dictionary) so a crash/resume
-                        // mid-repair-loop reconstructs exactly which rows still need fixing from
-                        // Results.yaml alone - a local-only dictionary would silently forget any row
-                        // whose Harmful verdict was already persisted before an interruption, since
-                        // the loop above only re-verifies rows with ActualCorrectionSafety == null.
-                        result.UnresolvedDefectCategories = result.ActualCorrectionSafety == "Harmful"
-                            ? verdict.UnresolvedDefects.Concat(verdict.NewDefects).Distinct().Select(c => c.ToString()).ToList()
-                            : [];
-                        WriteYamlAtomically(resultPath, report);
-                    }
+                    var (verdict, elapsedMilliseconds) = await JudgeCorrectionAsync(config, judgeModel, client, result);
+                    result.VerificationElapsedMilliseconds = elapsedMilliseconds;
+                    ApplyJudgeVerdict(result, verdict, config.QualityReview.MinAcceptableScore);
+                    result.InitialCorrectionSafety = result.ActualCorrectionSafety;
+                    WriteYamlAtomically(resultPath, report);
                 }
 
                 // Mirrors GetLlmVerdictAsync's calls 4/5 repair loop: a row verify rejected goes back
@@ -212,69 +182,40 @@ public static class QualityEvaluatorAssessmentWorkflow
                             break;
                         Console.WriteLine($"Correction generation: {correctorModelName} repair attempt {attempt + 1}/{maxRepairAttempts} for {needsRepair.Count} row(s)");
 
-                        using (var client = new HttpClient { Timeout = TimeSpan.FromSeconds(300) })
+                        config.Runtime.Models = new Dictionary<string, ModelExecutionConfig> { [correctorModelName] = correctorModel };
+                        foreach (var result in needsRepair)
                         {
-                            config.Runtime.Models = new Dictionary<string, ModelExecutionConfig> { [correctorModelName] = correctorModel };
-                            foreach (var result in needsRepair)
-                            {
-                                var tokenReplacer = new StringTokenReplacer();
-                                var glossaryPrompt = GlossaryLine.AppendPromptsFor(result.Source, config.Runtime.GlossaryLines, string.Empty);
-                                var maskedRaw = tokenReplacer.Replace(result.Source);
-                                var maskedTranslated = tokenReplacer.Replace(result.CurrentTranslation);
-                                var maskedPrevious = tokenReplacer.Replace(result.ProposedCorrection!);
+                            var sample = MaskSample(config, result.Source, result.CurrentTranslation);
+                            var maskedPrevious = sample.Mask(result.ProposedCorrection!);
 
-                                var targetDefects = result.UnresolvedDefectCategories.Select(ParseCategory).Distinct().ToList();
-                                var stopwatch = Stopwatch.StartNew();
-                                var repaired = await QualityReviewWorkflow.GetCorrectionRepairAsync(
-                                    config, correctorModel, client, result.SampleId, maskedRaw, maskedTranslated,
-                                    glossaryPrompt, targetDefects, maskedPrevious, null);
-                                stopwatch.Stop();
-                                result.RepairAttemptsUsed++;
-                                result.RepairElapsedMilliseconds = (result.RepairElapsedMilliseconds ?? 0) + stopwatch.ElapsedMilliseconds;
-                                if (repaired == null)
-                                    // Corrector couldn't improve on the previous attempt - same as
-                                    // production, stop repairing this row and keep the last verified
-                                    // candidate/verdict (still Harmful) as final. Clearing
-                                    // UnresolvedDefectCategories (rather than removing a dictionary
-                                    // entry) is what excludes it from the next attempt's needsRepair
-                                    // filter, and survives a crash/resume since it's persisted.
-                                    result.UnresolvedDefectCategories = [];
-                                else
-                                    result.ProposedCorrection = repaired;
-                                WriteYamlAtomically(resultPath, report);
-                            }
+                            var targetDefects = result.UnresolvedDefectCategories.Select(ParseCategory).Distinct().ToList();
+                            var stopwatch = Stopwatch.StartNew();
+                            var repaired = await QualityReviewWorkflow.GetCorrectionRepairAsync(
+                                config, correctorModel, client, result.SampleId, sample.MaskedRaw, sample.MaskedTranslated,
+                                sample.GlossaryPrompt, targetDefects, maskedPrevious, null);
+                            stopwatch.Stop();
+                            result.RepairAttemptsUsed++;
+                            result.RepairElapsedMilliseconds = (result.RepairElapsedMilliseconds ?? 0) + stopwatch.ElapsedMilliseconds;
+                            if (repaired == null)
+                                // Corrector couldn't improve on the previous attempt - same as
+                                // production, stop repairing this row and keep the last verified
+                                // candidate/verdict (still Harmful) as final. Clearing
+                                // UnresolvedDefectCategories (rather than removing a dictionary
+                                // entry) is what excludes it from the next attempt's needsRepair
+                                // filter, and survives a crash/resume since it's persisted.
+                                result.UnresolvedDefectCategories = [];
+                            else
+                                result.ProposedCorrection = repaired;
+                            WriteYamlAtomically(resultPath, report);
                         }
 
-                        using (var client = new HttpClient { Timeout = TimeSpan.FromSeconds(300) })
+                        config.Runtime.Models = new Dictionary<string, ModelExecutionConfig> { [settings.JudgeModelName] = judgeModel };
+                        foreach (var result in needsRepair.Where(r => r.UnresolvedDefectCategories.Count > 0))
                         {
-                            config.Runtime.Models = new Dictionary<string, ModelExecutionConfig> { [settings.JudgeModelName] = judgeModel };
-                            foreach (var result in needsRepair.Where(r => r.UnresolvedDefectCategories.Count > 0))
-                            {
-                                var tokenReplacer = new StringTokenReplacer();
-                                var glossaryPrompt = GlossaryLine.AppendPromptsFor(result.Source, config.Runtime.GlossaryLines, string.Empty);
-                                var maskedRaw = tokenReplacer.Replace(result.Source);
-                                var maskedTranslated = tokenReplacer.Replace(result.CurrentTranslation);
-                                var maskedCorrection = tokenReplacer.Replace(result.ProposedCorrection!);
-                                var confirmedDefects = result.ConfirmedDefectCategories.Select(ParseCategory).Distinct().ToList();
-
-                                var stopwatch = Stopwatch.StartNew();
-                                var verdict = await QualityReviewWorkflow.GetVerificationVerdictAsync(
-                                    config, judgeModel, client, result.SampleId, maskedRaw, maskedTranslated,
-                                    glossaryPrompt, confirmedDefects, maskedCorrection);
-                                stopwatch.Stop();
-                                result.VerificationElapsedMilliseconds += stopwatch.ElapsedMilliseconds;
-                                result.ParseSuccess = verdict.Success;
-                                result.VerificationScore = verdict.Score;
-                                result.ActualCorrectionSafety = !verdict.Success
-                                    ? "Unscored"
-                                    : !verdict.Accepted
-                                        ? "Harmful"
-                                        : verdict.Score >= config.QualityReview.MinAcceptableScore ? "Safe" : "Harmful";
-                                result.UnresolvedDefectCategories = result.ActualCorrectionSafety == "Harmful"
-                                    ? verdict.UnresolvedDefects.Concat(verdict.NewDefects).Distinct().Select(c => c.ToString()).ToList()
-                                    : [];
-                                WriteYamlAtomically(resultPath, report);
-                            }
+                            var (verdict, elapsedMilliseconds) = await JudgeCorrectionAsync(config, judgeModel, client, result);
+                            result.VerificationElapsedMilliseconds += elapsedMilliseconds;
+                            ApplyJudgeVerdict(result, verdict, config.QualityReview.MinAcceptableScore);
+                            WriteYamlAtomically(resultPath, report);
                         }
                     }
                 }
@@ -301,6 +242,70 @@ public static class QualityEvaluatorAssessmentWorkflow
             Correctors = summaries,
         });
     }
+
+    /// <summary>
+    /// One gold row's text masked for a QC prompt, the way production masks a column
+    /// (<see cref="StringTokenReplacer"/>), plus its glossary block. Gold-set items have no
+    /// output-file identity, so the glossary is scoped to string.Empty - this only affects glossary
+    /// lines with "only"/"exclude" file restrictions, which are skipped here the same way they'd be
+    /// skipped for any file not in an "only" list. Further text (a correction) must go through
+    /// <see cref="Mask"/> after the source/translation, on the same replacer.
+    /// </summary>
+    private sealed record MaskedSample(StringTokenReplacer TokenReplacer, string GlossaryPrompt, string MaskedRaw, string MaskedTranslated)
+    {
+        public string Mask(string text) => TokenReplacer.Replace(text);
+    }
+
+    private static MaskedSample MaskSample(LlmConfig config, string source, string translation)
+    {
+        var tokenReplacer = new StringTokenReplacer();
+        var glossaryPrompt = GlossaryLine.AppendPromptsFor(source, config.Runtime.GlossaryLines, string.Empty);
+        var maskedRaw = tokenReplacer.Replace(source);
+        var maskedTranslated = tokenReplacer.Replace(translation);
+        return new MaskedSample(tokenReplacer, glossaryPrompt, maskedRaw, maskedTranslated);
+    }
+
+    /// <summary>The judge's call 4 on <paramref name="result"/>'s current draft, against its full confirmed set.</summary>
+    private static async Task<(QcVerificationResult Verdict, long ElapsedMilliseconds)> JudgeCorrectionAsync(
+        LlmConfig config, ModelExecutionConfig judgeModel, HttpClient client, CorrectionGenerationResult result)
+    {
+        var sample = MaskSample(config, result.Source, result.CurrentTranslation);
+        var maskedCorrection = sample.Mask(result.ProposedCorrection!);
+        var confirmedDefects = result.ConfirmedDefectCategories.Select(ParseCategory).Distinct().ToList();
+
+        var stopwatch = Stopwatch.StartNew();
+        var verdict = await QualityReviewWorkflow.GetVerificationVerdictAsync(
+            config, judgeModel, client, result.SampleId, sample.MaskedRaw, sample.MaskedTranslated,
+            sample.GlossaryPrompt, confirmedDefects, maskedCorrection);
+        stopwatch.Stop();
+        return (verdict, stopwatch.ElapsedMilliseconds);
+    }
+
+    /// <summary>
+    /// Records a judge verdict on <paramref name="result"/>. UnresolvedDefectCategories is persisted
+    /// on the result itself (not a local dictionary) so a crash/resume mid-repair-loop reconstructs
+    /// exactly which rows still need fixing from Results.yaml alone - a local-only dictionary would
+    /// silently forget any row whose Harmful verdict was already persisted before an interruption,
+    /// since phase B only re-verifies rows with ActualCorrectionSafety == null.
+    /// </summary>
+    private static void ApplyJudgeVerdict(CorrectionGenerationResult result, QcVerificationResult verdict, int minAcceptableScore)
+    {
+        result.ParseSuccess = verdict.Success;
+        result.VerificationScore = verdict.Score;
+        result.ActualCorrectionSafety = ClassifyCorrectionSafety(verdict, minAcceptableScore);
+        result.UnresolvedDefectCategories = result.ActualCorrectionSafety == "Harmful"
+            ? verdict.UnresolvedDefects.Concat(verdict.NewDefects).Distinct().Select(c => c.ToString()).ToList()
+            : [];
+    }
+
+    /// <summary>Unscored (no parseable verdict), Harmful (rejected, or accepted below
+    /// <paramref name="minAcceptableScore"/>), or Safe.</summary>
+    internal static string ClassifyCorrectionSafety(QcVerificationResult verdict, int minAcceptableScore) =>
+        !verdict.Success
+            ? "Unscored"
+            : !verdict.Accepted
+                ? "Harmful"
+                : verdict.Score >= minAcceptableScore ? "Safe" : "Harmful";
 
     /// <summary>
     /// Every gold row with a known confirmed defect set to draft a fresh correction against: gold
@@ -404,6 +409,7 @@ public static class QualityEvaluatorAssessmentWorkflow
 
     private static async Task<EvaluatorResultFile> RunModelAsync(
         LlmConfig config,
+        HttpClient client,
         string modelName,
         ModelExecutionConfig model,
         GoldSet goldSet,
@@ -419,8 +425,8 @@ public static class QualityEvaluatorAssessmentWorkflow
 
         config.Runtime.Models = new Dictionary<string, ModelExecutionConfig> { [modelName] = model };
         config.Runtime.TranslationCache.Clear();
-        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(300) };
         var stopwatch = Stopwatch.StartNew();
+        var completedResultIds = report.Results.Select(x => x.ResultId).ToHashSet();
 
         foreach (var item in goldSet.Items)
         {
@@ -430,7 +436,7 @@ public static class QualityEvaluatorAssessmentWorkflow
                     continue;
 
                 var resultId = $"detection:{item.SampleId}:{candidate.Key}:{modelName}";
-                if (report.Results.Any(x => x.ResultId == resultId))
+                if (completedResultIds.Contains(resultId))
                     continue;
 
                 report.Results.Add(await ReviewDetectionAsync(config, model, client, resultId,
@@ -444,7 +450,7 @@ public static class QualityEvaluatorAssessmentWorkflow
         foreach (var item in goldSet.CorrectionSamples)
         {
             var resultId = $"correction:{item.SampleId}:{modelName}";
-            if (report.Results.Any(x => x.ResultId == resultId))
+            if (completedResultIds.Contains(resultId))
                 continue;
 
             report.Results.Add(await ReviewCorrectionAsync(config, model, client, resultId, item, modelName,
@@ -485,19 +491,13 @@ public static class QualityEvaluatorAssessmentWorkflow
         bool enableThinking = false)
     {
         var stopwatch = Stopwatch.StartNew();
-        var tokenReplacer = new StringTokenReplacer();
-        // Gold-set items have no output-file identity, so pass string.Empty for the outputFile scope -
-        // this only affects glossary lines with "only"/"exclude" file restrictions, which are skipped
-        // here the same way they'd be skipped for any file not in an "only" list.
-        var glossaryPrompt = GlossaryLine.AppendPromptsFor(source, config.Runtime.GlossaryLines, string.Empty);
-        var maskedRaw = tokenReplacer.Replace(source);
-        var maskedTranslated = tokenReplacer.Replace(translation);
+        var sample = MaskSample(config, source, translation);
 
-        var call1 = await QualityReviewWorkflow.DetectDefectsAsync(config, model, client, source, maskedRaw, maskedTranslated, glossaryPrompt, null, enableThinking);
+        var call1 = await QualityReviewWorkflow.DetectDefectsAsync(config, model, client, source, sample.MaskedRaw, sample.MaskedTranslated, sample.GlossaryPrompt, null, enableThinking);
         var confirmed = call1;
         if (doubledDetection && call1.Success)
         {
-            var call2 = await QualityReviewWorkflow.DetectDefectsAsync(config, model, client, source, maskedRaw, maskedTranslated, glossaryPrompt, null, enableThinking);
+            var call2 = await QualityReviewWorkflow.DetectDefectsAsync(config, model, client, source, sample.MaskedRaw, sample.MaskedTranslated, sample.GlossaryPrompt, null, enableThinking);
             confirmed = QcDetectionResult.Merge(call1, call2);
         }
         stopwatch.Stop();
@@ -583,14 +583,11 @@ public static class QualityEvaluatorAssessmentWorkflow
         bool doubledVerification)
     {
         var stopwatch = Stopwatch.StartNew();
-        var tokenReplacer = new StringTokenReplacer();
         var confirmedDefects = item.DefectCategories.Count == 0
             ? [QcDefectCategory.OtherNamedDefect]
             : item.DefectCategories.Select(ParseCategory).Distinct().ToList();
-        var glossaryPrompt = GlossaryLine.AppendPromptsFor(item.Source, config.Runtime.GlossaryLines, string.Empty);
-        var maskedRaw = tokenReplacer.Replace(item.Source);
-        var maskedTranslated = tokenReplacer.Replace(item.CurrentTranslation);
-        var maskedCorrection = tokenReplacer.Replace(item.ProposedCorrection);
+        var sample = MaskSample(config, item.Source, item.CurrentTranslation);
+        var maskedCorrection = sample.Mask(item.ProposedCorrection);
 
         QcVerificationResult verdict;
         if (!model.Prompts.ContainsKey("BaseQualityReviewVerificationPrompt"))
@@ -600,22 +597,18 @@ public static class QualityEvaluatorAssessmentWorkflow
         else
         {
             var call1 = await QualityReviewWorkflow.GetVerificationVerdictAsync(config, model, client, item.Source,
-                maskedRaw, maskedTranslated, glossaryPrompt, confirmedDefects, maskedCorrection);
+                sample.MaskedRaw, sample.MaskedTranslated, sample.GlossaryPrompt, confirmedDefects, maskedCorrection);
             verdict = call1;
             if (doubledVerification && call1.Success)
             {
                 var call2 = await QualityReviewWorkflow.GetVerificationVerdictAsync(config, model, client, item.Source,
-                    maskedRaw, maskedTranslated, glossaryPrompt, confirmedDefects, maskedCorrection);
+                    sample.MaskedRaw, sample.MaskedTranslated, sample.GlossaryPrompt, confirmedDefects, maskedCorrection);
                 verdict = QcVerificationResult.Merge(call1, call2);
             }
         }
         stopwatch.Stop();
 
-        var actualSafety = !verdict.Success
-            ? "Unscored"
-            : !verdict.Accepted
-                ? "Harmful"
-                : verdict.Score >= config.QualityReview.MinAcceptableScore ? "Safe" : "Harmful";
+        var actualSafety = ClassifyCorrectionSafety(verdict, config.QualityReview.MinAcceptableScore);
         return new EvaluatorResult
         {
             ResultId = resultId,
