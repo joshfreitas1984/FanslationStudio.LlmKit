@@ -84,6 +84,11 @@ per-game `CompoundFieldSplitterOptions.PlaceholderPatterns` extension point for 
   attempt needs a retry (banned phrases, placeholder/tag preservation, length/format sanity,
   leftover Chinese, per-game `CustomColumnValidator` hook). It only checks structural/format
   correctness, not translation quality/fluency.
+- One `HttpClient` is shared by every concurrent worker in a run: set per-request state (auth)
+  on the `HttpRequestMessage`, **never** on `client.DefaultRequestHeaders`.
+- Long-running passes write `Converted/*.yaml` back through `Utility/BufferedFileWriter`
+  (dirty-tracked, throttled) - don't hand-roll per-file flush counters/locks. `YamlHelper`'s
+  serializer/deserializer are cached shared instances, so anything they hold must stay thread-safe.
 - See [`docs/investigations/translation-retry-escalation-and-fixes.md`](../docs/investigations/translation-retry-escalation-and-fixes.md)
   for full retry/escalation mechanics and real-run bug-fix postmortems.
 

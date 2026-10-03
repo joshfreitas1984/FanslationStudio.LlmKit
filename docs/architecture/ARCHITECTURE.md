@@ -183,11 +183,11 @@ Key mechanics shared by both schedulers:
   see `TranslationWorkflowTests.SetBracketSplitBugLinesAsInvalid` in the downstream repo for a
   one-off remediation workflow step that flags affected lines for retranslation.
 - **Real LLM call** (`TranslateMessagesAsync`): builds prompt via `GenerateBaseMessages` (the
-  glossary section is omitted entirely when no glossary term occurs in the text), POSTs
-  a fresh `HttpRequestMessage` per send (auth set per request - the `HttpClient` is shared by every
-  concurrent worker, so its `DefaultRequestHeaders` are never mutated), retries on HTTP 429 with exponential backoff (5s → up to 60s, max 5 retries, now logging
-  per-attempt wait time and a post-backoff summary of total blocked time), strips `<think>` tags
-  from reasoning-model output.
+  glossary section is omitted entirely when no glossary term occurs in the text), POSTs a fresh
+  `HttpRequestMessage` per send (auth set per request - the `HttpClient` is shared by every
+  concurrent worker, so its `DefaultRequestHeaders` are never mutated), retries on HTTP 429 with
+  exponential backoff (5s → up to 60s, max 5 retries, logging per-attempt wait time and a
+  post-backoff summary of total blocked time), strips `<think>` tags from reasoning-model output.
 - **Validation + correction loop** (`LineValidation.CheckTransalationSuccessful` + `RetryCount`):
   on failure, regenerates a fresh message list (to avoid unbounded context growth) and appends a
   correction prompt. If the failure is a "leftover Chinese characters" case, the outer retry loop

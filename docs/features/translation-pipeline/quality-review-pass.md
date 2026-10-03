@@ -75,10 +75,10 @@ authority for the whole column.
    model, and that model has a `BaseQualityReviewPrompt` prompt (see "Prompts" below) — throws
    immediately on a misconfiguration rather than silently no-op'ing or reviewing with a missing
    prompt.
-2. Loads every file's `Converted/*.yaml` up front (same pattern as `TranslationService`'s pooled
-   scheduler's `PooledFileState`), then builds one **work item per column**: `line.Splits.GroupBy(s
-   => s.Split)`, anchored on the `SubIndex == 0` fragment, flattened across every line in every
-   file into one list.
+2. Loads every file's `Converted/*.yaml` up front (`LoadFileStatesAsync`, one `QcFileState` per
+   file), then builds one **work item per column** via `EnumerateColumns(line)` (fragments grouped
+   by column, anchored on the `SubIndex == 0` fragment - or the lowest `SubIndex` if none is 0),
+   flattened across every line in every file into one list.
 3. If `sampleSize` is set, randomly samples that many work items (not first-N — a first-N sample
    would be biased toward whichever file happens to be enumerated first) before processing. This
    exists specifically so a candidate model can be tried on a small, representative sample before
