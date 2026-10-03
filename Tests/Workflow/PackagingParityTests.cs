@@ -229,7 +229,8 @@ public class PackagingParityTests
     }
 
     private static void AssertPinned(string expected, string output, (int, int, int) counts) =>
-        Assert.Equal(expected, $"{counts}\n{output.Replace("\r\n", "\n")}");
+        // Normalise both sides - the raw-string expectations pick up the checkout's line endings.
+        Assert.Equal(expected.Replace("\r\n", "\n"), $"{counts}\n{output.Replace("\r\n", "\n")}");
 
     private const string PrefabExpected = """
 (10, 2, 5)

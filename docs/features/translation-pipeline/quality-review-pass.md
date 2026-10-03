@@ -85,9 +85,23 @@ authority for the whole column.
    committing an entire run to it — see the downstream plan doc's "sample run" methodology.
 4. Runs `Parallel.ForEachAsync` (bounded by `qualityReview.maxConcurrency`, falling back to
    `maxConcurrency` → `batchSize` → 20, same chain every other concurrency knob uses) over the work
-   items, calling `ReviewColumnAsync` per column, with the same periodic buffered-flush-to-disk
-   pattern `TranslateViaLlmAsyncPooled` uses (`TranslationService.BatchlessBuffer`/`BatchlessLog`
-   reused directly, not reinvented).
+   items, calling `ReviewColumnAsync` per column, writing back through the same
+   `Utility/BufferedFileWriter` the translation schedulers use: a file is re-serialized only when a
+   column in it changed (a Skipped outcome never counts), at most once per
+   `BufferedFileWriter.DefaultMinFlushInterval` (10s) once more than
+   `TranslationService.BatchlessBuffer` changes have accumulated, and once more when its last work
+   item finishes. Files with no changed column are never rewritten.
+
+`RunBruteForce` loads config, the QC model and every file once for the whole loop; each review
+pass (`ReviewFileStatesAsync`) and rule check (`ApplyRulesToFileStates`) works on those in-memory
+file states and writes only what changed. Columns are enumerated everywhere through one
+`EnumerateColumns(line)` iterator (`QcColumn`: sorted fragments, anchor = `SubIndex` 0 else the
+lowest `SubIndex`, template, reconstructed raw text). The four QC LLM calls share one prompt
+builder (`BuildQcUserPrompt` - the glossary block is omitted when no glossary term occurs in the
+source) and one send helper (`SendQcCallAsync`). The validation gate (`EvaluateQcCandidate`) is
+the same on the review path and the rule-check path, and both validate against the QC model
+(`qualityReview.modelName`, falling back to the first configured model if that doesn't resolve).
+A rule-check give-up sets `QcDefectCategories = [Unknown]`, the same as a review-pass give-up.
 
 `ReviewColumnAsync(config, modelConfig, client, item)` per column:
 
@@ -305,6 +319,10 @@ Register it on the same `GameHooks` instance already passed to every `QualityRev
 live there too) - no separate wiring needed.
 
 ## Resetting Qc state
+
+Every reset method below runs on one shared sweep and writes back only the files it changed.
+None of them check `TextFileToSplit.EnableQualityReview`, and only `ResetStaleQcState` checks
+`qualityReview.enabled`.
 
 Five levels, narrowest to broadest:
 

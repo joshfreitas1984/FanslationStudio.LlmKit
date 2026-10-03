@@ -186,10 +186,4 @@ public class StringTokenReplacer
 
         return result.ToString();
     }
-
-    public static string CleanTranslatedForApplyRules(string input)
-    {
-        return input;
-        //return EmojiRegex.Replace(input, "");
-    }
 }

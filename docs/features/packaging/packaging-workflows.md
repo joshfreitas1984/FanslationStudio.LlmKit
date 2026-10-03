@@ -85,8 +85,11 @@ instead. `PrefabTextWorkflow`/`DynamicStringWorkflow` are the two paths that can
 
 ## Differences in packaging behavior by workflow
 
-The four workflows share the score-gate/freshness logic above, but differ in unit of reconstruction,
-failure granularity, and what happens when nothing is packageable:
+The four workflows share the score-gate/freshness logic above - implemented once in
+`Utility/PackagingHelpers` (`ResolveFragments`/`ResolvePlainSplit`, parameterised by the
+per-workflow differences below: anchor fallback, `QcRejected` counted as success or not, the
+DynamicStrings label-spacing transform) - and export through `Utility/ExportHelpers`. They differ
+in unit of reconstruction, failure granularity, and what happens when nothing is packageable:
 
 | | `CsvGameDataWorkflow` | `JsonGameDataWorkflow` | `PrefabTextWorkflow` | `DynamicStringWorkflow` |
 | --- | --- | --- | --- | --- |
@@ -208,7 +211,9 @@ opts in.
 
 Each workflow's `PackageAsync`/`PackagePrefabTextAsync`/`PackageDynamicStringsAsync` takes the same
 `(workingDirectory, textFile)` shape (`CsvGameDataWorkflow.PackageAsync` also accepts two optional
-hooks — see below) and returns the same `(Passed, QcRejected, RawFallback)` tuple, so a downstream
+hooks — see below) plus an optional trailing `LlmConfig? config` (pass one already-loaded config
+when packaging many files in a loop, instead of each call re-reading `Config.yaml`, the
+glossaries and prompts) and returns the same `(Passed, QcRejected, RawFallback)` tuple, so a downstream
 project's own packaging entry point is a thin dispatch loop over its configured
 `TextFileToSplit[]`, grouped by `TextFileType`:
 
