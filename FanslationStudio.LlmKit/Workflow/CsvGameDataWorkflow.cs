@@ -30,11 +30,6 @@ public static class CsvGameDataWorkflow
         string rawSubfolder = "Raw/Dumped/GameData")
     {
         var dumpedPath = $"{workingDirectory}/{rawSubfolder}/{textFile.Path}";
-        var exportPath = $"{workingDirectory}/Raw/Export";
-        var convertedPath = $"{workingDirectory}/Converted";
-
-        Directory.CreateDirectory(exportPath);
-        Directory.CreateDirectory(convertedPath);
 
         var lines = File.ReadAllLines(dumpedPath);
         var foundLines = new List<TranslationLine>();
@@ -74,12 +69,7 @@ public static class CsvGameDataWorkflow
             });
         }
 
-        var serializer = YamlHelper.CreateSerializer();
-        FileHelper.WriteAllTextWithRetry($"{exportPath}/{textFile.Path}.yaml", serializer.Serialize(foundLines));
-
-        // Never overwrite an already-accumulated Converted/*.yaml - matches Prefab/DynamicStrings.
-        if (!File.Exists($"{convertedPath}/{textFile.Path}.yaml"))
-            File.Copy($"{exportPath}/{textFile.Path}.yaml", $"{convertedPath}/{textFile.Path}.yaml");
+        ExportHelpers.WriteExport(workingDirectory, textFile, foundLines);
     }
 
     /// <summary>
@@ -102,20 +92,21 @@ public static class CsvGameDataWorkflow
     /// one game's own naive CSV loader misreading a trailing comma before a closing quote. Neither
     /// hook runs for a row that fell back to its original raw text.
     /// </summary>
+    /// <param name="config">Already-loaded configuration; read from <paramref name="workingDirectory"/> when null.</param>
     public static async Task<(int Passed, int QcRejected, int RawFallback)> PackageAsync(
         string workingDirectory, TextFileToSplit textFile,
         Action<int, string, string>? onColumnPackaged = null,
-        Func<string[], string[]>? rowPostProcess = null)
+        Func<string[], string[]>? rowPostProcess = null,
+        LlmConfig? config = null)
     {
         var outputPath = $"{workingDirectory}/Mod";
         Directory.CreateDirectory(outputPath);
 
-        var config = ConfigurationExtensions.GetConfiguration(workingDirectory);
+        config ??= ConfigurationExtensions.GetConfiguration(workingDirectory);
         var qualityReview = config.QualityReview;
 
         var outputLines = new List<string>();
-        var passedCount = 0;
-        var rawFallbackCount = 0;
+        var counts = new PackagingCounts();
 
         await FileIteration.IterateTranslatedFilesAsync(workingDirectory, [textFile], async (_, _, fileLines) =>
         {
@@ -140,47 +131,18 @@ public static class CsvGameDataWorkflow
                         .OrderBy(s => s.SubIndex)
                         .ToList();
 
-                    var anchor = fragments.FirstOrDefault(f => f.SubIndex == 0) ?? fragments.FirstOrDefault();
-                    var qcFresh = anchor != null && QualityReviewHelpers.IsQcReviewFresh(anchor, template, fragments, qualityReview);
-                    var useQcTranslated = qcFresh
-                        && !string.IsNullOrEmpty(anchor!.QcTranslated)
-                        && QualityReviewHelpers.PassesQcScoreGate(anchor.QcQualityScore, anchor.QcDefectCategory, qualityReview);
-
-                    if (useQcTranslated)
+                    // A QcRejected outcome still packages the plain pre-QC reconstruction, so only a
+                    // missing result fails the row.
+                    var resolved = PackagingHelpers.ResolveFragments(fragments, template, textFile, qualityReview, anchorFallsBackToFirst: true);
+                    if (resolved.Text == null)
                     {
-                        splits[template.Split] = PackagingTextFixups.Apply(config, textFile, template.Split, anchor!.Text, anchor.QcTranslated);
-                        onColumnPackaged?.Invoke(template.Split, anchor.Text, splits[template.Split]);
-                        continue;
-                    }
-
-                    var translatedFragments = new List<string>();
-
-                    foreach (var fragment in fragments)
-                    {
-                        if (!textFile.PackageOutput || fragment.FlaggedForRetranslation || !fragment.SafeToTranslate)
-                        {
-                            failed = true;
-                            break;
-                        }
-
-                        if (!string.IsNullOrEmpty(fragment.Translated))
-                            translatedFragments.Add(fragment.Translated);
-                        else if (!string.IsNullOrEmpty(fragment.Text))
-                        {
-                            failed = true;
-                            break;
-                        }
-                        else
-                            translatedFragments.Add(fragment.Text);
-                    }
-
-                    if (failed)
+                        failed = true;
                         break;
+                    }
 
-                    var reconstructed = CompoundFieldSplitter.Reconstruct(template.Template, translatedFragments);
-                    var rawConcat = string.Concat(fragments.Select(f => f.Text));
-                    splits[template.Split] = PackagingTextFixups.Apply(config, textFile, template.Split, rawConcat, reconstructed);
-                    onColumnPackaged?.Invoke(template.Split, rawConcat, splits[template.Split]);
+                    var rawText = resolved.QcAnchor?.Text ?? string.Concat(fragments.Select(f => f.Text));
+                    splits[template.Split] = PackagingTextFixups.Apply(config, textFile, template.Split, rawText, resolved.Text);
+                    onColumnPackaged?.Invoke(template.Split, rawText, splits[template.Split]);
                 }
 
                 if (!failed)
@@ -200,16 +162,13 @@ public static class CsvGameDataWorkflow
                             break;
                         }
 
-                        var plainQcFresh = QualityReviewHelpers.IsQcReviewFresh(split, null, [split], qualityReview);
-                        var usePlainQcTranslated = plainQcFresh
-                            && !string.IsNullOrEmpty(split.QcTranslated)
-                            && QualityReviewHelpers.PassesQcScoreGate(split.QcQualityScore, split.QcDefectCategory, qualityReview);
+                        // Flags were checked above, so a missing result here only means no usable
+                        // translation - which leaves an empty-Text cell untouched rather than failing.
+                        var resolved = PackagingHelpers.ResolvePlainSplit(split, qualityReview);
 
-                        var effectiveTranslated = usePlainQcTranslated ? split.QcTranslated : split.Translated;
-
-                        if (!string.IsNullOrEmpty(effectiveTranslated))
+                        if (resolved.Text != null)
                         {
-                            splits[split.Split] = PackagingTextFixups.Apply(config, textFile, split.Split, split.Text, effectiveTranslated);
+                            splits[split.Split] = PackagingTextFixups.Apply(config, textFile, split.Split, split.Text, resolved.Text);
                             onColumnPackaged?.Invoke(split.Split, split.Text, splits[split.Split]);
                         }
                         else if (!string.IsNullOrEmpty(split.Text))
@@ -223,7 +182,7 @@ public static class CsvGameDataWorkflow
                 if (failed)
                 {
                     outputLines.Add(line.Raw);
-                    rawFallbackCount++;
+                    counts.RawFallback++;
                 }
                 else
                 {
@@ -232,7 +191,7 @@ public static class CsvGameDataWorkflow
 
                     var rebuilt = CompoundFieldSplitter.RebuildCsvRow(splits);
                     outputLines.Add(rebuilt);
-                    passedCount++;
+                    counts.Passed++;
                 }
             }
 
@@ -243,8 +202,8 @@ public static class CsvGameDataWorkflow
 
         // CSV rows never fail purely for a low QC score - a template column below MinAcceptableScore
         // just skips its QcTranslated correction and falls through to the row's plain, pre-QC
-        // fragment translation instead (see the useQcTranslated/usePlainQcTranslated checks above),
-        // so every failure counted here is a RawFallback.
-        return (passedCount, 0, rawFallbackCount);
+        // fragment translation instead (see PackagingHelpers.ResolveFragments/ResolvePlainSplit), so
+        // every failure counted here is a RawFallback.
+        return counts.ToTuple();
     }
 }

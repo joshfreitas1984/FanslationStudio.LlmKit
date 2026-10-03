@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using FanslationStudio.LlmKit.Support;
 using FanslationStudio.LlmKit.Utility;
 using SharedAssembly.DynamicStrings;
@@ -35,13 +34,7 @@ public static class DynamicStringsCecilWorkflow
         string workingDirectory, TextFileToSplit textFile, string rawSubfolder = "Raw/Dumped")
     {
         var dumpedPath = $"{workingDirectory}/{rawSubfolder}/{textFile.Path}";
-        var exportPath = $"{workingDirectory}/Raw/Export";
-        var convertedPath = $"{workingDirectory}/Converted";
 
-        Directory.CreateDirectory(exportPath);
-        Directory.CreateDirectory(convertedPath);
-
-        var pattern = LineValidation.ChineseCharPattern;
         var foundLines = new List<TranslationLine>();
 
         foreach (var line in File.ReadAllLines(dumpedPath))
@@ -51,7 +44,7 @@ public static class DynamicStringsCecilWorkflow
 
             for (var i = 0; i < splits.Length; i++)
             {
-                if (!Regex.IsMatch(splits[i], pattern))
+                if (!LineValidation.ContainsCjk(splits[i]))
                     continue;
 
                 var cleaned = splits[i];
@@ -70,13 +63,7 @@ public static class DynamicStringsCecilWorkflow
             });
         }
 
-        var serializer = YamlHelper.CreateSerializer();
-        var yaml = serializer.Serialize(foundLines);
-        FileHelper.WriteAllTextWithRetry($"{exportPath}/{textFile.Path}.yaml", yaml);
-
-        // Never overwrite an already-accumulated Converted/*.yaml - matches Prefab/DynamicStringsIL2CPP.
-        if (!File.Exists($"{convertedPath}/{textFile.Path}.yaml"))
-            File.Copy($"{exportPath}/{textFile.Path}.yaml", $"{convertedPath}/{textFile.Path}.yaml");
+        ExportHelpers.WriteExport(workingDirectory, textFile, foundLines);
     }
 
     /// <summary>
