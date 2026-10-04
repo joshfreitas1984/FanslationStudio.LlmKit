@@ -97,6 +97,47 @@ public class LineValidationSilentFailureTests
         Assert.Empty(validation.SoftCorrectionPrompt);
     }
 
+    [Theory(DisplayName = "NarratesAsFirstPerson flags subject-less narration written as I, not speech or thoughts")]
+    [InlineData("只见阮芷躺在一块草席上，正不住咳嗽。", "I see Ruan Zhi lying on a straw mat, coughing.", true)]
+    [InlineData("话音刚落，只听闻金鼓齐鸣，无数马蹄声轰隆而至。", "The moment the words fell silent, I heard gongs and drums.", true)]
+    [InlineData("（只听得一阵洪钟般的笑声从山下传来", "(I could hear a loud laugh from below the mountain.", true)]
+    [InlineData("只见阮芷躺在一块草席上，正不住咳嗽。", "You see Ruan Zhi lying on a straw mat.", false)]
+    [InlineData("只见我宋廉庭在此，谁敢放肆！", "I, Song Lianting, am here - who dares?", false)]
+    [InlineData("听闻近来监牢内更换了一批守卫，刚熟络起来的几位狱卒都调离了此处。", "I heard that a batch of new guards has been assigned.", false)]
+    [InlineData("（啊呀，又扔偏了）", "(Oops, I missed again.)", false)]
+    [InlineData("眼见你快步追上，只能扑通一声跪地求饶", "Seeing you catch up, I could only fall to my knees and beg.", false)]
+    public void NarratesAsFirstPerson_Cases(string raw, string result, bool expected) =>
+        Assert.Equal(expected, LineValidation.NarratesAsFirstPerson(raw, result));
+
+    [Theory(DisplayName = "ContradictsGender flags only the opposite pronoun for a known gender, and never when the source states a gender")]
+    [InlineData("（揉了揉被震麻的手腕）", "(Rubbing her numbed wrist)", "male", true)]
+    [InlineData("（揉了揉被震麻的手腕）", "(Rubbing his numbed wrist)", "male", false)]
+    [InlineData("（点了点头）", "(Smiled, he nodded)", "female", true)]
+    [InlineData("（点了点头）", "(Smiled, she nodded)", "female", false)]
+    [InlineData("（点了点头）", "(Smiled and nodded)", "female", false)]
+    [InlineData("（点了点头）", "(Smiled, they nodded)", "male", false)]
+    // The speaker is male but the source says 她: another person, so "she" is correct.
+    [InlineData("（看着姜婉，她羞红了脸）", "(Looking at Jiang Wan, she blushed)", "male", false)]
+    [InlineData("（看着姜婉的妹妹）", "(Looking at Jiang Wan's sister, her eyes shining)", "male", false)]
+    public void ContradictsGender_Cases(string raw, string translated, string gender, bool expected) =>
+        Assert.Equal(expected, LineValidation.ContradictsGender(raw, translated, gender));
+
+    [Theory(DisplayName = "ContradictsGenderDespiteKinshipTerm flags a kinship-term source only when it has no explicit 他/她")]
+    [InlineData("（妹妹说错了）", "(His younger sister was wrong)", "female", true)]
+    [InlineData("（妹妹说错了）", "(Her younger sister was wrong)", "female", false)]
+    [InlineData("（看着妹妹，她羞红了脸）", "(Looking at his sister, she blushed)", "male", false)]
+    [InlineData("（点了点头）", "(Smiled, he nodded)", "female", false)]
+    public void ContradictsGenderDespiteKinshipTerm_Cases(string raw, string translated, string gender, bool expected) =>
+        Assert.Equal(expected, LineValidation.ContradictsGenderDespiteKinshipTerm(raw, translated, gender));
+
+    [Theory(DisplayName = "UsesOnlyNeutralPronouns needs a they/their and no he/she")]
+    [InlineData("(Smiled, they nodded)", true)]
+    [InlineData("(Smiled, he nodded)", false)]
+    [InlineData("(Smiled and nodded)", false)]
+    [InlineData("(They smiled; she nodded)", false)]
+    public void UsesOnlyNeutralPronouns_Cases(string translated, bool expected) =>
+        Assert.Equal(expected, LineValidation.UsesOnlyNeutralPronouns(translated));
+
     [Fact(DisplayName = "An unclosed color tag fails with a reason")]
     public void UnclosedColorTag_FailsWithReason()
     {

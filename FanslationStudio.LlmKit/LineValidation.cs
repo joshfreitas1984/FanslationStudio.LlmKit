@@ -584,12 +584,59 @@ public static partial class LineValidation
     }
 
     /// <summary>
+    /// True when <paramref name="translated"/> uses a pronoun for the opposite gender to the known
+    /// <paramref name="gender"/> and <paramref name="raw"/> states no gender of its own (<see cref="LineContext.Male"/> / <see cref="LineContext.Female"/>) and none
+    /// for the right one. A line that names a second person can legitimately use both, so it is only a candidate
+    /// to re-check, not proof of an error.
+    /// </summary>
+    public static bool ContradictsGender(string raw, string translated, string gender)
+    {
+        // A source that states a gender itself (他/她, a kinship term or title) can name a second person of either
+        // gender, so a pronoun that differs from the speaker's is expected there.
+        if (GenderedSourceRegex().IsMatch(raw))
+            return false;
+
+        var male = MalePronounRegex().IsMatch(translated);
+        var female = FemalePronounRegex().IsMatch(translated);
+        return gender == LineContext.Male ? female && !male : gender == LineContext.Female && male && !female;
+    }
+
+    /// <summary>
+    /// Like <see cref="ContradictsGender"/>, but for a source whose only gender signal is a kinship term or title
+    /// (妹妹, 先生...) with no explicit 他/她: e.g. a female speaker's "（妹妹说错了）" translated "His younger sister
+    /// was wrong". The pronoun may belong to the relative rather than the speaker, so this is a lower-confidence
+    /// candidate for a re-check, never proof.
+    /// </summary>
+    public static bool ContradictsGenderDespiteKinshipTerm(string raw, string translated, string gender)
+    {
+        if (!GenderedSourceRegex().IsMatch(raw) || ExplicitPronounSourceRegex().IsMatch(raw))
+            return false;
+
+        var male = MalePronounRegex().IsMatch(translated);
+        var female = FemalePronounRegex().IsMatch(translated);
+        return gender == LineContext.Male ? female && !male : gender == LineContext.Female && male && !female;
+    }
+
+    /// <summary>True when <paramref name="translated"/> refers to someone only as "they/them/their", with no he/she at all.</summary>
+    public static bool UsesOnlyNeutralPronouns(string translated) =>
+        NeutralPronounRegex().IsMatch(translated) && !GenderedPronounRegex().IsMatch(translated);
+
+    /// <summary>
+    /// True when <paramref name="raw"/> is subject-less narration (只见, 只听, 行至, 忽然听闻...) that names no
+    /// speaker of its own, yet <paramref name="result"/> narrates it as "I/me/my". The game narrates to the
+    /// player in second person, so this should read "you" or have no subject. Spoken lines and parenthesised
+    /// thoughts are not matched, nor is a line that mentions 你/您 (another character addressing the player, so "I" is right).
+    /// </summary>
+    public static bool NarratesAsFirstPerson(string raw, string result) =>
+        raw.Length <= 80 && NarrationOpenerRegex().IsMatch(raw) && !SelfReferenceRegex().IsMatch(raw) && !raw.Contains('你') && !raw.Contains('您') && FirstPersonPronounRegex().IsMatch(result);
+
+    /// <summary>
     /// True when <paramref name="result"/> gives someone a he/she/his/her/him that the short, ungendered
     /// <paramref name="raw"/> never established: a parenthesised stage direction or an unnamed-role line
     /// (此人, 对方, 乞丐...) with no 他/她 or gendered kinship/title character. Deliberately narrow - a
     /// named character in running narration is left alone rather than forced into "they".
     /// </summary>
-    internal static bool InventsGender(string raw, string result)
+    public static bool InventsGender(string raw, string result)
     {
         if (raw.Length > 60 || !GenderedPronounRegex().IsMatch(result) || GenderedSourceRegex().IsMatch(raw))
             return false;
@@ -867,12 +914,35 @@ public static partial class LineValidation
     [GeneratedRegex(@"\b(?:he|she|his|her|him|himself|herself)\b", RegexOptions.IgnoreCase)]
     private static partial Regex GenderedPronounRegex();
 
+    [GeneratedRegex(@"\b(?:he|his|him|himself)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex MalePronounRegex();
+
+    [GeneratedRegex(@"\b(?:she|her|hers|herself)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex FemalePronounRegex();
+
+    [GeneratedRegex(@"\b(?:they|them|their|theirs|themselves)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex NeutralPronounRegex();
+
     // 他/她/它 plus gendered kinship, titles and roles: any of these means the source does state a gender.
     [GeneratedRegex("[他她它牠哥姐弟妹父母爹娘兄嫂郎女男叔婶爷妻婆翁妇]|公子|姑娘|少爷|小姐|先生|夫人|丈夫|夫君|儿子|奶奶|好汉|大汉|汉子")]
     private static partial Regex GenderedSourceRegex();
 
+    // An explicit pronoun in the source: the translation is following the source, so it is not an invented gender.
+    [GeneratedRegex("[他她它牠]")]
+    private static partial Regex ExplicitPronounSourceRegex();
+
     [GeneratedRegex("此人|这人|那人|来人|对方|乞丐|隐者|路人|店小二|小二|行人|旁人|某人|有人|何人")]
     private static partial Regex UnnamedRoleRegex();
+
+    [GeneratedRegex(@"^[（(]?\s*(?:只见|只听|但见|眼见|行至|话音刚落|等了不多时|正[^，。,]{1,8}间)|忽然听闻|只听闻|只听得")]
+    private static partial Regex NarrationOpenerRegex();
+
+    // Words that make a first-person subject legitimate: the speaker names themself.
+    [GeneratedRegex("我|咱|老子|老夫|在下|贫道|贫僧|本官|本座|为师|弟子|徒儿|小的|自己|某")]
+    private static partial Regex SelfReferenceRegex();
+
+    [GeneratedRegex(@"\b(?:I|[Mm]y|[Mm]e|myself)\b")]
+    private static partial Regex FirstPersonPronounRegex();
 
     [GeneratedRegex(@"<[^>]+>")]
     private static partial Regex HtmlTagRegex();

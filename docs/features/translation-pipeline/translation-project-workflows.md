@@ -70,6 +70,21 @@ The normal translation loop is:
 
 Pass the same `GameHooks` instance to every translation entry point. A hook supplied only to one pass makes behavior depend on which command was run.
 
+#### Repairing an old corpus: pronoun defects
+
+`PronounDefectWorkflow.RunAsync(workingDirectory, textFiles, flagForRetranslation, hooks)` finds translations written before the pronoun prompt rules and line context existed, and writes them to `TestResults/PronounRetranslation.yaml`:
+
+| Category | Meaning |
+| --- | --- |
+| `InventedGender` | A he/she/his/her/him where the source states no gender (a stage direction or an unnamed role such as 此人). |
+| `WrongGender` | A pronoun that contradicts the speaker's gender, when a `LineContextProvider` knows it. |
+| `WrongGenderKinshipTerm` | The same, where the source's only gender signal is a kinship term or title. Lower confidence; a false positive costs one extra retranslation. |
+| `NarratedAsFirstPerson` | Subject-less narration (只见, 只听, 行至...) written as "I". |
+
+Run it as a dry run first (`flagForRetranslation: false`, the default). It writes only the report, so the count can be read before committing to a retranslation; `Converted` is untouched. Judged on the pre-QC `Translated`, with `QcRewrote` marking lines QC already corrected. Without a line-context provider only `InventedGender` and `NarratedAsFirstPerson` can be found.
+
+With `flagForRetranslation: true` it sets `FlaggedForRetranslation` on each hit. Flagged lines are not packaged until retranslated, so run the flag pass and a translate-flagged pass back to back. QC state resets automatically when a retranslation changes the text, so lines are re-reviewed afterward.
+
 ### 4. Run quality review after translation is complete
 
 `QualityReviewWorkflow.RunAsync(...)` is an optional second LLM pass. Run it only after ordinary translation has produced complete, valid candidates. It reviews reconstructed columns, not unfinished individual splits, and skips unsafe, missing, or flagged translations.

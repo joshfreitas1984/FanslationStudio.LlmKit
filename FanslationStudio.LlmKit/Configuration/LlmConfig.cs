@@ -22,6 +22,12 @@ public class LlmConfig
     public bool SkipLineValidation { get; set; }
     public bool CorrectionPromptsEnabled { get; set; }
     public bool TranslateFlagged { get; set; }
+
+    /// <summary>
+    /// Off by default. When true, <see cref="GameHooks.LineContextProvider"/> (if the game set one) supplies a
+    /// per-line context - e.g. the speaker and their gender - that is added to that line's system prompt.
+    /// </summary>
+    public bool LineContextEnabled { get; set; }
     public List<ModelConfig> Models { get; set; } = new();
     public GlossaryPresetConfig GlossaryPreset { get; set; } = new();
 
@@ -224,6 +230,13 @@ public class RuntimeValues
     /// across every parallel worker, for the lifetime of the run.
     /// </summary>
     public Dictionary<string, List<GlossaryLine>> FileRestrictedEntriesByText { get; set; } = new();
+
+    /// <summary>
+    /// Per-split context from <see cref="GameHooks.LineContextProvider"/>, built once per run before any
+    /// translation starts (keyed by split instance - <see cref="TranslationSplit"/> has no value equality).
+    /// Empty unless <see cref="LlmConfig.LineContextEnabled"/>.
+    /// </summary>
+    public ConcurrentDictionary<TranslationSplit, LineContext> LineContexts { get; set; } = new();
 }
 
 public class ModelUrlConfig

@@ -33,6 +33,16 @@ public class GameHooks
     public Func<string, string, string>? CustomPostRepair { get; set; }
 
     /// <summary>
+    /// Invoked once per file when a translation run starts, and only if <see cref="LlmConfig.LineContextEnabled"/>.
+    /// Receives the working directory (so a game can read its own data files), the file and its lines (in file order, so a provider can carry state such as the current speaker
+    /// from one row to the next) and returns a <see cref="LineContext"/> for each split it has context for.
+    /// Splits it omits are translated exactly as before. A split with a context is never served from, or written
+    /// to, the shared translation cache, and never deduplicated against an identical text with a different
+    /// context, since the same text can translate differently for a different speaker.
+    /// </summary>
+    public Func<string, TextFileToSplit, IReadOnlyList<TranslationLine>, IReadOnlyDictionary<TranslationSplit, LineContext>>? LineContextProvider { get; set; }
+
+    /// <summary>
     /// Invoked at the very end of <see cref="LineValidation.CheckTransalationSuccessful"/>, only
     /// when every built-in check above has already passed. Lets a game-specific project add
     /// validation rules that only make sense for one specific column of one specific file - e.g. a

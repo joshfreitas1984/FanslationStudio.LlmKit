@@ -299,4 +299,80 @@ public class TranslationServiceTests
         Assert.Equal("(Smiling, he put the silver away)", result.Result);
         Assert.Equal(0, softRule.CallCount);
     }
+
+    [Fact(DisplayName = "TranslateSplitAsync passes the line context through the leading-bracket path and skips the soft gender check")]
+    public async Task TranslateSplitAsync_LineContext_ReachesPromptAndSuppressesSoftCheck()
+    {
+        var softRule = new ScriptedLlmHandler.Rule { Matches = c => c.Contains("NOGENDER"), Responses = ["(Smiling, put the silver away)"] };
+        var contextRule = new ScriptedLlmHandler.Rule { Matches = c => c.Contains("HINT-XYZ"), Responses = ["(Smiling, he put the silver away)"] };
+
+        var config = BuildConfig([softRule, contextRule], out var client);
+        config.CorrectionPromptsEnabled = true;
+
+        var result = await TranslationService.TranslateSplitAsync(config, "（笑着把银两收起来）", client, BuildTextFile(),
+            additionalPrompts: "HINT-XYZ", genderKnown: true);
+
+        Assert.True(result.Valid);
+        Assert.Equal("(Smiling, he put the silver away)", result.Result);
+        Assert.Equal(1, contextRule.CallCount);
+        Assert.Equal(0, softRule.CallCount);
+    }
+
+    [Theory(DisplayName = "A run gives identical text a separate translation per line context, and still dedupes without contexts")]
+    [InlineData(true, true, 2)]
+    [InlineData(false, true, 2)]
+    [InlineData(true, false, 1)]
+    [InlineData(false, false, 1)]
+    public async Task TranslateViaLlm_LineContext_SeparatesIdenticalText(bool pooled, bool contextEnabled, int expectedCalls)
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "llmkit-linectx-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(dir, "Converted"));
+        Directory.CreateDirectory(Path.Combine(dir, "TestResults", "OldFiles"));
+
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "Converted", "Test.txt.yaml"),
+                "- raw: \"（笑了笑）\"\n  splits:\n  - text: \"（笑了笑）\"\n- raw: \"（笑了笑）\"\n  splits:\n  - text: \"（笑了笑）\"\n");
+
+            var ruleA = new ScriptedLlmHandler.Rule { Matches = c => c.Contains("HINT-A"), Responses = ["(Smiled, he nodded)"] };
+            var ruleB = new ScriptedLlmHandler.Rule { Matches = c => c.Contains("HINT-B"), Responses = ["(Smiled, she nodded)"] };
+            var plain = new ScriptedLlmHandler.Rule { Matches = _ => true, Responses = ["(Smiled and nodded)"] };
+
+            var config = BuildConfig([ruleA, ruleB, plain], out var client);
+            config.UseContinuousWorkerPool = pooled;
+            config.LineContextEnabled = contextEnabled;
+            config.Hooks = new GameHooks
+            {
+                LineContextProvider = (_, _, lines) => new Dictionary<TranslationSplit, LineContext>
+                {
+                    [lines[0].Splits[0]] = new LineContext("HINT-A", true),
+                    [lines[1].Splits[0]] = new LineContext("HINT-B", true),
+                },
+            };
+
+            var textFile = BuildTextFile();
+            textFile.Path = "Test.txt";
+            var corpus = TranslationCorpus.Load(dir, [textFile], copyMissingFromExport: false);
+
+            await TranslationService.TranslateViaLlmAsync(config, corpus, forceRetranslation: false, client);
+
+            var lines = corpus.Files.Single().Lines;
+            Assert.Equal(expectedCalls, ruleA.CallCount + ruleB.CallCount + plain.CallCount);
+
+            if (contextEnabled)
+            {
+                Assert.Equal("(Smiled, he nodded)", lines[0].Splits[0].Translated);
+                Assert.Equal("(Smiled, she nodded)", lines[1].Splits[0].Translated);
+            }
+            else
+            {
+                Assert.Equal("(Smiled and nodded)", lines[0].Splits[0].Translated);
+                Assert.Equal(lines[0].Splits[0].Translated, lines[1].Splits[0].Translated);
+            }
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
 }
