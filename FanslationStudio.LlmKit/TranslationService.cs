@@ -349,24 +349,6 @@ public static partial class TranslationService
     /// Builds the run-wide translation cache from <paramref name="corpus"/>, shared by both
     /// <see cref="TranslateViaLlmAsyncBatched"/> and <see cref="TranslateViaLlmAsyncPooled"/>.
     /// </summary>
-    /// <summary>
-    /// Asks <see cref="GameHooks.LineContextProvider"/> for each file's per-line contexts. Runs single-threaded
-    /// before any translation starts, so the workers only ever read <see cref="RuntimeValues.LineContexts"/>.
-    /// A no-op unless <see cref="LlmConfig.LineContextEnabled"/> and the game set a provider.
-    /// </summary>
-    private static void BuildLineContexts(LlmConfig config, TranslationCorpus corpus)
-    {
-        config.Runtime.LineContexts = new ConcurrentDictionary<TranslationSplit, LineContext>();
-
-        var provider = config.Hooks?.LineContextProvider;
-        if (!config.LineContextEnabled || provider == null)
-            return;
-
-        foreach (var file in corpus.Files)
-            foreach (var (split, context) in provider(corpus.WorkingDirectory, file.TextFile, file.Lines))
-                config.Runtime.LineContexts[split] = context;
-    }
-
     private static TranslationRun PrepareTranslationRun(LlmConfig config, TranslationCorpus corpus, bool forceRetranslation, HttpClient? client = null)
     {
         // Translation Cache - dedups repeated strings within this run and across history
@@ -383,7 +365,7 @@ public static partial class TranslationService
         var fragmentCache = new ConcurrentDictionary<string, string>();
         var overrideKeys = new HashSet<string>();
         FillTranslationCache(corpus, TranslationCacheMaxChars, translationCache, config, fragmentCache, overrideKeys);
-        BuildLineContexts(config, corpus);
+        LineContexts.Build(config, corpus.WorkingDirectory, corpus.Files.Select(file => (file.TextFile, (IReadOnlyList<TranslationLine>)file.Lines)));
 
         return new TranslationRun
         {

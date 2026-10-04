@@ -360,11 +360,25 @@ public static class QualityReviewWorkflow
     /// </summary>
     internal static string BuildQcUserPrompt(string maskedRaw, string maskedTranslated, string? glossaryPrompt, params (string Label, string Value)[] extraFields)
     {
+        // The game's line context (see GameHooks.LineContextProvider) rides in the same string as the glossary.
+        string? lineContext = null;
+        if (glossaryPrompt != null && glossaryPrompt.Contains(LineContexts.QcSeparator))
+        {
+            var parts = glossaryPrompt.Split(LineContexts.QcSeparator, 2);
+            glossaryPrompt = parts[0];
+            lineContext = parts[1];
+        }
+
         var userPrompt = new StringBuilder();
         userPrompt.AppendLine($"SOURCE (Chinese): {maskedRaw}");
         userPrompt.AppendLine($"CURRENT TRANSLATION (English): {maskedTranslated}");
         foreach (var (label, value) in extraFields)
             userPrompt.AppendLine($"{label}: {value}");
+        if (!string.IsNullOrEmpty(lineContext))
+        {
+            userPrompt.AppendLine("Line context from the game (treat as fact; a pronoun that matches it is correct, so never change it):");
+            userPrompt.AppendLine(lineContext);
+        }
         if (!string.IsNullOrEmpty(glossaryPrompt))
         {
             userPrompt.AppendLine("Relevant glossary terms (must be preserved if they appear in SOURCE):");
@@ -681,6 +695,9 @@ public static class QualityReviewWorkflow
     /// </summary>
     internal static async Task<int> ReviewFileStatesAsync(LlmConfig config, ModelExecutionConfig modelConfig, List<QcFileState> fileStates, int? sampleSize)
     {
+        // The same per-line context the translator saw (see GameHooks.LineContextProvider); empty unless lineContextEnabled.
+        LineContexts.Build(config, config.Runtime.WorkingDirectory ?? string.Empty, fileStates.Select(f => (f.TextFile, (IReadOnlyList<TranslationLine>)f.FileLines)));
+
         var maxConcurrency = config.QualityReview.MaxConcurrency ?? config.MaxConcurrency ?? config.BatchSize ?? 20;
         var workItems = BuildWorkItems(config, fileStates, sampleSize);
 
@@ -951,7 +968,8 @@ public static class QualityReviewWorkflow
         var maskedRaw = tokenReplacer.Replace(rawText);
         var maskedTranslated = tokenReplacer.Replace(effectiveTranslated);
 
-        var glossaryPrompt = GlossaryLine.AppendPromptsFor(rawText, config.Runtime.GlossaryLines, item.File.TextFile.Path);
+        var glossaryPrompt = LineContexts.WithColumnContext(config,
+            GlossaryLine.AppendPromptsFor(rawText, config.Runtime.GlossaryLines, item.File.TextFile.Path), item.Column.Anchor);
 
         var cacheKey = new ReviewCacheKey(rawText, effectiveTranslated, glossaryPrompt);
         // Timing/call-count instrumentation happens per real HTTP round trip INSIDE
@@ -1264,7 +1282,8 @@ public static class QualityReviewWorkflow
             .Select(x =>
             {
                 var tokenReplacer = new StringTokenReplacer();
-                var glossaryPrompt = GlossaryLine.AppendPromptsFor(x.Item.Column.RawText, config.Runtime.GlossaryLines, x.Item.File.TextFile.Path);
+                var glossaryPrompt = LineContexts.WithColumnContext(config,
+                    GlossaryLine.AppendPromptsFor(x.Item.Column.RawText, config.Runtime.GlossaryLines, x.Item.File.TextFile.Path), x.Item.Column.Anchor);
                 return BuildQcUserPrompt(tokenReplacer.Replace(x.Item.Column.RawText), tokenReplacer.Replace(x.Translated), glossaryPrompt);
             })
             .Distinct()
