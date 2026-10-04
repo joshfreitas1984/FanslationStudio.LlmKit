@@ -1,4 +1,5 @@
 using FanslationStudio.LlmKit.Support;
+using FanslationStudio.LlmKit.Workflow;
 
 namespace FanslationStudio.LlmKit.Tests;
 
@@ -30,7 +31,15 @@ public class CharacterContextTests
         Assert.True(context.GenderKnown);
         Assert.Equal(LineContext.Female, context.Gender);
         Assert.Contains("慕容星辰", context.Prompt);
-        Assert.False(contexts.ContainsKey(mixed.Splits[0]));
+        // Both genders named: the translator is told who is who, and no single gender is checked against.
+        var mixedContext = contexts[mixed.Splits[0]];
+        Assert.True(mixedContext.GenderKnown);
+        Assert.Equal(string.Empty, mixedContext.Gender);
+        Assert.Contains("空闻大师 (male)", mixedContext.Prompt);
+        Assert.Contains("慕容星辰 (female)", mixedContext.Prompt);
+        // ...so a he or she on that line is neither invented nor contradicting.
+        var wrong = new TranslationSplit { Text = mixed.Splits[0].Text, Translated = "Murong Xingchen and Master Kongwen set out, and he led the way." };
+        Assert.False(PronounDefectWorkflow.Classify(wrong, null, mixedContext, false).Category is not null);
         Assert.False(contexts.ContainsKey(shortName.Splits[0]));
         Assert.False(contexts.ContainsKey(unnamed.Splits[0]));
 

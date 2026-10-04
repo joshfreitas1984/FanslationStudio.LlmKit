@@ -91,8 +91,9 @@ public static class CharacterContext
 
     /// <summary>
     /// Gives each split that names a character from <paramref name="characters"/> (name to male/female/男/女) that
-    /// character's gender as a line context. It never replaces a context that already knows a gender (a speaker), and
-    /// leaves a split alone when the characters it names have different genders, since the pronoun is then ambiguous.
+    /// character's gender as a line context. It never replaces a context that already knows a gender (a speaker). When the
+    /// characters it names have different genders the context lists who is who but has no single <see cref="LineContext.Gender"/>,
+    /// so the pronoun check neither flags an "invented" gender nor a wrong one on that line.
     /// A split whose source already states a gender (他/她, 师兄, 姑娘...) is left alone unless
     /// <paramref name="skipGenderedSources"/> is false: such a line usually has a second person of the other gender, so
     /// the named character's gender would flag correct pronouns. <paramref name="skipSplit"/> lets a game exclude splits (for example ones with a player token). Names shorter
@@ -121,8 +122,20 @@ public static class CharacterContext
                 continue;
 
             var named = names.Where(character => split.Text.Contains(character.Name, StringComparison.Ordinal)).ToList();
-            if (named.Count == 0 || named.Select(character => character.Gender).Distinct().Count() != 1)
+            if (named.Count == 0)
                 continue;
+
+            if (named.Select(character => character.Gender).Distinct().Count() != 1)
+            {
+                // Characters of both genders: any he or she can be right, so nothing here is "invented" and nothing can be
+                // called wrong, but the translator is told who is who. Gender stays empty (no single gender to check against).
+                string Describe(string gender) => string.Join(" and ", named.Where(character => character.Gender == gender).Select(character => character.Name).Distinct());
+                contexts[split] = new LineContext(
+                    $"Context: the text names {Describe(LineContext.Male)} (male) and {Describe(LineContext.Female)} (female). "
+                    + "Use he/his/him for the male and she/her for the female. For anyone else, or when the source does not say who is meant, use \"they\" or avoid the pronoun.",
+                    GenderKnown: true);
+                continue;
+            }
 
             var male = named[0].Gender == LineContext.Male;
             var who = named.Select(character => character.Name).Distinct().ToList();
