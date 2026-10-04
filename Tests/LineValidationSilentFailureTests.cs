@@ -24,6 +24,7 @@ public class LineValidationSilentFailureTests
             ["CorrectRemovalPrompt"] = "removed {0}",
             ["CorrectRemovedQuotesPrompt"] = "quotes",
             ["CorrectAdditionalPrompt"] = "added {0}",
+            ["CorrectInventedGenderPrompt"] = "no gender",
         },
     };
 
@@ -61,6 +62,39 @@ public class LineValidationSilentFailureTests
 
         Assert.False(validation.Valid);
         Assert.Contains(validation.SilentFailures, reason => reason.Contains("'English equivalent'"));
+    }
+
+    [Theory(DisplayName = "Invented he/his on an ungendered stage direction or unnamed role sets a soft prompt but stays valid")]
+    [InlineData("（笑着把银两收起来）", "(Smiling, he put the silver away)")]
+    [InlineData("此人暂无性命之虞", "Don't worry, he is not in immediate danger")]
+    public void InventedGender_SetsSoftPrompt_WithoutFailing(string raw, string result)
+    {
+        var validation = Validate(raw, result);
+
+        Assert.True(validation.Valid);
+        Assert.Equal("no gender", validation.SoftCorrectionPrompt);
+    }
+
+    [Theory(DisplayName = "No soft prompt when the source states gender, the line is running narration, or the result is already neutral")]
+    [InlineData("（他笑着把银两收起来）", "(Smiling, he put the silver away)")]
+    [InlineData("（笑着把银两收起来）", "(Smiling, they put the silver away)")]
+    [InlineData("赵胤宗笑着把银两收了起来。", "Zhao Yinzong smiled and put his silver away")]
+    [InlineData("（笑着把银子收起来）", "(Smiling, put the silver away)")]
+    public void NoInventedGender_NoSoftPrompt(string raw, string result)
+    {
+        var validation = Validate(raw, result);
+
+        Assert.True(validation.Valid);
+        Assert.Empty(validation.SoftCorrectionPrompt);
+    }
+
+    [Fact(DisplayName = "A result that already fails a hard check does not also carry a soft prompt")]
+    public void HardFailure_CarriesNoSoftPrompt()
+    {
+        var validation = Validate("（笑着把银两收起来）", "(Smiling, he put the silver away) 银两");
+
+        Assert.False(validation.Valid);
+        Assert.Empty(validation.SoftCorrectionPrompt);
     }
 
     [Fact(DisplayName = "An unclosed color tag fails with a reason")]

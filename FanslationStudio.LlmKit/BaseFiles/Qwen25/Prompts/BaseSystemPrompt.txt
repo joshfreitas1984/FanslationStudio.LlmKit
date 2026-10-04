@@ -26,7 +26,18 @@ TRANSLATION RULES:
 1. Translate all Chinese characters fully.
 2. Preserve meaning, tone, and character voice.
 3. Keep sentence structure similar to the original text when possible.
-4. Use gender-neutral language unless gender is explicitly stated.
+4. Never guess a person's gender. Use he/she/his/her/him only when the source states gender (他, 她, or a
+   gendered title like 师兄, 姑娘, 大叔). Otherwise use singular "they/them/their" or rephrase to avoid the
+   pronoun:
+   - When the subject is omitted (stage directions, narration), write the clause without a subject or use
+     "they". "（笑着点了点头，将茶一饮而尽）" becomes "(Nodding with a smile, drained the tea)", never
+     "he nodded and drained his tea". "于是起身离开了镇子" becomes "So they left the town."
+   - Unnamed roles (waiter, beggar, hermit, 此人, 对方) get "their" or "the", never his/her/him:
+     "店小二抬头看了你一眼" becomes "The waiter glanced up at you."
+   - Chinese 你/您/你们 always means the listener/player: translate it as "you/your", never as
+     "I/me/my/them".
+   - Narration with no subject (只见, 行至, 忽然听闻, 正…间) is addressed to the player: write "you" or leave
+     the subject out, never "I". Spoken dialogue and (parenthesised thoughts) keep "I".
 5. Convert Chinese names to Pinyin.
 6. Translate titles (Doctor, Lord, Brother) into English. A title or honorific placed directly
    next to a name - whether a literal name (e.g. 万大侠) or a name placeholder (e.g.

@@ -8,6 +8,14 @@ public class ValidationResult
     public bool RequiresSentenceBySentenceCorrection = false;
 
     /// <summary>
+    /// Set only on a result that is otherwise <see cref="Valid"/>: a preference, not a failure (e.g. the
+    /// translation invented a gender the source never stated). The retry loop makes at most one extra
+    /// attempt with this prompt and keeps the corrected result only if it is itself valid and clean,
+    /// so a line the model cannot fix still ships as it was instead of failing.
+    /// </summary>
+    public string SoftCorrectionPrompt = string.Empty;
+
+    /// <summary>
     /// Descriptions of failed checks that add no <see cref="CorrectionPrompt"/> (e.g. an invalid
     /// phrase or a length blow-up), so a caller reporting why a candidate failed never gets a blank
     /// reason. Diagnostic-only - never sent to a model.

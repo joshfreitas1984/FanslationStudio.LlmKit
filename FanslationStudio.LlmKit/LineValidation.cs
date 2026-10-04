@@ -577,7 +577,25 @@ public static partial class LineValidation
             Result = result,
             CorrectionPrompt = correctionPrompts.ToString(),
             SilentFailures = silentFailures,
+            SoftCorrectionPrompt = response && InventsGender(raw, result) && config.Prompts.TryGetValue("CorrectInventedGenderPrompt", out var genderPrompt)
+                ? genderPrompt
+                : string.Empty,
         };
+    }
+
+    /// <summary>
+    /// True when <paramref name="result"/> gives someone a he/she/his/her/him that the short, ungendered
+    /// <paramref name="raw"/> never established: a parenthesised stage direction or an unnamed-role line
+    /// (此人, 对方, 乞丐...) with no 他/她 or gendered kinship/title character. Deliberately narrow - a
+    /// named character in running narration is left alone rather than forced into "they".
+    /// </summary>
+    internal static bool InventsGender(string raw, string result)
+    {
+        if (raw.Length > 60 || !GenderedPronounRegex().IsMatch(result) || GenderedSourceRegex().IsMatch(raw))
+            return false;
+
+        var trimmed = raw.TrimStart();
+        return trimmed.StartsWith('(') || trimmed.StartsWith('（') || UnnamedRoleRegex().IsMatch(raw);
     }
 
     private static readonly (string WideChars, string AcceptableInResult)[] WideBracketFamilies =
@@ -845,6 +863,16 @@ public static partial class LineValidation
 
     [GeneratedRegex(ChinesePlaceholderPattern)]
     private static partial Regex ChinesePlaceholderRegex();
+
+    [GeneratedRegex(@"\b(?:he|she|his|her|him|himself|herself)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex GenderedPronounRegex();
+
+    // 他/她/它 plus gendered kinship, titles and roles: any of these means the source does state a gender.
+    [GeneratedRegex("[他她它牠哥姐弟妹父母爹娘兄嫂郎女男叔婶爷妻婆翁妇]|公子|姑娘|少爷|小姐|先生|夫人|丈夫|夫君|儿子|奶奶|好汉|大汉|汉子")]
+    private static partial Regex GenderedSourceRegex();
+
+    [GeneratedRegex("此人|这人|那人|来人|对方|乞丐|隐者|路人|店小二|小二|行人|旁人|某人|有人|何人")]
+    private static partial Regex UnnamedRoleRegex();
 
     [GeneratedRegex(@"<[^>]+>")]
     private static partial Regex HtmlTagRegex();

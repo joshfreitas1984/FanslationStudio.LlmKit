@@ -96,6 +96,7 @@ public class TranslationServiceTests
                 ["CorrectRemovalPrompt"] = "{0}",
                 ["CorrectRemovedQuotesPrompt"] = "quotes",
                 ["CorrectAdditionalPrompt"] = "{0}",
+                ["CorrectInventedGenderPrompt"] = "NOGENDER",
             },
         };
 
@@ -249,5 +250,53 @@ public class TranslationServiceTests
         Assert.Equal(1, fullCellRule.CallCount);
         Assert.Equal(3, sentenceCorrectionRule.CallCount);
     }
-}
 
+    [Fact(DisplayName = "TranslateSplitAsync makes one soft correction for invented gender and keeps the clean result")]
+    public async Task TranslateSplitAsync_SoftGenderCorrection_KeepsCleanResult()
+    {
+        var softRule = new ScriptedLlmHandler.Rule { Matches = c => c.Contains("NOGENDER"), Responses = ["(Smiling, put the silver away)"] };
+        var initialRule = new ScriptedLlmHandler.Rule { Matches = c => c.Contains("笑着把银两收起来"), Responses = ["(Smiling, he put the silver away)"] };
+
+        var config = BuildConfig([softRule, initialRule], out var client);
+        config.CorrectionPromptsEnabled = true;
+
+        var result = await TranslationService.TranslateSplitAsync(config, "（笑着把银两收起来）", client, BuildTextFile());
+
+        Assert.True(result.Valid);
+        Assert.Equal("(Smiling, put the silver away)", result.Result);
+        Assert.Equal(1, softRule.CallCount);
+        Assert.Equal(1, initialRule.CallCount);
+    }
+
+    [Fact(DisplayName = "TranslateSplitAsync keeps the original when the soft gender correction is unusable")]
+    public async Task TranslateSplitAsync_SoftGenderCorrection_UnusableKeepsOriginal()
+    {
+        // The corrected attempt leaks Chinese, so it is hard-invalid and must not replace the shippable original.
+        var softRule = new ScriptedLlmHandler.Rule { Matches = c => c.Contains("NOGENDER"), Responses = ["(Smiling, 收起 the silver away)"] };
+        var initialRule = new ScriptedLlmHandler.Rule { Matches = c => c.Contains("笑着把银两收起来"), Responses = ["(Smiling, he put the silver away)"] };
+
+        var config = BuildConfig([softRule, initialRule], out var client);
+        config.CorrectionPromptsEnabled = true;
+
+        var result = await TranslationService.TranslateSplitAsync(config, "（笑着把银两收起来）", client, BuildTextFile());
+
+        Assert.True(result.Valid);
+        Assert.Equal("(Smiling, he put the silver away)", result.Result);
+        Assert.Equal(1, softRule.CallCount);
+    }
+
+    [Fact(DisplayName = "TranslateSplitAsync makes no soft correction when correction prompts are disabled")]
+    public async Task TranslateSplitAsync_SoftGenderCorrection_SkippedWhenCorrectionsDisabled()
+    {
+        var softRule = new ScriptedLlmHandler.Rule { Matches = c => c.Contains("NOGENDER"), Responses = ["(Smiling, put the silver away)"] };
+        var initialRule = new ScriptedLlmHandler.Rule { Matches = c => c.Contains("笑着把银两收起来"), Responses = ["(Smiling, he put the silver away)"] };
+
+        var config = BuildConfig([softRule, initialRule], out var client);
+
+        var result = await TranslationService.TranslateSplitAsync(config, "（笑着把银两收起来）", client, BuildTextFile());
+
+        Assert.True(result.Valid);
+        Assert.Equal("(Smiling, he put the silver away)", result.Result);
+        Assert.Equal(0, softRule.CallCount);
+    }
+}

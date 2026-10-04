@@ -1109,6 +1109,7 @@ public static partial class TranslationService
             // round-trips instead of a bounded ~2x RetryCount total, which was the real cause of a
             // noticeable slowdown after this retry-scoping change was introduced.
             var sentenceRetryCount = 0;
+            var lastLlmResult = string.Empty;
 
             while (!validationResult.Valid && retryCount < maxRetries)
             {
@@ -1121,6 +1122,7 @@ public static partial class TranslationService
                 }
 
                 var llmResult = await TranslateMessagesAsync(client, config, executingModel, messages, executingModel.EnableThinking ?? false);
+                lastLlmResult = llmResult;
                 preparedResult = LineValidation.PrepareResult(preparedRaw, llmResult, config.Hooks, textFile, column);
                 validationResult = LineValidation.CheckTransalationSuccessful(executingModel, preparedRaw, preparedResult, textFile, config.Hooks, column);
                 validationResult.Result = LineValidation.CleanupLineBeforeSaving(validationResult.Result, preparedRaw, textFile, tokenReplacer);
@@ -1185,6 +1187,34 @@ public static partial class TranslationService
                 }
 
                 retryCount++;
+            }
+
+            // Soft correction (see ValidationResult.SoftCorrectionPrompt): one extra attempt on a line that is
+            // already valid. Only a result that is itself valid and clean replaces it, so this can never turn a
+            // shippable line into a failed one.
+            if (validationResult.Valid
+                && validationResult.SoftCorrectionPrompt.Length > 0
+                && config.CorrectionPromptsEnabled
+                && !config.SkipLineValidation)
+            {
+                var accepted = validationResult;
+                var softMessages = GenerateBaseMessages(executingModel, config.Runtime.GlossaryLines, preparedRaw, textFile);
+                AddCorrectionMessages(softMessages, lastLlmResult, accepted.SoftCorrectionPrompt + executingModel.Prompts["BaseCorrectionSuffixPrompt"]);
+
+                if (isEscalation)
+                    Interlocked.Increment(ref _escalationAttemptCounter);
+                else
+                    Interlocked.Increment(ref _retryAttemptCounter);
+
+                var softResult = await TranslateMessagesAsync(client, config, executingModel, softMessages, executingModel.EnableThinking ?? false);
+                var softPrepared = LineValidation.PrepareResult(preparedRaw, softResult, config.Hooks, textFile, column);
+                var softValidation = LineValidation.CheckTransalationSuccessful(executingModel, preparedRaw, softPrepared, textFile, config.Hooks, column);
+                softValidation.Result = LineValidation.CleanupLineBeforeSaving(softValidation.Result, preparedRaw, textFile, tokenReplacer);
+
+                if (softValidation.Valid && softValidation.SoftCorrectionPrompt.Length == 0)
+                    return softValidation;
+
+                return accepted;
             }
 
             return validationResult;
