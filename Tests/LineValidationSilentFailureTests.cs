@@ -146,6 +146,8 @@ public class LineValidationSilentFailureTests
     [InlineData("此人功法诡异。", "This person's method is strange, he is skilled.", false, true)]
     [InlineData("此人功法诡异。", "Xue Ruyi saw this person; he is skilled.", false, true)]
     [InlineData("此人功法诡异。", "Xue Ruyi saw this person; he is skilled.", true, false)]
+    [InlineData("街边乞丐一遍以筷子敲碗，一遍所唱之歌谣，其吐字换气中暗含丐帮入门内功心法", "A beggar by the street beat on his bowl while singing; his diction concealed the method.", false, true)]
+    [InlineData("街边乞丐一遍以筷子敲碗，一遍所唱之歌谣，其吐字换气中暗含丐帮入门内功心法", "A beggar by the street beat on a bowl while singing; the beggar's diction concealed the method.", false, false)]
     public void InventsGender_RolesAndProse(string raw, string result, bool skipNamed, bool expected) =>
         Assert.Equal(expected, LineValidation.InventsGender(raw, result, skipNamed));
 

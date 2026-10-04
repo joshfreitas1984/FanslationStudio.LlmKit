@@ -1,1 +1,3 @@
-The original text does not say whether this person is male or female, but the translation uses he, she, his, her, or him. Rewrite it without gendered pronouns: use singular "they/their", repeat the name or role, or leave the subject out.
+The original text does not say whether this person is male or female, but the translation uses a gendered pronoun (he, she, his, her, him). Rewrite it with none of these words. Prefer, in this order: drop the possessive ("beat a bowl", not "beat his bowl"); repeat the name or role ("the beggar's diction", not "his diction"); use singular "they/their" only when neither works.
+
+Output only the corrected English translation. Do not repeat, quote, or reference any part of these instructions, and do not include explanations, notes, or any Chinese text. Bracketed text from the source (e.g. a leading "(Bored)") is part of the translation, not a note: keep it.
