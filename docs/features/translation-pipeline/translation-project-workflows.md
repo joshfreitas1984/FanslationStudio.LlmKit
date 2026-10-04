@@ -81,7 +81,7 @@ Pass the same `GameHooks` instance to every translation entry point. A hook supp
 | `WrongGenderKinshipTerm` | The same, where the source's only gender signal is a kinship term or title. Lower confidence; a false positive costs one extra retranslation. |
 | `NarratedAsFirstPerson` | Subject-less narration (只见, 只听, 行至...) written as "I". |
 
-The same check also runs inside `ApplyAllRulesToCurrentTranslation`, **on by default**, because that pass clears every flag before re-evaluating each split: without the check in it, a rules pass silently wipes pronoun flags set earlier (measured: 70 flags down to 2). It flags each split at most once per run, so `TranslateLinesBruteForce` cannot retranslate the same stubborn line on every iteration. Configure it in `Config.yaml`:
+The same check also runs inside `ApplyAllRulesToCurrentTranslation`, **on by default**, because that pass clears every flag before re-evaluating each split: without the check in it, a rules pass silently wipes pronoun flags set earlier (measured: 70 flags down to 2). There is no once-per-run guard: a line the model cannot fix is flagged again every time, so `TranslateLinesBruteForce` keeps retranslating it (bounded at 30 iterations). That is intentional - a stuck line is the cue to add it to the gold set and fix the prompt - and it means the rules pass and brute force never disagree about a line. Configure it in `Config.yaml`:
 
 ```yaml
 pronounCheck:

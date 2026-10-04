@@ -88,19 +88,10 @@ public static class TranslationWorkflow
 
     private record TranslationRuleContext(
         LlmConfig Config,
-        Regex ChineseCharRegex)
-    {
-        /// <summary>
-        /// Splits already flagged by the pronoun check in this run. Shared across the brute-force loop's iterations, so a
-        /// line the model keeps getting wrong is retranslated once, not on every iteration.
-        /// </summary>
-        public ConcurrentDictionary<TranslationSplit, byte> PronounFlagged { get; } = new();
-    }
+        Regex ChineseCharRegex);
 
-    /// <summary>One file's inputs to the pronoun check: its line contexts and the run-wide guard.</summary>
-    internal sealed record PronounRulesState(
-        IReadOnlyDictionary<TranslationSplit, LineContext> Contexts,
-        ConcurrentDictionary<TranslationSplit, byte> Flagged);
+    /// <summary>One file's input to the pronoun check: its line contexts.</summary>
+    internal sealed record PronounRulesState(IReadOnlyDictionary<TranslationSplit, LineContext> Contexts);
 
     private static TranslationRuleContext BuildTranslationRuleContext(string workingDirectory, GameHooks? hooks)
     {
@@ -125,7 +116,7 @@ public static class TranslationWorkflow
         {
             var contexts = context.Config.Hooks?.LineContextProvider?.Invoke(context.Config.Runtime.WorkingDirectory ?? string.Empty, textFile, fileLines)
                 ?? new Dictionary<TranslationSplit, LineContext>();
-            pronouns = new PronounRulesState(contexts, context.PronounFlagged);
+            pronouns = new PronounRulesState(contexts);
         }
 
         Parallel.ForEach(fileLines, line =>
@@ -242,15 +233,13 @@ public static class TranslationWorkflow
 
     /// <summary>
     /// Flags a translation with a pronoun defect (see <see cref="PronounDefectWorkflow"/>) for retranslation. Runs after
-    /// every other rule found nothing, and at most once per split per run (<see cref="PronounRulesState.Flagged"/>),
-    /// so a line the model cannot fix does not keep the brute-force loop retranslating it.
+    /// every other rule found nothing. There is deliberately no once-per-run guard: a line the model cannot fix keeps
+    /// being flagged, so the brute-force loop (bounded at 30 iterations) retranslating it over and over is the signal
+    /// to add the line to the gold set and tune the prompt, and a later rules pass never disagrees with this one.
     /// </summary>
     internal static bool TryFlagPronounDefect(ConcurrentBag<string> logLines, TranslationSplit split, TextFileToSplit textFile, LlmConfig config, PronounRulesState? pronouns)
     {
         if (pronouns == null || split.FlaggedForRetranslation || split.Text.Length == 0 || split.Translated.Length == 0)
-            return false;
-
-        if (pronouns.Flagged.ContainsKey(split))
             return false;
 
         pronouns.Contexts.TryGetValue(split, out var lineContext);
@@ -258,7 +247,6 @@ public static class TranslationWorkflow
         if (category == null)
             return false;
 
-        pronouns.Flagged.TryAdd(split, 0);
         logLines.Add($"Pronoun defect ({category}) {textFile.Path} \n{split.Text}\n->\n{split.Translated}");
         split.FlaggedForRetranslation = true;
         split.FlaggedMistranslation = category;

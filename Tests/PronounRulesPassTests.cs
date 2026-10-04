@@ -11,11 +11,11 @@ public class PronounRulesPassTests
 
     private static TextFileToSplit File() => new() { Path = "Test.txt", TextFileType = TextFileType.RawCsv };
 
-    private static TranslationWorkflow.PronounRulesState State(ConcurrentDictionary<TranslationSplit, byte>? flagged = null, Dictionary<TranslationSplit, LineContext>? contexts = null) =>
-        new(contexts ?? new Dictionary<TranslationSplit, LineContext>(), flagged ?? new ConcurrentDictionary<TranslationSplit, byte>());
+    private static TranslationWorkflow.PronounRulesState State(Dictionary<TranslationSplit, LineContext>? contexts = null) =>
+        new(contexts ?? new Dictionary<TranslationSplit, LineContext>());
 
-    [Fact(DisplayName = "The rules pass flags an invented gender for retranslation, and only once per run")]
-    public void FlagsOnce()
+    [Fact(DisplayName = "The rules pass flags an invented gender for retranslation, every time a stuck line is checked")]
+    public void FlagsEveryTime()
     {
         var split = Split("（笑着把银两收起来）", "(Smiling, he put the silver away)");
         var state = State();
@@ -27,10 +27,12 @@ public class PronounRulesPassTests
         Assert.Equal("InventedGender", split.FlaggedMistranslation);
         Assert.Single(log);
 
-        // The brute-force loop retranslates and re-checks: the same split must not be flagged a second time.
+        // The brute-force loop retranslates and re-checks. The model produced the same defect again, so it is flagged
+        // again: a stuck line must stay visible, not be silently accepted after one retry.
         split.FlaggedForRetranslation = false;
-        Assert.False(TranslationWorkflow.TryFlagPronounDefect(log, split, File(), config, state));
-        Assert.False(split.FlaggedForRetranslation);
+        Assert.True(TranslationWorkflow.TryFlagPronounDefect(log, split, File(), config, state));
+        Assert.True(split.FlaggedForRetranslation);
+        Assert.Equal(2, log.Count);
     }
 
     [Fact(DisplayName = "The rules pass pronoun check does nothing without state (disabled), for a flagged split, or for a clean translation")]

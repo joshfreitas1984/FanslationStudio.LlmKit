@@ -218,9 +218,9 @@ public class PronounCheckConfig
 {
     /// <summary>
     /// Flag translations with an invented or wrong gender, or subject-less narration written as "I", for
-    /// retranslation during the rules pass. Each line is flagged at most once per run, so the brute-force loop
-    /// cannot retranslate the same stubborn line over and over. Turn it off if it keeps flagging lines the model
-    /// cannot fix.
+    /// retranslation during the rules pass. A line the model cannot fix is flagged every time, so brute force
+    /// keeps retranslating it (at most 30 iterations): that is the cue to add it to the gold set and tune the
+    /// prompt. Turn it off if it keeps flagging lines you cannot fix.
     /// </summary>
     public bool Enabled { get; set; } = true;
 
