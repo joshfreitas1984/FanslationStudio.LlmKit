@@ -52,7 +52,10 @@ public static partial class LineValidation
         "the translation remains",
         "fully corrected English translation",
         "Translate all Chinese characters",
-        "untranslated Chinese characters"
+        "untranslated Chinese characters",
+        "English equivalent",
+        "more natural English",
+        "could be translated"
     ];
 
     private static readonly (string raw, string trans)[] CheckForRemoval = [];

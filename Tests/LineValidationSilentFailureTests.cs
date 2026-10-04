@@ -52,6 +52,17 @@ public class LineValidationSilentFailureTests
         Assert.Contains(validation.SilentFailures, reason => reason.Contains(@"'\U'"));
     }
 
+    [Fact(DisplayName = "Translator commentary about a more natural English equivalent fails with a reason")]
+    public void TranslatorCommentary_FailsWithReason()
+    {
+        var validation = Validate(
+            "若诸葛姐姐愿意出手相助，定能帮咱们渡过难关的！",
+            "If Big Sister Zhuge is willing to help, she will surely help us get through this crisis! However, if a more natural English equivalent is needed, it could be crisis or challenge. Challenge Stage");
+
+        Assert.False(validation.Valid);
+        Assert.Contains(validation.SilentFailures, reason => reason.Contains("'English equivalent'"));
+    }
+
     [Fact(DisplayName = "An unclosed color tag fails with a reason")]
     public void UnclosedColorTag_FailsWithReason()
     {
