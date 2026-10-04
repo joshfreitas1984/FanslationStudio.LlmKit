@@ -16,6 +16,7 @@ var hooks = new GameHooks
     CustomUnsafeToTranslateRule = (file, line, split) => IsNonDisplayText(file, line, split),
     CustomPackagingFixup = (file, column, raw, result) => FixPackagedText(file, column, raw, result),
     LineContextProvider = (workingDirectory, file, lines) => BuildLineContexts(workingDirectory, file, lines),
+    UnknownGenderPersonTokens = ["#PlayerName#", "#$PlayerName#"],
 };
 
 var config = ConfigurationExtensions.GetConfiguration(workingDirectory, hooks);
@@ -66,6 +67,10 @@ The validator is also applied by the shared translation rule evaluation used by 
 Receives `(workingDirectory, textFile, lines)` and returns a `LineContext(Prompt, GenderKnown, Gender)` for each split it has context for. The lines arrive in file order, so a provider can carry state across rows (for example the current speaker). `Prompt` is appended to that split's system prompt, including every recursive sub-call (leading brackets, color tags, bracket splits). `GenderKnown` tells the pipeline that a he/she is correct there, which suppresses the soft invented-gender correction and lets `PronounDefectWorkflow` check old translations against `Gender`.
 
 A split with a context never reads or writes the shared translation cache and never deduplicates against identical text with a different context, because the same text can translate differently for a different speaker. Splits the provider omits translate exactly as before. Never return a gender you cannot know: a player-chosen gender, or an unnamed character, should get a prompt that says the gender is unknown and `GenderKnown: false`.
+
+### `UnknownGenderPersonTokens`
+
+A list of placeholder tokens (for example `#PlayerName#`) that stand for a person whose gender is not known when the text is translated: the player, or someone the game fills in at runtime. It is not a callback. `LineValidation.InventsGender` treats a he/she/his/her/him in a line containing one of them as an invented gender when the source states no gender itself (no 他/她, no kinship term or title), and skips the line when the translation names someone else, since the pronoun may be theirs. Survey the game's tokens first: list every `#...#` token in the raw text and keep only those that are people. Faction, place, item and number tokens are not people. A `LineContextProvider` should give the same lines a "gender unknown, use you/they" hint so new translations avoid the problem.
 
 ### `CustomPackagingFixup`
 

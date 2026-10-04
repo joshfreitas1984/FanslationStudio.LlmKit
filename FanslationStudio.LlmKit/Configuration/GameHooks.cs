@@ -62,6 +62,14 @@ public class GameHooks
     public Func<TextFileToSplit, int?, string, string, string?>? CustomColumnValidator { get; set; }
 
     /// <summary>
+    /// Placeholder tokens (e.g. "#PlayerName#") that stand for a person whose gender is not known when the text is
+    /// translated - the player, or someone chosen at runtime. A he/she/his/her/him in a line containing one of
+    /// them, when the source itself states no gender, is an invented gender (see
+    /// <see cref="LineValidation.InventsGender"/>). Left null for a game with no such tokens.
+    /// </summary>
+    public IReadOnlyCollection<string>? UnknownGenderPersonTokens { get; set; }
+
+    /// <summary>
     /// Invoked at the end of <see cref="LineValidation.PrepareResult"/>, before
     /// <see cref="CustomColumnValidator"/>/<see cref="LineValidation.CheckTransalationSuccessful"/>
     /// ever run. Lets a game-specific project deterministically strip/repair characters that can

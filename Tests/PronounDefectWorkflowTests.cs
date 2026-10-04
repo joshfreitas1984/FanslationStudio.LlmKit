@@ -89,6 +89,34 @@ public class PronounDefectWorkflowTests
         }
     }
 
+    [Fact(DisplayName = "PronounDefectWorkflow Prose option skips an invented-gender line whose translation names someone")]
+    public async Task ProseOption_SkipsNamedCharacters()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "llmkit-pronoun-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(dir, "Converted"));
+        var textFile = new TextFileToSplit { Path = "Test.txt", TextFileType = TextFileType.RawCsv };
+        List<TranslationLine> lines =
+        [
+            Line("（笑着把银两收起来）", "(Smiling, he put the silver away)"),
+            Line("（笑着把银两收起来）", "(Xiao Mei smiled and put her silver away)"),
+        ];
+        File.WriteAllText(Path.Combine(dir, "Converted", "Test.txt.yaml"), YamlHelper.CreateSerializer().Serialize(lines));
+
+        try
+        {
+            var normal = await PronounDefectWorkflow.RunAsync(dir, [textFile]);
+            var prose = await PronounDefectWorkflow.RunAsync(dir, [textFile], options: PronounDefectWorkflow.PronounDefectOptions.Prose);
+
+            Assert.Equal(2, normal.Hits.Count);
+            Assert.Single(prose.Hits);
+            Assert.Contains("he put", prose.Hits[0].Translated);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
     [Fact(DisplayName = "PronounDefectWorkflow without a provider finds only invented gender and first-person narration")]
     public async Task NoProvider_FindsContextFreeDefects()
     {

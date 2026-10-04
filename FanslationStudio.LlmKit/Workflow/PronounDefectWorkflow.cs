@@ -14,6 +14,54 @@ namespace FanslationStudio.LlmKit.Workflow;
 /// </summary>
 public static class PronounDefectWorkflow
 {
+    /// <summary>
+    /// <paramref name="SkipWhenTranslationNamesSomeone"/> leaves out an invented-gender hit whose translation names a
+    /// character. Use <see cref="Prose"/> for a game whose text is running prose rather than stage directions: there a
+    /// pronoun after a named character is usually right, and a single line cannot show otherwise.
+    /// </summary>
+    public sealed record PronounDefectOptions(bool SkipWhenTranslationNamesSomeone = false)
+    {
+        public static PronounDefectOptions Prose { get; } = new(SkipWhenTranslationNamesSomeone: true);
+
+        /// <summary>The options Config.yaml's <c>pronounCheck</c> section asks for.</summary>
+        public static PronounDefectOptions From(PronounCheckConfig config) => new(config.SkipWhenTranslationNamesSomeone);
+    }
+
+    /// <summary>Config.yaml's <c>pronounCheck</c> section, or the defaults when the working directory has no Config.yaml.</summary>
+    private static PronounCheckConfig LoadPronounCheck(string workingDirectory, GameHooks? hooks) =>
+        File.Exists($"{workingDirectory}/Config.yaml")
+            ? ConfigurationExtensions.GetConfiguration(workingDirectory, hooks).PronounCheck
+            : new PronounCheckConfig();
+
+    /// <summary>What <see cref="Classify"/> decided about one translated split.</summary>
+    public sealed record PronounClassification(string? Category, bool GenderKnownAndCorrect, bool OnlyNeutralForKnownGender);
+
+    /// <summary>
+    /// Decides whether <paramref name="split"/>'s current translation has a pronoun defect, given the line context
+    /// the game supplies for it (if any). Shared by <see cref="FindAsync"/> and the rules pass.
+    /// </summary>
+    public static PronounClassification Classify(TranslationSplit split, GameHooks? hooks, LineContext? context, bool skipWhenNamesSomeone)
+    {
+        var tokens = hooks?.UnknownGenderPersonTokens;
+        var known = context is { GenderKnown: true } ? context : null;
+
+        if (known == null)
+        {
+            var category = LineValidation.InventsGender(split.Text, split.Translated, skipWhenNamesSomeone, tokens) ? "InventedGender"
+                : LineValidation.NarratesAsFirstPerson(split.Text, split.Translated) ? "NarratedAsFirstPerson"
+                : null;
+            return new PronounClassification(category, false, false);
+        }
+
+        // The speaker's gender is known, so he/she is allowed - but only if it is the right one.
+        var knownCategory = LineValidation.ContradictsGender(split.Text, split.Translated, known.Gender) ? "WrongGender"
+            : LineValidation.ContradictsGenderDespiteKinshipTerm(split.Text, split.Translated, known.Gender) ? "WrongGenderKinshipTerm"
+            : LineValidation.NarratesAsFirstPerson(split.Text, split.Translated) ? "NarratedAsFirstPerson"
+            : null;
+
+        var correct = knownCategory == null && LineValidation.InventsGender(split.Text, split.Translated, skipWhenNamesSomeone, tokens);
+        return new PronounClassification(knownCategory, correct, correct && LineValidation.UsesOnlyNeutralPronouns(split.Translated));
+    }
     /// <summary>One current translation that shows an invented gender or first-person narration.</summary>
     public sealed record PronounDefectHit(string File, string Category, string Source, string Translated, bool QcRewrote);
 
@@ -36,8 +84,10 @@ public static class PronounDefectWorkflow
     /// line context enabled would still get wrong.
     /// </summary>
     public static async Task<PronounDefectResult> FindAsync(string workingDirectory,
-        TextFileToSplit[] textFiles, bool flagForRetranslation, GameHooks? hooks = null)
+        TextFileToSplit[] textFiles, bool flagForRetranslation, GameHooks? hooks = null, PronounDefectOptions? options = null)
     {
+        options ??= PronounDefectOptions.From(LoadPronounCheck(workingDirectory, hooks));
+        var skipNamed = options.SkipWhenTranslationNamesSomeone;
         var hits = new ConcurrentBag<PronounDefectHit>();
         var genderKnownAndCorrect = 0;
         var neutralForKnownGender = 0;
@@ -56,29 +106,18 @@ public static class PronounDefectWorkflow
                     if (split.FlaggedForRetranslation || split.Text.Length == 0 || split.Translated.Length == 0)
                         continue;
 
-                    var known = contexts != null && contexts.TryGetValue(split, out var context) && context.GenderKnown ? context : null;
+                    LineContext? context = null;
+                    contexts?.TryGetValue(split, out context);
 
-                    string? category;
-                    if (known != null)
+                    var classification = Classify(split, hooks, context, skipNamed);
+                    if (classification.GenderKnownAndCorrect)
                     {
-                        // The speaker's gender is known, so he/she is allowed - but only if it is the right one.
-                        category = LineValidation.ContradictsGender(split.Text, split.Translated, known.Gender) ? "WrongGender"
-                            : LineValidation.ContradictsGenderDespiteKinshipTerm(split.Text, split.Translated, known.Gender) ? "WrongGenderKinshipTerm"
-                            : LineValidation.NarratesAsFirstPerson(split.Text, split.Translated) ? "NarratedAsFirstPerson"
-                            : null;
-
-                        if (category == null && LineValidation.InventsGender(split.Text, split.Translated))
-                        {
-                            Interlocked.Increment(ref genderKnownAndCorrect);
-                            if (LineValidation.UsesOnlyNeutralPronouns(split.Translated))
-                                Interlocked.Increment(ref neutralForKnownGender);
-                        }
+                        Interlocked.Increment(ref genderKnownAndCorrect);
+                        if (classification.OnlyNeutralForKnownGender)
+                            Interlocked.Increment(ref neutralForKnownGender);
                     }
-                    else
-                        category = LineValidation.InventsGender(split.Text, split.Translated) ? "InventedGender"
-                            : LineValidation.NarratesAsFirstPerson(split.Text, split.Translated) ? "NarratedAsFirstPerson"
-                            : null;
 
+                    var category = classification.Category;
                     if (category == null)
                         continue;
 
@@ -111,9 +150,9 @@ public static class PronounDefectWorkflow
     /// translate-flagged pass back to back.
     /// </summary>
     public static async Task<PronounDefectResult> RunAsync(string workingDirectory, TextFileToSplit[] textFiles,
-        bool flagForRetranslation = false, GameHooks? hooks = null)
+        bool flagForRetranslation = false, GameHooks? hooks = null, PronounDefectOptions? options = null)
     {
-        var result = await FindAsync(workingDirectory, textFiles, flagForRetranslation, hooks);
+        var result = await FindAsync(workingDirectory, textFiles, flagForRetranslation, hooks, options);
         var hits = result.Hits;
 
         var summary = hits

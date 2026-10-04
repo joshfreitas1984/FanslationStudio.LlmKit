@@ -28,6 +28,12 @@ public class LlmConfig
     /// per-line context - e.g. the speaker and their gender - that is added to that line's system prompt.
     /// </summary>
     public bool LineContextEnabled { get; set; }
+
+    /// <summary>
+    /// The pronoun check run by the rules pass (<see cref="Workflow.TranslationWorkflow.ApplyAllRulesToCurrentTranslation"/>)
+    /// and the default for <see cref="Workflow.PronounDefectWorkflow"/>. On by default; see <see cref="PronounCheckConfig"/>.
+    /// </summary>
+    public PronounCheckConfig PronounCheck { get; set; } = new();
     public List<ModelConfig> Models { get; set; } = new();
     public GlossaryPresetConfig GlossaryPreset { get; set; } = new();
 
@@ -206,6 +212,25 @@ public class QualityEvaluatorAssessmentConfig
 // When we pick up the split - using the dictionary key for the split
 // Api Key would be Key<ApiKey>.txt
 // Presets for Model params would have a structured/unstructured. - you can say whether you want structured or unstructured
+
+/// <summary>Config.yaml's <c>pronounCheck</c> section.</summary>
+public class PronounCheckConfig
+{
+    /// <summary>
+    /// Flag translations with an invented or wrong gender, or subject-less narration written as "I", for
+    /// retranslation during the rules pass. Each line is flagged at most once per run, so the brute-force loop
+    /// cannot retranslate the same stubborn line over and over. Turn it off if it keeps flagging lines the model
+    /// cannot fix.
+    /// </summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// Leave out an invented-gender hit whose translation names a character. Set this for a game whose text is
+    /// running prose, where a pronoun after a named character is usually right (see
+    /// <see cref="Workflow.PronounDefectWorkflow.PronounDefectOptions.Prose"/>).
+    /// </summary>
+    public bool SkipWhenTranslationNamesSomeone { get; set; }
+}
 
 public class RuntimeValues
 {

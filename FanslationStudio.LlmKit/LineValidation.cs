@@ -584,6 +584,22 @@ public static partial class LineValidation
     }
 
     /// <summary>
+    /// True when <paramref name="translated"/> probably names someone: a capitalised word of three or more letters
+    /// that does not start a sentence. Titles such as "Sect Leader" count too, which errs towards skipping.
+    /// </summary>
+    public static bool NamesSomeone(string translated) =>
+        CapitalisedWordRegex().Matches(translated).Any(match => !StartsSentence(translated, match.Index));
+
+    private static bool StartsSentence(string text, int index)
+    {
+        var i = index - 1;
+        while (i >= 0 && char.IsWhiteSpace(text[i]))
+            i--;
+
+        return i < 0 || text[i] is '.' or '!' or '?' or '(' or ':' or '"' or '\u201C';
+    }
+
+    /// <summary>
     /// True when <paramref name="translated"/> uses a pronoun for the opposite gender to the known
     /// <paramref name="gender"/> and <paramref name="raw"/> states no gender of its own (<see cref="LineContext.Male"/> / <see cref="LineContext.Female"/>) and none
     /// for the right one. A line that names a second person can legitimately use both, so it is only a candidate
@@ -636,9 +652,23 @@ public static partial class LineValidation
     /// (此人, 对方, 乞丐...) with no 他/她 or gendered kinship/title character. Deliberately narrow - a
     /// named character in running narration is left alone rather than forced into "they".
     /// </summary>
-    public static bool InventsGender(string raw, string result)
+    public static bool InventsGender(string raw, string result, bool skipWhenResultNamesSomeone = false, IReadOnlyCollection<string>? unknownGenderTokens = null)
     {
-        if (raw.Length > 60 || !GenderedPronounRegex().IsMatch(result) || GenderedSourceRegex().IsMatch(raw))
+        // In running prose a pronoun after a named character is usually right (the game, or an earlier sentence,
+        // established who they are), which a single line cannot tell apart from an invented one.
+        if (skipWhenResultNamesSomeone && NamesSomeone(result))
+            return false;
+
+        if (!GenderedPronounRegex().IsMatch(result) || GenderedSourceRegex().IsMatch(raw))
+            return false;
+
+        // A token for someone whose gender is unknown (the player, a runtime-chosen person) - the pronoun is invented
+        // however the line is shaped. Tokens lengthen a line, so allow a little more room. A translation that also names
+        // someone is skipped: the pronoun may belong to that person, not to the token.
+        if (unknownGenderTokens != null && raw.Length <= 100 && unknownGenderTokens.Any(token => raw.Contains(token, StringComparison.Ordinal)))
+            return !NamesSomeone(result);
+
+        if (raw.Length > 60)
             return false;
 
         var trimmed = raw.TrimStart();
@@ -914,6 +944,9 @@ public static partial class LineValidation
     [GeneratedRegex(@"\b(?:he|she|his|her|him|himself|herself)\b", RegexOptions.IgnoreCase)]
     private static partial Regex GenderedPronounRegex();
 
+    [GeneratedRegex(@"\b[A-Z][a-z]{2,}\b")]
+    private static partial Regex CapitalisedWordRegex();
+
     [GeneratedRegex(@"\b(?:he|his|him|himself)\b", RegexOptions.IgnoreCase)]
     private static partial Regex MalePronounRegex();
 
@@ -931,7 +964,9 @@ public static partial class LineValidation
     [GeneratedRegex("[他她它牠]")]
     private static partial Regex ExplicitPronounSourceRegex();
 
-    [GeneratedRegex("此人|这人|那人|来人|对方|乞丐|隐者|路人|店小二|小二|行人|旁人|某人|有人|何人")]
+    // Specific unnamed people only. 来人 ("guards!"), 有人 ("someone"), 旁人 ("others") and 何人 ("who") are summons or
+    // indefinites, not a reference to one person, so a he/she near them is not an invented gender.
+    [GeneratedRegex("此人|这人|那人|对方|乞丐|隐者|路人|店小二|小二")]
     private static partial Regex UnnamedRoleRegex();
 
     [GeneratedRegex(@"^[（(]?\s*(?:只见|只听|但见|眼见|行至|话音刚落|等了不多时|正[^，。,]{1,8}间)|忽然听闻|只听闻|只听得")]

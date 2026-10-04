@@ -130,6 +130,42 @@ public class LineValidationSilentFailureTests
     public void ContradictsGenderDespiteKinshipTerm_Cases(string raw, string translated, string gender, bool expected) =>
         Assert.Equal(expected, LineValidation.ContradictsGenderDespiteKinshipTerm(raw, translated, gender));
 
+    [Theory(DisplayName = "NamesSomeone sees a capitalised name mid-sentence, not a sentence start or I")]
+    [InlineData("Xiao Mei charged, she trembled", true)]
+    [InlineData("Haha, Shangguan will not bend", true)]
+    [InlineData("Who do you want Xue Ruyi to become", true)]
+    [InlineData("(Smiling, he put the silver away)", false)]
+    [InlineData("This person is not in danger. He is fine", false)]
+    [InlineData("I will go and he will stay", false)]
+    public void NamesSomeone_Cases(string translated, bool expected) =>
+        Assert.Equal(expected, LineValidation.NamesSomeone(translated));
+
+    [Theory(DisplayName = "InventsGender ignores summons and indefinites, and optionally lines that name someone")]
+    [InlineData("来人，把这个家伙拖出去！", "Guards, drag him out!", false, false)]
+    [InlineData("有人在门外偷听。", "Someone is eavesdropping, and he is nervous.", false, false)]
+    [InlineData("此人功法诡异。", "This person's method is strange, he is skilled.", false, true)]
+    [InlineData("此人功法诡异。", "Xue Ruyi saw this person; he is skilled.", false, true)]
+    [InlineData("此人功法诡异。", "Xue Ruyi saw this person; he is skilled.", true, false)]
+    public void InventsGender_RolesAndProse(string raw, string result, bool skipNamed, bool expected) =>
+        Assert.Equal(expected, LineValidation.InventsGender(raw, result, skipNamed));
+
+    [Theory(DisplayName = "InventsGender treats a he/she near an unknown-gender token as invented, whatever the line's shape")]
+    [InlineData("#PlayerName#手脚挺快，", "#PlayerName# is quick on his feet", true)]
+    [InlineData("#PlayerName#手脚挺快，", "#PlayerName#, you're quick-handed,", false)]
+    [InlineData("#PlayerName#手脚挺快，", "#PlayerName# is quick on their feet", false)]
+    // The translation names someone else, so the pronoun may be theirs, not the token's.
+    [InlineData("还望#PlayerName#速来，皇甫掌门告辞！", "I hope #PlayerName# comes soon; Sect Master Huangfu takes his leave", false)]
+    // The source states a gender itself, so the pronoun follows the source.
+    [InlineData("#PlayerName#的师兄手脚挺快，", "#PlayerName#'s senior brother is quick on his feet", false)]
+    // A faction token is not in the list: no person, no trigger.
+    [InlineData("#PlayerForceName#手脚挺快，", "#PlayerForceName# is quick on his feet", false)]
+    public void InventsGender_UnknownGenderTokens(string raw, string result, bool expected) =>
+        Assert.Equal(expected, LineValidation.InventsGender(raw, result, false, ["#PlayerName#", "#$PlayerName#"]));
+
+    [Fact(DisplayName = "InventsGender without a token list does not treat a plain token line as invented")]
+    public void InventsGender_NoTokenList_NoTrigger() =>
+        Assert.False(LineValidation.InventsGender("#PlayerName#手脚挺快，", "#PlayerName# is quick on his feet"));
+
     [Theory(DisplayName = "UsesOnlyNeutralPronouns needs a they/their and no he/she")]
     [InlineData("(Smiled, they nodded)", true)]
     [InlineData("(Smiled, he nodded)", false)]

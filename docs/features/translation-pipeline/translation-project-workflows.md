@@ -81,6 +81,16 @@ Pass the same `GameHooks` instance to every translation entry point. A hook supp
 | `WrongGenderKinshipTerm` | The same, where the source's only gender signal is a kinship term or title. Lower confidence; a false positive costs one extra retranslation. |
 | `NarratedAsFirstPerson` | Subject-less narration (只见, 只听, 行至...) written as "I". |
 
+The same check also runs inside `ApplyAllRulesToCurrentTranslation`, **on by default**, because that pass clears every flag before re-evaluating each split: without the check in it, a rules pass silently wipes pronoun flags set earlier (measured: 70 flags down to 2). It flags each split at most once per run, so `TranslateLinesBruteForce` cannot retranslate the same stubborn line on every iteration. Configure it in `Config.yaml`:
+
+```yaml
+pronounCheck:
+  enabled: true                       # false if it keeps flagging lines the model cannot fix
+  skipWhenTranslationNamesSomeone: false   # true for running-prose games
+```
+
+`PronounDefectWorkflow` reads the same section for its default options. A game that sets `GameHooks.UnknownGenderPersonTokens` (see [game hooks](game-hooks.md)) also gets a he/she next to one of those tokens counted as an invented gender, unless the translation names someone else.
+
 Run it as a dry run first (`flagForRetranslation: false`, the default). It writes only the report, so the count can be read before committing to a retranslation; `Converted` is untouched. Judged on the pre-QC `Translated`, with `QcRewrote` marking lines QC already corrected. Without a line-context provider only `InventedGender` and `NarratedAsFirstPerson` can be found.
 
 With `flagForRetranslation: true` it sets `FlaggedForRetranslation` on each hit. Flagged lines are not packaged until retranslated, so run the flag pass and a translate-flagged pass back to back. QC state resets automatically when a retranslation changes the text, so lines are re-reviewed afterward.

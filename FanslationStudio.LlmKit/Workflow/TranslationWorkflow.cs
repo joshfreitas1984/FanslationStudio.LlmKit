@@ -88,7 +88,19 @@ public static class TranslationWorkflow
 
     private record TranslationRuleContext(
         LlmConfig Config,
-        Regex ChineseCharRegex);
+        Regex ChineseCharRegex)
+    {
+        /// <summary>
+        /// Splits already flagged by the pronoun check in this run. Shared across the brute-force loop's iterations, so a
+        /// line the model keeps getting wrong is retranslated once, not on every iteration.
+        /// </summary>
+        public ConcurrentDictionary<TranslationSplit, byte> PronounFlagged { get; } = new();
+    }
+
+    /// <summary>One file's inputs to the pronoun check: its line contexts and the run-wide guard.</summary>
+    internal sealed record PronounRulesState(
+        IReadOnlyDictionary<TranslationSplit, LineContext> Contexts,
+        ConcurrentDictionary<TranslationSplit, byte> Flagged);
 
     private static TranslationRuleContext BuildTranslationRuleContext(string workingDirectory, GameHooks? hooks)
     {
@@ -106,9 +118,19 @@ public static class TranslationWorkflow
     {
         int recordsModded = 0;
 
+        // Built once per file (the provider needs the whole file to carry a speaker across rows); a no-op when the
+        // check is off.
+        PronounRulesState? pronouns = null;
+        if (context.Config.PronounCheck.Enabled)
+        {
+            var contexts = context.Config.Hooks?.LineContextProvider?.Invoke(context.Config.Runtime.WorkingDirectory ?? string.Empty, textFile, fileLines)
+                ?? new Dictionary<TranslationSplit, LineContext>();
+            pronouns = new PronounRulesState(contexts, context.PronounFlagged);
+        }
+
         Parallel.ForEach(fileLines, line =>
         {
-            int lineModded = ProcessLine(line, textFile, resetFlag, logLines, context);
+            int lineModded = ProcessLine(line, textFile, resetFlag, logLines, context, pronouns);
             Interlocked.Add(ref recordsModded, lineModded);
         });
 
@@ -127,7 +149,8 @@ public static class TranslationWorkflow
         TextFileToSplit textFile,
         bool resetFlag,
         ConcurrentBag<string> logLines,
-        TranslationRuleContext context)
+        TranslationRuleContext context,
+        PronounRulesState? pronouns = null)
     {
         var tokenReplacer = new StringTokenReplacer();
         int modded = 0;
@@ -137,7 +160,7 @@ public static class TranslationWorkflow
             if (resetFlag)
                 split.ResetFlags(false);
 
-            if (UpdateSplit(logLines, line, split, textFile, context.Config, context.ChineseCharRegex, tokenReplacer))
+            if (UpdateSplit(logLines, line, split, textFile, context.Config, context.ChineseCharRegex, tokenReplacer, pronouns))
                 modded++;
         }
 
@@ -151,7 +174,18 @@ public static class TranslationWorkflow
         TextFileToSplit textFile,
         LlmConfig config,
         Regex chineseCharRegex,
-        StringTokenReplacer tokenReplacer)
+        StringTokenReplacer tokenReplacer) =>
+        UpdateSplit(logLines, line, split, textFile, config, chineseCharRegex, tokenReplacer, null);
+
+    private static bool UpdateSplit(
+        ConcurrentBag<string> logLines,
+        TranslationLine line,
+        TranslationSplit split,
+        TextFileToSplit textFile,
+        LlmConfig config,
+        Regex chineseCharRegex,
+        StringTokenReplacer tokenReplacer,
+        PronounRulesState? pronouns)
     {
         if (split.SafeToTranslate && config.Hooks?.CustomUnsafeToTranslateRule?.Invoke(textFile, line, split) == true)
         {
@@ -160,7 +194,7 @@ public static class TranslationWorkflow
         }
 
         var translatedBeforeRules = split.Translated;
-        var modified = UpdateSplitCore(logLines, split, textFile, config, chineseCharRegex, tokenReplacer);
+        var modified = UpdateSplitCore(logLines, split, textFile, config, chineseCharRegex, tokenReplacer, pronouns);
 
         if (!string.Equals(translatedBeforeRules, split.Translated, StringComparison.Ordinal))
             QualityReviewHelpers.FindQcAnchor(line, split).ResetQcState();
@@ -174,7 +208,8 @@ public static class TranslationWorkflow
         TextFileToSplit textFile,
         LlmConfig config,
         Regex chineseCharRegex,
-        StringTokenReplacer tokenReplacer)
+        StringTokenReplacer tokenReplacer,
+        PronounRulesState? pronouns = null)
     {
         if (!split.SafeToTranslate)
             return false;
@@ -201,7 +236,33 @@ public static class TranslationWorkflow
         if (TryApplyGameSpecificRepair(logLines, split, textFile, config) is bool gameSpecificResult)
             return gameSpecificResult;
 
-        return ApplyTranslationRules(logLines, config, split, textFile, preparedRaw);
+        return ApplyTranslationRules(logLines, config, split, textFile, preparedRaw)
+            || TryFlagPronounDefect(logLines, split, textFile, config, pronouns);
+    }
+
+    /// <summary>
+    /// Flags a translation with a pronoun defect (see <see cref="PronounDefectWorkflow"/>) for retranslation. Runs after
+    /// every other rule found nothing, and at most once per split per run (<see cref="PronounRulesState.Flagged"/>),
+    /// so a line the model cannot fix does not keep the brute-force loop retranslating it.
+    /// </summary>
+    internal static bool TryFlagPronounDefect(ConcurrentBag<string> logLines, TranslationSplit split, TextFileToSplit textFile, LlmConfig config, PronounRulesState? pronouns)
+    {
+        if (pronouns == null || split.FlaggedForRetranslation || split.Text.Length == 0 || split.Translated.Length == 0)
+            return false;
+
+        if (pronouns.Flagged.ContainsKey(split))
+            return false;
+
+        pronouns.Contexts.TryGetValue(split, out var lineContext);
+        var category = PronounDefectWorkflow.Classify(split, config.Hooks, lineContext, config.PronounCheck.SkipWhenTranslationNamesSomeone).Category;
+        if (category == null)
+            return false;
+
+        pronouns.Flagged.TryAdd(split, 0);
+        logLines.Add($"Pronoun defect ({category}) {textFile.Path} \n{split.Text}\n->\n{split.Translated}");
+        split.FlaggedForRetranslation = true;
+        split.FlaggedMistranslation = category;
+        return true;
     }
 
     /// <summary>
