@@ -1242,7 +1242,7 @@ public static partial class TranslationService
     /// </summary>
     private static ValidationResult? TryRepairInventedGender(LlmConfig config, string preparedRaw, ValidationResult candidate)
     {
-        if (!config.PronounCheck.AutoRepair || !candidate.Valid)
+        if (!config.PronounCheck.AutoRepairPronouns || !candidate.Valid)
             return null;
 
         var repaired = PronounRepair.Neutralise(candidate.Result);

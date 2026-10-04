@@ -68,6 +68,20 @@ Receives `(workingDirectory, textFile, lines)` and returns a `LineContext(Prompt
 
 A split with a context never reads or writes the shared translation cache and never deduplicates against identical text with a different context, because the same text can translate differently for a different speaker. Splits the provider omits translate exactly as before. Never return a gender you cannot know: a player-chosen gender, or an unnamed character, should get a prompt that says the gender is unknown and `GenderKnown: false`.
 
+#### `CharacterContext.AddCharacterContext` (named characters)
+
+When the game has a table of character names and genders, a provider calls the shared helper instead of writing its own name matching:
+
+```csharp
+var characters = CharacterContext.FromCsv(path, nameColumn: "名字", genderColumn: "性别", stripFromNames: ".");
+// or CharacterContext.FromYaml(path): a list of { name, gender, aliases } entries
+CharacterContext.AddCharacterContext(contexts, lines, characters, minNameLength: 3, skipSplit: split => HasPlayerToken(split));
+```
+
+Any split that names a character gets "the text names X, a female character: use she/her for them, otherwise they". It never replaces a context that already knows a gender (a speaker) and skips a split naming characters of different genders. Genders are `male`/`female` (or `男`/`女`, `m`/`f`); other values are ignored. Set `minNameLength` to keep short names that are ordinary words out of the table's matching; list a short name explicitly (with the minimum lowered) only when it is safe.
+
+This does not raise more flags in the rules pass. A known-gender context is checked with `ContradictsGender`: the right pronoun passes, only one that contradicts the table is flagged, and the invented-gender rule (and `autoRepairPronouns`) never applies to it. What it can add is true positives: a line naming a female character that says "he" is now a `WrongGender` hit where before it was only a guess. A false positive remains when the line also contains an unnamed person of the other gender.
+
 ### `UnknownGenderPersonTokens`
 
 A list of placeholder tokens (for example `#PlayerName#`) that stand for a person whose gender is not known when the text is translated: the player, or someone the game fills in at runtime. It is not a callback. `LineValidation.InventsGender` treats a he/she/his/her/him in a line containing one of them as an invented gender when the source states no gender itself (no 他/她, no kinship term or title), and skips the line when the translation names someone else, since the pronoun may be theirs. Survey the game's tokens first: list every `#...#` token in the raw text and keep only those that are people. Faction, place, item and number tokens are not people. A `LineContextProvider` should give the same lines a "gender unknown, use you/they" hint so new translations avoid the problem.

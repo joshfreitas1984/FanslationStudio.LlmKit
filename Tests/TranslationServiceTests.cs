@@ -272,13 +272,12 @@ public class TranslationServiceTests
     public async Task TranslateSplitAsync_SoftGenderCorrection_UnusableKeepsOriginal()
     {
         // The corrected attempt leaks Chinese, so it is hard-invalid and must not replace the shippable original.
-        // (Auto repair is off here so the original comes back untouched; the next test covers the repair.)
+        // (Pronoun auto repair is off by default, so the original comes back untouched; the next test covers the repair.)
         var softRule = new ScriptedLlmHandler.Rule { Matches = c => c.Contains("NOGENDER"), Responses = ["(Smiling, 收起 the silver away)"] };
         var initialRule = new ScriptedLlmHandler.Rule { Matches = c => c.Contains("笑着把银两收起来"), Responses = ["(Smiling, he put the silver away)"] };
 
         var config = BuildConfig([softRule, initialRule], out var client);
         config.CorrectionPromptsEnabled = true;
-        config.PronounCheck.AutoRepair = false;
 
         var result = await TranslationService.TranslateSplitAsync(config, "（笑着把银两收起来）", client, BuildTextFile());
 
@@ -296,6 +295,7 @@ public class TranslationServiceTests
 
         var config = BuildConfig([softRule, initialRule], out var client);
         config.CorrectionPromptsEnabled = true;
+        config.PronounCheck.AutoRepairPronouns = true;
 
         var result = await TranslationService.TranslateSplitAsync(config, "（笑着把银两收起来）", client, BuildTextFile());
 
