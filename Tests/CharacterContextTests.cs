@@ -43,6 +43,14 @@ public class CharacterContextTests
         CharacterContext.AddCharacterContext(known, lines, characters, 3);
         Assert.Equal(LineContext.Male, known[murong.Splits[0]].Gender);
 
+        // A source that already states a gender (大师兄) is left alone: its pronoun may be for that other person.
+        var kin = Line("龙湘来到外堡，到处没见着你大师兄。");
+        var kinContexts = new Dictionary<TranslationSplit, LineContext>();
+        CharacterContext.AddCharacterContext(kinContexts, [kin], new Dictionary<string, string> { ["龙湘"] = "女" });
+        Assert.Empty(kinContexts);
+        CharacterContext.AddCharacterContext(kinContexts, [kin], new Dictionary<string, string> { ["龙湘"] = "女" }, skipGenderedSources: false);
+        Assert.Single(kinContexts);
+
         var skipped = new Dictionary<TranslationSplit, LineContext>();
         CharacterContext.AddCharacterContext(skipped, lines, characters, 3, split => split.Text.Contains("慕容"));
         Assert.Empty(skipped);

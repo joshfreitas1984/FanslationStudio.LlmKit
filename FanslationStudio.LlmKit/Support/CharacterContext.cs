@@ -20,6 +20,8 @@ public static class CharacterContext
         public string Gender { get; set; } = string.Empty;
         /// <summary>Other names the text uses for the same character (a nickname, a given name without the family name).</summary>
         public List<string> Aliases { get; set; } = [];
+        /// <summary>Free text on where the gender came from; documentation only.</summary>
+        public string Evidence { get; set; } = string.Empty;
     }
 
     /// <summary>Maps male/female/男/女/m/f (any case) to <see cref="LineContext.Male"/>/<see cref="LineContext.Female"/>; null for anything else.</summary>
@@ -89,7 +91,9 @@ public static class CharacterContext
     /// Gives each split that names a character from <paramref name="characters"/> (name to male/female/男/女) that
     /// character's gender as a line context. It never replaces a context that already knows a gender (a speaker), and
     /// leaves a split alone when the characters it names have different genders, since the pronoun is then ambiguous.
-    /// <paramref name="skipSplit"/> lets a game exclude splits (for example ones with a player token). Names shorter
+    /// A split whose source already states a gender (他/她, 师兄, 姑娘...) is left alone unless
+    /// <paramref name="skipGenderedSources"/> is false: such a line usually has a second person of the other gender, so
+    /// the named character's gender would flag correct pronouns. <paramref name="skipSplit"/> lets a game exclude splits (for example ones with a player token). Names shorter
     /// than <paramref name="minNameLength"/> are not matched, because short names are often ordinary words; list a
     /// short name in the table explicitly only if it is safe, and set the minimum to 1.
     /// </summary>
@@ -98,7 +102,8 @@ public static class CharacterContext
         IReadOnlyList<TranslationLine> lines,
         IReadOnlyDictionary<string, string> characters,
         int minNameLength = 1,
-        Func<TranslationSplit, bool>? skipSplit = null)
+        Func<TranslationSplit, bool>? skipSplit = null,
+        bool skipGenderedSources = true)
     {
         var names = characters
             .Where(character => character.Key.Length >= minNameLength && NormaliseGender(character.Value) != null)
@@ -109,7 +114,8 @@ public static class CharacterContext
 
         foreach (var split in lines.SelectMany(line => line.Splits))
         {
-            if (split.Text.Length == 0 || (contexts.TryGetValue(split, out var existing) && existing.GenderKnown) || skipSplit?.Invoke(split) == true)
+            if (split.Text.Length == 0 || (contexts.TryGetValue(split, out var existing) && existing.GenderKnown) || skipSplit?.Invoke(split) == true
+                || (skipGenderedSources && LineValidation.SourceStatesGender(split.Text)))
                 continue;
 
             var named = names.Where(character => split.Text.Contains(character.Name, StringComparison.Ordinal)).ToList();

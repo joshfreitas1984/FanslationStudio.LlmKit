@@ -643,6 +643,12 @@ public static partial class LineValidation
     /// player in second person, so this should read "you" or have no subject. Spoken lines and parenthesised
     /// thoughts are not matched, nor is a line that mentions 你/您 (another character addressing the player, so "I" is right).
     /// </summary>
+    /// <summary>
+    /// True when <paramref name="raw"/> itself states a gender: 他/她/它 or a gendered kinship term or title (师兄, 姑娘...).
+    /// A pronoun for someone else in such a line cannot be judged from a named character's gender alone.
+    /// </summary>
+    public static bool SourceStatesGender(string raw) => GenderedSourceRegex().IsMatch(raw);
+
     public static bool NarratesAsFirstPerson(string raw, string result) =>
         raw.Length <= 80 && NarrationOpenerRegex().IsMatch(raw) && !SelfReferenceRegex().IsMatch(raw) && !raw.Contains('你') && !raw.Contains('您') && FirstPersonPronounRegex().IsMatch(result);
 
