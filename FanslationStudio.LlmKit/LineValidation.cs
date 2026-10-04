@@ -612,8 +612,8 @@ public static partial class LineValidation
         if (GenderedSourceRegex().IsMatch(raw))
             return false;
 
-        var male = MalePronounRegex().IsMatch(translated);
-        var female = FemalePronounRegex().IsMatch(translated);
+        var male = MalePronounRegex().IsMatch(WithoutNameTails(translated));
+        var female = FemalePronounRegex().IsMatch(WithoutNameTails(translated));
         return gender == LineContext.Male ? female && !male : gender == LineContext.Female && male && !female;
     }
 
@@ -628,14 +628,14 @@ public static partial class LineValidation
         if (!GenderedSourceRegex().IsMatch(raw) || ExplicitPronounSourceRegex().IsMatch(raw))
             return false;
 
-        var male = MalePronounRegex().IsMatch(translated);
-        var female = FemalePronounRegex().IsMatch(translated);
+        var male = MalePronounRegex().IsMatch(WithoutNameTails(translated));
+        var female = FemalePronounRegex().IsMatch(WithoutNameTails(translated));
         return gender == LineContext.Male ? female && !male : gender == LineContext.Female && male && !female;
     }
 
     /// <summary>True when <paramref name="translated"/> refers to someone only as "they/them/their", with no he/she at all.</summary>
     public static bool UsesOnlyNeutralPronouns(string translated) =>
-        NeutralPronounRegex().IsMatch(translated) && !GenderedPronounRegex().IsMatch(translated);
+        NeutralPronounRegex().IsMatch(translated) && !GenderedPronounRegex().IsMatch(WithoutNameTails(translated));
 
     /// <summary>
     /// True when <paramref name="raw"/> is subject-less narration (只见, 只听, 行至, 忽然听闻...) that names no
@@ -659,7 +659,7 @@ public static partial class LineValidation
         if (skipWhenResultNamesSomeone && NamesSomeone(result))
             return false;
 
-        if (!GenderedPronounRegex().IsMatch(result) || GenderedSourceRegex().IsMatch(raw))
+        if (!GenderedPronounRegex().IsMatch(WithoutNameTails(result)) || GenderedSourceRegex().IsMatch(raw))
             return false;
 
         // A token for someone whose gender is unknown (the player, a runtime-chosen person) - the pronoun is invented
@@ -940,6 +940,16 @@ public static partial class LineValidation
 
     [GeneratedRegex(ChinesePlaceholderPattern)]
     private static partial Regex ChinesePlaceholderRegex();
+
+    /// <summary>
+    /// Blanks a name that ends in "He" (晁和 becomes "Chao He") before the pronoun checks run, so the name is not mistaken
+    /// for "he". Only a capitalised word directly before a capital "He" counts; a sentence-initial "He" after a full
+    /// stop does not match.
+    /// </summary>
+    private static string WithoutNameTails(string text) => NameEndingInHeRegex().Replace(text, "$1_");
+
+    [GeneratedRegex(@"\b([A-Z][a-z]+) He\b")]
+    private static partial Regex NameEndingInHeRegex();
 
     [GeneratedRegex(@"\b(?:he|she|his|her|him|himself|herself)\b", RegexOptions.IgnoreCase)]
     private static partial Regex GenderedPronounRegex();

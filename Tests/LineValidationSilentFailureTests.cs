@@ -151,6 +151,13 @@ public class LineValidationSilentFailureTests
     public void InventsGender_RolesAndProse(string raw, string result, bool skipNamed, bool expected) =>
         Assert.Equal(expected, LineValidation.InventsGender(raw, result, skipNamed));
 
+    [Theory(DisplayName = "A name ending in He (Chao He) is not read as the pronoun he")]
+    [InlineData("此人给我们打个半死才招供，名叫晁和来着。", "We beat them half to death before they confessed; their name is Chao He.", false)]
+    [InlineData("此人给我们打个半死才招供，名叫晁和来着。", "We beat him half to death before he confessed; his name is Chao He.", true)]
+    [InlineData("名唤晁和的此人", "This person, named Chao He. He fled.", true)]
+    public void InventsGender_NameEndingInHe(string raw, string result, bool expected) =>
+        Assert.Equal(expected, LineValidation.InventsGender(raw, result));
+
     [Theory(DisplayName = "InventsGender treats a he/she near an unknown-gender token as invented, whatever the line's shape")]
     [InlineData("#PlayerName#手脚挺快，", "#PlayerName# is quick on his feet", true)]
     [InlineData("#PlayerName#手脚挺快，", "#PlayerName#, you're quick-handed,", false)]
