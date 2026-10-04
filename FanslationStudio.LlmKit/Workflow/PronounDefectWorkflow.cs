@@ -54,8 +54,10 @@ public static class PronounDefectWorkflow
         }
 
         // The speaker's gender is known, so he/she is allowed - but only if it is the right one.
-        var knownCategory = LineValidation.ContradictsGender(split.Text, split.Translated, known.Gender) ? "WrongGender"
-            : LineValidation.ContradictsGenderDespiteKinshipTerm(split.Text, split.Translated, known.Gender) ? "WrongGenderKinshipTerm"
+        // A continuation split that opens with he/she points back to the previous sentence's subject, which it cannot see.
+        var pointsBack = split.SubIndex > 0 && LineValidation.OpensWithPronounSubject(split.Translated);
+        var knownCategory = !pointsBack && LineValidation.ContradictsGender(split.Text, split.Translated, known.Gender) ? "WrongGender"
+            : !pointsBack && LineValidation.ContradictsGenderDespiteKinshipTerm(split.Text, split.Translated, known.Gender) ? "WrongGenderKinshipTerm"
             : LineValidation.NarratesAsFirstPerson(split.Text, split.Translated) ? "NarratedAsFirstPerson"
             : null;
 

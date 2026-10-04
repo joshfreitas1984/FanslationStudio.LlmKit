@@ -117,6 +117,17 @@ public class PronounDefectWorkflowTests
         }
     }
 
+    [Fact(DisplayName = "PronounDefectWorkflow Classify leaves a continuation split that opens with she alone, but not the first split")]
+    public void Classify_ContinuationOpeningWithPronoun_PointsBack()
+    {
+        var male = new LineContext("male", true, LineContext.Male);
+        var continuation = new TranslationSplit { SubIndex = 1, Text = "要嫁给唐离那登徒子了。", Translated = "She's going to marry Tang Li." };
+        var first = new TranslationSplit { SubIndex = 0, Text = "要嫁给唐离了。", Translated = "She's going to marry Tang Li." };
+
+        Assert.Null(PronounDefectWorkflow.Classify(continuation, null, male, false).Category);
+        Assert.Equal("WrongGender", PronounDefectWorkflow.Classify(first, null, male, false).Category);
+    }
+
     [Fact(DisplayName = "PronounDefectWorkflow without a provider finds only invented gender and first-person narration")]
     public async Task NoProvider_FindsContextFreeDefects()
     {

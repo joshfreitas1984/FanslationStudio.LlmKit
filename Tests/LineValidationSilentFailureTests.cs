@@ -80,6 +80,8 @@ public class LineValidationSilentFailureTests
     [InlineData("（笑着把银两收起来）", "(Smiling, they put the silver away)")]
     [InlineData("赵胤宗笑着把银两收了起来。", "Zhao Yinzong smiled and put his silver away")]
     [InlineData("（笑着把银子收起来）", "(Smiling, put the silver away)")]
+    // 青年 states a gender itself, so "young man" / "his" are not invented.
+    [InlineData("（只见那青年从怀中掏出细毫，", "(You saw the young man take out a fine brush from his robes,")]
     public void NoInventedGender_NoSoftPrompt(string raw, string result)
     {
         var validation = Validate(raw, result);
@@ -119,6 +121,10 @@ public class LineValidationSilentFailureTests
     // The speaker is male but the source says 她: another person, so "she" is correct.
     [InlineData("（看着姜婉，她羞红了脸）", "(Looking at Jiang Wan, she blushed)", "male", false)]
     [InlineData("（看着姜婉的妹妹）", "(Looking at Jiang Wan's sister, her eyes shining)", "male", false)]
+    // A second person named only by a role (老乞丐, 老兵) can own the pronoun; a plain hero line is still checked.
+    [InlineData("（那老乞丐颤颤巍巍把那铁碗举到面前，林云裳定睛一看，", "(The old beggar raised the iron bowl to his face. Lin Yunshang took a closer look,", "female", false)]
+    [InlineData("这老兵武功出神入化，眼看就要将上官凤斩于枪下。", "This old veteran was about to cut Shangguan Feng down with his spear.", "female", false)]
+    [InlineData("（白云天话说到一半，面色突变，", "(Bai Yuntian's words were cut off as his expression changed,", "female", true)]
     public void ContradictsGender_Cases(string raw, string translated, string gender, bool expected) =>
         Assert.Equal(expected, LineValidation.ContradictsGender(raw, translated, gender));
 
@@ -127,6 +133,10 @@ public class LineValidationSilentFailureTests
     [InlineData("（妹妹说错了）", "(Her younger sister was wrong)", "female", false)]
     [InlineData("（看着妹妹，她羞红了脸）", "(Looking at his sister, she blushed)", "male", false)]
     [InlineData("（点了点头）", "(Smiled, he nodded)", "female", false)]
+    // The pronoun matches the kinship term's own gender: it belongs to the relative, not the speaker.
+    [InlineData("（跪下）哈哈，这小师妹还没入门，怎就如此受欢迎了？", "(Kneeling) Ha ha, this junior sister hasn't even joined yet, and she's already so popular?", "male", false)]
+    [InlineData("（大哥说错了）", "(His elder brother was wrong)", "female", false)]
+    [InlineData("（还好小妮子没反应过来，否则非得让我退学费不可）", "(Good thing the little girl didn't react, or I'd refund her tuition)", "male", false)]
     public void ContradictsGenderDespiteKinshipTerm_Cases(string raw, string translated, string gender, bool expected) =>
         Assert.Equal(expected, LineValidation.ContradictsGenderDespiteKinshipTerm(raw, translated, gender));
 
@@ -150,6 +160,15 @@ public class LineValidationSilentFailureTests
     [InlineData("街边乞丐一遍以筷子敲碗，一遍所唱之歌谣，其吐字换气中暗含丐帮入门内功心法", "A beggar by the street beat on a bowl while singing; the beggar's diction concealed the method.", false, false)]
     public void InventsGender_RolesAndProse(string raw, string result, bool skipNamed, bool expected) =>
         Assert.Equal(expected, LineValidation.InventsGender(raw, result, skipNamed));
+
+    [Theory(DisplayName = "SourceStatesGender recognises gendered role nouns (old man, old woman, madam, monk)")]
+    [InlineData("想那老头万一气再长些", true)]
+    [InlineData("何况是六旬老妪！", true)]
+    [InlineData("老鸨还说下回见就要打死我", true)]
+    [InlineData("这老和尚怕不是自命武林至尊吧", true)]
+    [InlineData("魏掌门为人谦和", false)]
+    public void SourceStatesGender_Roles(string raw, bool expected) =>
+        Assert.Equal(expected, LineValidation.SourceStatesGender(raw));
 
     [Theory(DisplayName = "A name ending in He (Chao He) is not read as the pronoun he")]
     [InlineData("此人给我们打个半死才招供，名叫晁和来着。", "We beat them half to death before they confessed; their name is Chao He.", false)]
