@@ -19,12 +19,12 @@ public static class PronounDefectWorkflow
     /// character. Use <see cref="Prose"/> for a game whose text is running prose rather than stage directions: there a
     /// pronoun after a named character is usually right, and a single line cannot show otherwise.
     /// </summary>
-    public sealed record PronounDefectOptions(bool SkipWhenTranslationNamesSomeone = false)
+    public sealed record PronounDefectOptions(bool SkipWhenTranslationNamesSomeone = false, IReadOnlyCollection<string>? IgnoreSources = null)
     {
         public static PronounDefectOptions Prose { get; } = new(SkipWhenTranslationNamesSomeone: true);
 
         /// <summary>The options Config.yaml's <c>pronounCheck</c> section asks for.</summary>
-        public static PronounDefectOptions From(PronounCheckConfig config) => new(config.SkipWhenTranslationNamesSomeone);
+        public static PronounDefectOptions From(PronounCheckConfig config) => new(config.SkipWhenTranslationNamesSomeone, config.IgnoreSources);
     }
 
     /// <summary>Config.yaml's <c>pronounCheck</c> section, or the defaults when the working directory has no Config.yaml.</summary>
@@ -90,6 +90,7 @@ public static class PronounDefectWorkflow
     {
         options ??= PronounDefectOptions.From(LoadPronounCheck(workingDirectory, hooks));
         var skipNamed = options.SkipWhenTranslationNamesSomeone;
+        var ignored = options.IgnoreSources?.ToHashSet(StringComparer.Ordinal) ?? [];
         var hits = new ConcurrentBag<PronounDefectHit>();
         var genderKnownAndCorrect = 0;
         var neutralForKnownGender = 0;
@@ -105,7 +106,7 @@ public static class PronounDefectWorkflow
             foreach (var line in fileLines)
                 foreach (var split in line.Splits)
                 {
-                    if (split.FlaggedForRetranslation || split.Text.Length == 0 || split.Translated.Length == 0)
+                    if (split.FlaggedForRetranslation || split.Text.Length == 0 || split.Translated.Length == 0 || ignored.Contains(split.Text))
                         continue;
 
                     LineContext? context = null;

@@ -238,6 +238,13 @@ public class PronounCheckConfig
     /// fix does not stay stuck, and a 14B model that ignores the instruction cannot keep a guessed gender in.
     /// </summary>
     public bool AutoRepairPronouns { get; set; }
+
+    /// <summary>
+    /// Source texts (exact, as in the raw text) the pronoun check never flags. For the rare line it cannot judge, such
+    /// as one naming a known character where the pronoun is for an unnamed other person. Prefer fixing the cause
+    /// (a gendered role word, a missing character in the table) and use this only for what cannot be fixed.
+    /// </summary>
+    public List<string> IgnoreSources { get; set; } = [];
 }
 
 public class RuntimeValues

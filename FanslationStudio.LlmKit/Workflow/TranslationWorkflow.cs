@@ -239,7 +239,7 @@ public static class TranslationWorkflow
     /// </summary>
     internal static bool TryFlagPronounDefect(ConcurrentBag<string> logLines, TranslationSplit split, TextFileToSplit textFile, LlmConfig config, PronounRulesState? pronouns)
     {
-        if (pronouns == null || split.FlaggedForRetranslation || split.Text.Length == 0 || split.Translated.Length == 0)
+        if (pronouns == null || split.FlaggedForRetranslation || split.Text.Length == 0 || split.Translated.Length == 0 || config.PronounCheck.IgnoreSources.Contains(split.Text))
             return false;
 
         pronouns.Contexts.TryGetValue(split, out var lineContext);

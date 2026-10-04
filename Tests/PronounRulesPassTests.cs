@@ -54,6 +54,17 @@ public class PronounRulesPassTests
         Assert.False(clean.FlaggedForRetranslation);
     }
 
+    [Fact(DisplayName = "The rules pass never flags a source listed in pronounCheck.ignoreSources")]
+    public void IgnoredSource_IsNotFlagged()
+    {
+        var split = Split("（笑着把银两收起来）", "(Smiling, he put the silver away)");
+        var config = new LlmConfig();
+        config.PronounCheck.IgnoreSources.Add("（笑着把银两收起来）");
+
+        Assert.False(TranslationWorkflow.TryFlagPronounDefect(new ConcurrentBag<string>(), split, File(), config, State()));
+        Assert.False(split.FlaggedForRetranslation);
+    }
+
     [Fact(DisplayName = "The rules pass uses a known speaker gender: the right pronoun passes, the wrong one is flagged")]
     public void UsesLineContext()
     {

@@ -88,6 +88,7 @@ pronounCheck:
   enabled: true                       # false if it keeps flagging lines the model cannot fix
   skipWhenTranslationNamesSomeone: false   # true for running-prose games
   autoRepairPronouns: false           # true: rewrite a still-gendered line to they/their/them instead of shipping it
+  ignoreSources: []                   # exact source texts the check never flags (last resort for a line it cannot judge)
 ```
 
 `autoRepairPronouns` (off by default) is the deterministic last step of "never guess a gender". During translation, a line that still has an invented he/she/his/her/him after the retries and the one soft correction is rewritten by `PronounRepair` (he performs → they perform, his → their, she was → they were) rather than shipped gendered. It only rewrites what it can do safely and otherwise leaves the line alone (and so flagged): a second present-tense verb or plural noun after "and/but/or" in the same sentence (`He washes himself and goes home`, `the bow and arrows`) makes it give up, and a capital `He` after a capitalised word is read as a name (`Chao He`). A known-gender line (line context) is never repaired. It applies when a line is translated, not in the rules pass, so existing translations are changed only by retranslating them. Note it will turn a correct pronoun for an unnamed-gender character into "they" (it cannot know the pronoun was right), which is what `skipWhenTranslationNamesSomeone: true` avoids in prose games.
