@@ -1227,11 +1227,35 @@ public static partial class TranslationService
                 if (softValidation.Valid && softValidation.SoftCorrectionPrompt.Length == 0)
                     return softValidation;
 
-                return accepted;
+                // Still gendered. Rewrite the pronouns deterministically (the soft attempt if it was valid, otherwise the
+                // accepted line); a line the model cannot fix then ships as "they" instead of staying flagged.
+                return TryRepairInventedGender(config, preparedRaw, softValidation.Valid ? softValidation : accepted) ?? accepted;
             }
 
             return validationResult;
         }
+    }
+
+    /// <summary>
+    /// <see cref="PronounRepair"/> applied to a valid line that still invents a gender. Returns null (keep the line as
+    /// it is) when repair is off, nothing can be rewritten safely, or the rewrite still reads as gendered.
+    /// </summary>
+    private static ValidationResult? TryRepairInventedGender(LlmConfig config, string preparedRaw, ValidationResult candidate)
+    {
+        if (!config.PronounCheck.AutoRepair || !candidate.Valid)
+            return null;
+
+        var repaired = PronounRepair.Neutralise(candidate.Result);
+        if (repaired == null || LineValidation.InventsGender(preparedRaw, repaired))
+            return null;
+
+        return new ValidationResult
+        {
+            Valid = true,
+            Result = repaired,
+            CorrectionPrompt = candidate.CorrectionPrompt,
+            SilentFailures = candidate.SilentFailures,
+        };
     }
 
     public static void AddCorrectionMessages(List<object> messages, string result, string correctionPrompt)

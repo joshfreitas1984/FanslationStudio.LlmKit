@@ -272,8 +272,27 @@ public class TranslationServiceTests
     public async Task TranslateSplitAsync_SoftGenderCorrection_UnusableKeepsOriginal()
     {
         // The corrected attempt leaks Chinese, so it is hard-invalid and must not replace the shippable original.
+        // (Auto repair is off here so the original comes back untouched; the next test covers the repair.)
         var softRule = new ScriptedLlmHandler.Rule { Matches = c => c.Contains("NOGENDER"), Responses = ["(Smiling, 收起 the silver away)"] };
         var initialRule = new ScriptedLlmHandler.Rule { Matches = c => c.Contains("笑着把银两收起来"), Responses = ["(Smiling, he put the silver away)"] };
+
+        var config = BuildConfig([softRule, initialRule], out var client);
+        config.CorrectionPromptsEnabled = true;
+        config.PronounCheck.AutoRepair = false;
+
+        var result = await TranslationService.TranslateSplitAsync(config, "（笑着把银两收起来）", client, BuildTextFile());
+
+        Assert.True(result.Valid);
+        Assert.Equal("(Smiling, he put the silver away)", result.Result);
+        Assert.Equal(1, softRule.CallCount);
+    }
+
+    [Fact(DisplayName = "TranslateSplitAsync rewrites an invented gender to they when the soft correction cannot fix it")]
+    public async Task TranslateSplitAsync_SoftGenderCorrection_StillGendered_IsRepaired()
+    {
+        // The model ignores the correction and keeps "his"; the deterministic repair has the last word.
+        var softRule = new ScriptedLlmHandler.Rule { Matches = c => c.Contains("NOGENDER"), Responses = ["(Smiling, he put his silver away)"] };
+        var initialRule = new ScriptedLlmHandler.Rule { Matches = c => c.Contains("笑着把银两收起来"), Responses = ["(Smiling, he put his silver away)"] };
 
         var config = BuildConfig([softRule, initialRule], out var client);
         config.CorrectionPromptsEnabled = true;
@@ -281,7 +300,7 @@ public class TranslationServiceTests
         var result = await TranslationService.TranslateSplitAsync(config, "（笑着把银两收起来）", client, BuildTextFile());
 
         Assert.True(result.Valid);
-        Assert.Equal("(Smiling, he put the silver away)", result.Result);
+        Assert.Equal("(Smiling, they put their silver away)", result.Result);
         Assert.Equal(1, softRule.CallCount);
     }
 

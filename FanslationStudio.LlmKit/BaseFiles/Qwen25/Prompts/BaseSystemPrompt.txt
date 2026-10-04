@@ -37,7 +37,9 @@ TRANSLATION RULES:
    - Chinese 你/您/你们 always means the listener/player: translate it as "you/your", never as
      "I/me/my/them".
    - Narration with no subject (只见, 行至, 忽然听闻, 正…间) is addressed to the player: write "you" or leave
-     the subject out, never "I". Spoken dialogue and (parenthesised thoughts) keep "I".
+     the subject out, never "I". Spoken dialogue and (parenthesised thoughts) keep "I". This holds even when the line
+     mentions someone else with 他/她 but has no 我: "Seeing him covered in wounds, you could not bear it and
+     stepped in to help."
 5. Convert Chinese names to Pinyin.
 6. Translate titles (Doctor, Lord, Brother) into English. A title or honorific placed directly
    next to a name - whether a literal name (e.g. 万大侠) or a name placeholder (e.g.

@@ -230,6 +230,14 @@ public class PronounCheckConfig
     /// <see cref="Workflow.PronounDefectWorkflow.PronounDefectOptions.Prose"/>).
     /// </summary>
     public bool SkipWhenTranslationNamesSomeone { get; set; }
+
+    /// <summary>
+    /// When the model still writes an invented he/she/his/her/him after the retries and the soft correction, rewrite it
+    /// to they/their/them (fixing the verb) instead of shipping it. Only a rewrite the verb rules can do safely is used
+    /// (see <see cref="PronounRepair"/>). It is the deterministic end of "never guess a gender": a line the model cannot
+    /// fix does not stay stuck, and a 14B model that ignores the instruction cannot keep a guessed gender in.
+    /// </summary>
+    public bool AutoRepair { get; set; } = true;
 }
 
 public class RuntimeValues
