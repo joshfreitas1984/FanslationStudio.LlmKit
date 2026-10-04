@@ -20,6 +20,8 @@ public static class CharacterContext
         public string Gender { get; set; } = string.Empty;
         /// <summary>Other names the text uses for the same character (a nickname, a given name without the family name).</summary>
         public List<string> Aliases { get; set; } = [];
+        /// <summary>The name the translation uses; documentation only.</summary>
+        public string EnglishName { get; set; } = string.Empty;
         /// <summary>Free text on where the gender came from; documentation only.</summary>
         public string Evidence { get; set; } = string.Empty;
     }
