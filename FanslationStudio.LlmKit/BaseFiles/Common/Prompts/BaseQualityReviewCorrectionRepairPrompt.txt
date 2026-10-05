@@ -8,6 +8,13 @@ idea but introduced a new problem while fixing it (e.g. broken a name, changed u
 or it may need a genuinely different approach. Do not go looking for a different kind of problem
 than what TARGET DEFECTS names.
 
+If RULE CHECK FAILURE is given, PREVIOUS ATTEMPT failed an automatic rule check (e.g. it dropped
+a placeholder token that SOURCE contains, or added one SOURCE does not). Fix exactly what it says
+while keeping the fixes for TARGET DEFECTS - this is mandatory, never answer NONE for it.
+
+If VERIFIER EVIDENCE is given, it quotes the exact text each TARGET DEFECTS entry is about: SOURCE
+text PREVIOUS ATTEMPT failed to render, or wrong words in PREVIOUS ATTEMPT. Fix exactly that text.
+
 How to fix each defect category:
 - GARBLED_NUMBER: restore the correct number/clause supported by SOURCE or surrounding context -
   never invent a number SOURCE doesn't support.

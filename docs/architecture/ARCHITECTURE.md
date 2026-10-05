@@ -72,21 +72,26 @@ Single entry point, called once per workflow invocation. Loads, in order:
 5. Hyphens in glossary/manual results are rewritten to non-breaking hyphens (Unity line-break
    workaround).
 
-Adding a new preset model = add a case in `GetConfiguration`'s preset-branch (a `GetQwen25Preset`-
-style method) + embedded `BaseFiles/<Name>/Config.yaml` + only the prompt `.txt` resources that
-diverge from `BaseFiles/Common/` + a new `ModelPreset` enum value.
+Adding a new preset model = a new `ModelPreset` enum value + its case in
+`GetPresetModelConfig`'s name switch + embedded `BaseFiles/<Name>/Config.yaml` + only the prompt
+`.txt` resources that diverge from `BaseFiles/Common/`. Workspace glossary files override preset
+entries by `raw`/`rawSimplified`/`rawTraditional` through an indexed merge (`GlossaryIndex`).
 
 ## Entry points (`Workflow/TranslationWorkflow.cs`)
 
 - `TranslateLines` → single pass, `TranslationService.TranslateViaLlmAsync(force:false)`.
 - `TranslateLinesBruteForce` → loop: apply validation rules (flagging bad/retranslatable lines) →
   translate → re-validate → repeat, up to 30 iterations or until nothing is flagged. This is the
-  "keep hammering until clean" mode used for real translation runs.
+  "keep hammering until clean" mode used for real translation runs. Config and the deserialized
+  corpus (`Support/TranslationCorpus`) are loaded once for the whole loop; every pass works in
+  memory and writes only the files it changed. It starts with a rules pass over existing
+  `Converted` files, so on a fresh workspace (nothing in `Converted` yet) it does nothing - run
+  `TranslateLines` first.
 - `ApplyAllRulesToCurrentTranslation` → just the validation/flagging pass, no LLM calls (cheap,
   used to see what *would* need retranslating).
 
-`UpdateCurrentTranslationLines` iterates all files **in parallel**
-(`FileIteration.IterateTranslatedFilesInParallelAsync`) and, within a file, all lines **in
+`UpdateCurrentTranslationLines` iterates all files **in parallel** (bounded by
+`FileIteration.MaxParallelFiles`) and, within a file, all lines **in
 parallel** (`Parallel.ForEach`) running `ProcessLine`/`UpdateSplit` — a chain of pure/local rule
 checks (glossary hits, bad regex, dynamic-string exclusion, manual translation match, empty
 check, bad-word/mistranslation/hallucination glossary checks, `...` ellipsis repair, trim,
@@ -109,13 +114,12 @@ default `false`):
           uniqueSplits = distinct-by-Text splits in this batch only
           await Task.WhenAll(uniqueSplits.Select(TranslateSplitAsync))   (PARALLEL within batch)
           propagate result to duplicate splits within the same batch
-          every 25 records written: flush Converted/<file>.yaml to disk (synchronous write)
-      final flush for the file
+          changes reported to the file's BufferedFileWriter (throttled periodic flush)
+      final flush for the file (only if anything changed)
   ```
 
   `batchSize` (`Config.yaml: batchSize`) is the *only* concurrency knob here — it caps how many
-  distinct strings are in flight at once, and doubles as a checkpoint boundary (files rewritten to
-  disk after each batch's writes accumulate past `BatchlessBuffer` = 25). Every batch is a hard
+  distinct strings are in flight at once. Every batch is a hard
   synchronization barrier and files are fully sequential — the tail latency of one slow item (a
   retry/correction/sub-split chain) holds up the whole batch, and there's no overlap between one
   file's last few items and the next file's first ones.
@@ -124,12 +128,12 @@ default `false`):
   a continuous worker pool across the whole run instead of sequential batches/files:
 
   ```
-  load every file up-front, build PooledFileState per file (output path, lines, serializer, lock, counters)
+  load every file up-front, build PooledFileState per file (lines, duplicate groups, BufferedFileWriter)
   workItems = every file's distinct-by-Text splits, flattened across ALL files into one list
   await Parallel.ForEachAsync(workItems, MaxDegreeOfParallelism = MaxConcurrency ?? BatchSize ?? 20)
       translate-or-cache-hit each item, independent of file/batch boundaries
-      periodically (every 25 processed for that file): propagate duplicates for that file, flush to disk
-  final pass per file: propagate remaining duplicates, final flush
+      changed items reported to the file's writer; its last item triggers that file's flush
+  final pass per file: propagate remaining duplicates, flush only if anything changed
   ```
 
   No batch barrier and no file-boundary barrier — a worker pulls the next unique string the moment
@@ -143,6 +147,14 @@ default `false`):
   wall-clock comparison, not yet formal p95/in-flight-concurrency numbers).
 
 Key mechanics shared by both schedulers:
+- **Per-file write-back** (`Utility/BufferedFileWriter`, shared with the QC pass): a file is
+  re-serialized only when it changed - periodically once more than `BatchlessBuffer` (25) changes
+  have accumulated *and* at least `DefaultMinFlushInterval` (10s) has passed since its last write,
+  and once more when its last work item finishes. Duplicate propagation runs before every write.
+  A worker never waits on another worker's flush (`Monitor.TryEnter`), and an unchanged file is
+  never rewritten. Both schedulers share the per-item body (`TranslateWorkItemAsync`) and the
+  dedup/propagation helpers (`UniqueWorkItems`, `DuplicateGroups` - computed once per file -
+  and `PropagateDuplicates`).
 - **Translation cache** (`FillTranslationCacheAsync`, `RuntimeValues.TranslationCache` — a
   `ConcurrentDictionary<string,string>`, not a plain `Dictionary`, since both schedulers mutate it
   from parallel workers): built once per run, seeded from manual translations, preset+workspace
@@ -170,10 +182,12 @@ Key mechanics shared by both schedulers:
   translation runs (`splitRegexPatterns` had bracket patterns enabled before being disabled again) —
   see `TranslationWorkflowTests.SetBracketSplitBugLinesAsInvalid` in the downstream repo for a
   one-off remediation workflow step that flags affected lines for retranslation.
-- **Real LLM call** (`TranslateMessagesAsync`): builds prompt via `GenerateBaseMessages`, POSTs
-  once, retries on HTTP 429 with exponential backoff (5s → up to 60s, max 5 retries, now logging
-  per-attempt wait time and a post-backoff summary of total blocked time), strips `<think>` tags
-  from reasoning-model output.
+- **Real LLM call** (`TranslateMessagesAsync`): builds prompt via `GenerateBaseMessages` (the
+  glossary section is omitted entirely when no glossary term occurs in the text), POSTs a fresh
+  `HttpRequestMessage` per send (auth set per request - the `HttpClient` is shared by every
+  concurrent worker, so its `DefaultRequestHeaders` are never mutated), retries on HTTP 429 with
+  exponential backoff (5s → up to 60s, max 5 retries, logging per-attempt wait time and a
+  post-backoff summary of total blocked time), strips `<think>` tags from reasoning-model output.
 - **Validation + correction loop** (`LineValidation.CheckTransalationSuccessful` + `RetryCount`):
   on failure, regenerates a fresh message list (to avoid unbounded context growth) and appends a
   correction prompt. If the failure is a "leftover Chinese characters" case, the outer retry loop
@@ -189,7 +203,9 @@ Key mechanics shared by both schedulers:
   `Split(". ")`.
 - **Duplicate propagation**: batched scheduler is per-batch (`GroupBy(split => split.Text)` within
   one batch's lines); pooled scheduler is per-file (a strict superset — duplicates split across two
-  batches of the same file are always linked). Neither scheduler dedups across *different* files —
+  batches of the same file are always linked). In both, a group whose representative has no
+  translation (it failed) is skipped, so a failure never erases a duplicate's existing
+  translation. Neither scheduler dedups across *different* files —
   only the run-wide translation cache does that, and only for strings ≤
   `TranslationCacheMaxChars`.
 
@@ -220,9 +236,15 @@ accepted), and rates its own confidence 0-100. Entirely opt-in (`qualityReview.e
 - `StringTokenReplacer` — swaps game-specific tokens (placeholders, extra tokens from
   `Config.yaml: extraStringTokenReplacers`) out before sending to the LLM and back in after.
 - `ColorTagHelpers`, `HtmlTagHelpers` — Unity rich-text tag extraction/preservation.
-- `LlmHelpers` — request payload construction, per-text model selection
-  (`CalculateModelConfig` — chooses Standard vs StructuredText model based on text shape).
-- `YamlHelper` — shared YamlDotNet serializer/deserializer configuration.
+- `LlmHelpers` — request payload construction. `CalculateModelConfig` currently always returns
+  the first configured model (per-text model selection is an unimplemented TODO).
+- `YamlHelper` — `CreateSerializer`/`CreateDeserializer` return one cached, thread-safe instance
+  each; safe to share across parallel workers.
+- `BufferedFileWriter` — dirty-tracked, throttled per-file write-back (see the translation pipeline
+  section); used by the pooled/batched schedulers and the QC pass.
+- `PackagingHelpers`/`ExportHelpers` — the field-resolution core (QC freshness + score gate +
+  fragment checks + reconstruct) and the export-file plumbing shared by the CSV/JSON/PrefabText/
+  DynamicStrings workflows; see [`../features/packaging/`](../features/packaging/).
 - `FileHelper` — retry-wrapped `File.WriteAllText`/`WriteAllLines` (sync and async, 3 attempts,
   short delays) for the transient "file locked by another process" failure (IDE/antivirus/sync tool
   briefly holding an output `.yaml` open) that would otherwise abort an entire multi-hour

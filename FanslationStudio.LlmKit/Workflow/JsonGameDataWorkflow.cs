@@ -25,6 +25,12 @@ public static class JsonGameDataWorkflow
 {
     private static readonly Regex ArrayIndexSuffix = new(@"^(.+)\[(\d+)\]$", RegexOptions.Compiled);
 
+    private static readonly JsonSerializerOptions PackagedJsonOptions = new()
+    {
+        WriteIndented = true,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
+
     /// <summary>
     /// Reads a dumped JSON array file from <paramref name="rawSubfolder"/>/{textFile.Path} (default
     /// "Raw/Dumped", matching this game's own dump convention), decomposes every translatable
@@ -37,11 +43,6 @@ public static class JsonGameDataWorkflow
         string rawSubfolder = "Raw/Dumped")
     {
         var dumpedPath = $"{workingDirectory}/{rawSubfolder}/{textFile.Path}";
-        var exportPath = $"{workingDirectory}/Raw/Export";
-        var convertedPath = $"{workingDirectory}/Converted";
-
-        Directory.CreateDirectory(exportPath);
-        Directory.CreateDirectory(convertedPath);
 
         using var jsonDoc = JsonDocument.Parse(File.ReadAllText(dumpedPath));
         var foundLines = new List<TranslationLine>();
@@ -89,12 +90,7 @@ public static class JsonGameDataWorkflow
             }
         }
 
-        var serializer = YamlHelper.CreateSerializer();
-        FileHelper.WriteAllTextWithRetry($"{exportPath}/{textFile.Path}.yaml", serializer.Serialize(foundLines));
-
-        // Never overwrite an already-accumulated Converted/*.yaml - matches Csv/Prefab/DynamicStrings.
-        if (!File.Exists($"{convertedPath}/{textFile.Path}.yaml"))
-            File.Copy($"{exportPath}/{textFile.Path}.yaml", $"{convertedPath}/{textFile.Path}.yaml");
+        ExportHelpers.WriteExport(workingDirectory, textFile, foundLines);
     }
 
     /// <summary>
@@ -144,17 +140,18 @@ public static class JsonGameDataWorkflow
     /// not the whole object - since one JSON object commonly holds many independent translatable
     /// fields where one failing must not discard translations already accepted for the rest.
     /// </summary>
-    public static async Task<(int Passed, int QcRejected, int RawFallback)> PackageAsync(string workingDirectory, TextFileToSplit textFile)
+    /// <param name="config">Already-loaded configuration; read from <paramref name="workingDirectory"/> when null.</param>
+    public static async Task<(int Passed, int QcRejected, int RawFallback)> PackageAsync(string workingDirectory, TextFileToSplit textFile,
+        LlmConfig? config = null)
     {
         var outputPath = $"{workingDirectory}/Mod";
         Directory.CreateDirectory(outputPath);
 
-        var config = ConfigurationExtensions.GetConfiguration(workingDirectory);
+        config ??= ConfigurationExtensions.GetConfiguration(workingDirectory);
         var qualityReview = config.QualityReview;
 
         var outputArray = new JsonArray();
-        var passedCount = 0;
-        var rawFallbackCount = 0;
+        var counts = new PackagingCounts();
 
         await FileIteration.IterateTranslatedFilesAsync(workingDirectory, [textFile], async (_, _, fileLines) =>
         {
@@ -179,12 +176,12 @@ public static class JsonGameDataWorkflow
 
                     if (!ok)
                     {
-                        rawFallbackCount++;
+                        counts.RawFallback++;
                         continue; // leave the field at its original (already-parsed) raw value
                     }
 
                     SetValueAtPath(root, splitPath, packagedText);
-                    passedCount++;
+                    counts.Passed++;
                 }
 
                 outputArray.Add(root);
@@ -193,56 +190,30 @@ public static class JsonGameDataWorkflow
             await Task.CompletedTask;
         });
 
-        var jsonOptions = new JsonSerializerOptions
-        {
-            WriteIndented = true,
-            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-        };
-        FileHelper.WriteAllTextWithRetry($"{outputPath}/{textFile.Path}", outputArray.ToJsonString(jsonOptions));
+        FileHelper.WriteAllTextWithRetry($"{outputPath}/{textFile.Path}", outputArray.ToJsonString(PackagedJsonOptions));
 
-        // A field never fails purely for a low QC score - see PackageField's useQcTranslated check,
-        // which just skips the QcTranslated correction and falls through to plain fragment
-        // translation instead - so every failure counted here is a RawFallback.
-        return (passedCount, 0, rawFallbackCount);
+        // A field never fails purely for a low QC score - PackageField just skips the QcTranslated
+        // correction and falls through to plain fragment translation instead - so every failure
+        // counted here is a RawFallback.
+        return counts.ToTuple();
     }
 
     private static (bool Ok, string Text) PackageField(
         List<TranslationSplit> fragments, FieldTemplate? template, TextFileToSplit textFile, QualityReviewConfig qualityReview,
         LlmConfig config)
     {
-        var anchor = fragments.FirstOrDefault(f => f.SubIndex == 0) ?? fragments.FirstOrDefault();
-        if (anchor == null)
+        if (fragments.Count == 0)
             return (false, string.Empty);
 
-        var qcFresh = QualityReviewHelpers.IsQcReviewFresh(anchor, template, fragments, qualityReview);
-        var useQcTranslated = qcFresh
-            && !string.IsNullOrEmpty(anchor.QcTranslated)
-            && QualityReviewHelpers.PassesQcScoreGate(anchor.QcQualityScore, anchor.QcDefectCategory, qualityReview);
+        // A plain field goes through the same path with no template (its single split is its own
+        // anchor), so QC is consulted before its flags. A QcRejected outcome still packages the
+        // plain pre-QC translation, so only a missing result is a failure.
+        var resolved = PackagingHelpers.ResolveFragments(fragments, template, textFile, qualityReview, anchorFallsBackToFirst: true);
+        if (resolved.Text == null)
+            return (false, string.Empty);
 
-        if (useQcTranslated)
-            return (true, PackagingTextFixups.Apply(config, textFile, null, anchor.Text, anchor.QcTranslated));
-
-        var translatedFragments = new List<string>();
-
-        foreach (var fragment in fragments)
-        {
-            if (!textFile.PackageOutput || fragment.FlaggedForRetranslation || !fragment.SafeToTranslate)
-                return (false, string.Empty);
-
-            if (!string.IsNullOrEmpty(fragment.Translated))
-                translatedFragments.Add(fragment.Translated);
-            else if (!string.IsNullOrEmpty(fragment.Text))
-                return (false, string.Empty);
-            else
-                translatedFragments.Add(fragment.Text);
-        }
-
-        var packaged = template != null
-            ? CompoundFieldSplitter.Reconstruct(template.Template, translatedFragments)
-            : translatedFragments[0];
-
-        var rawText = string.Concat(fragments.Select(f => f.Text));
-        return (true, PackagingTextFixups.Apply(config, textFile, null, rawText, packaged));
+        var rawText = resolved.QcAnchor?.Text ?? string.Concat(fragments.Select(f => f.Text));
+        return (true, PackagingTextFixups.Apply(config, textFile, null, rawText, resolved.Text));
     }
 
     private static void SetValueAtPath(JsonObject root, string splitPath, string text)

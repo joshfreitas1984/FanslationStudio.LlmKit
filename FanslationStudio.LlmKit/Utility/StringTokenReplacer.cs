@@ -1,6 +1,5 @@
 ﻿using System.Text;
 using System.Text.RegularExpressions;
-using YamlDotNet.Core.Tokens;
 
 namespace FanslationStudio.LlmKit.Utility;
 
@@ -186,11 +185,5 @@ public class StringTokenReplacer
             result.Replace(color.Key, color.Value);
 
         return result.ToString();
-    }
-
-    public static string CleanTranslatedForApplyRules(string input)
-    {
-        return input;
-        //return EmojiRegex.Replace(input, "");
     }
 }

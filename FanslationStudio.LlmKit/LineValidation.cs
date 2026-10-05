@@ -16,6 +16,15 @@ public static partial class LineValidation
     // Compiled / source-generated regexes — one instance shared across all calls
     public static Regex ChineseCharPatternCompiled => ChineseCharRegex();
 
+    /// <summary>True if <paramref name="input"/> contains any CJK unified ideograph. Prefer this
+    /// over <c>Regex.IsMatch(input, ChineseCharPattern)</c> - same answer, without the
+    /// <c>.*</c> wrappers' backtracking or the static Regex cache lookup.</summary>
+    public static bool ContainsCjk(string? input) => !string.IsNullOrEmpty(input) && CjkCharRegex().IsMatch(input);
+
+    /// <summary>True if <paramref name="input"/> contains a <c>{...}</c> placeholder whose name
+    /// is CJK text (see <see cref="ChinesePlaceholderPattern"/>).</summary>
+    public static bool ContainsChinesePlaceholder(string? input) => !string.IsNullOrEmpty(input) && ChinesePlaceholderRegex().IsMatch(input);
+
     // LLM meta-commentary/instruction-leak signatures - the model narrating its own
     // translation process instead of just returning the translation   
     private static readonly string[] InvalidPhrases =
@@ -43,7 +52,10 @@ public static partial class LineValidation
         "the translation remains",
         "fully corrected English translation",
         "Translate all Chinese characters",
-        "untranslated Chinese characters"
+        "untranslated Chinese characters",
+        "English equivalent",
+        "more natural English",
+        "could be translated"
     ];
 
     private static readonly (string raw, string trans)[] CheckForRemoval = [];
@@ -166,7 +178,7 @@ public static partial class LineValidation
                     result = result.Replace(" ", "");
                 else if (textFile.NameCleanupRoutines2)
                 {
-                    if (!ChineseCharRegex().IsMatch(input))
+                    if (!CjkCharRegex().IsMatch(input))
                     {
                         var splits = result.Split(" ", StringSplitOptions.RemoveEmptyEntries);
                         switch (splits.Length)
@@ -260,18 +272,36 @@ public static partial class LineValidation
         if (result.Contains('\r') && !raw.Contains('\r'))
             result = result.Replace("\r\n", "\n").Replace('\r', '\n');
 
-        if (string.IsNullOrEmpty(raw))
-            response = false;
+        var silentFailures = new List<string>();
 
-        if (InvalidPhrases.Any(phrase => result.IndexOf(phrase, StringComparison.OrdinalIgnoreCase) >= 0))
+        if (string.IsNullOrEmpty(raw))
+        {
             response = false;
+            silentFailures.Add("The source text is empty.");
+        }
+
+        // A phrase the source itself contains (e.g. "\U" in a "C:\Users\..." path) is not model chatter.
+        var invalidPhrase = InvalidPhrases.FirstOrDefault(phrase =>
+            result.IndexOf(phrase, StringComparison.OrdinalIgnoreCase) >= 0
+            && raw.IndexOf(phrase, StringComparison.OrdinalIgnoreCase) < 0);
+        if (invalidPhrase != null)
+        {
+            response = false;
+            silentFailures.Add($"Contains the invalid phrase '{invalidPhrase}'.");
+        }
 
         // 99% chance its gone crazy with hallucinations
         if (result.Length > 50 && raw.Length <= 4)
+        {
             response = false;
+            silentFailures.Add("Result is far too long for a source of 4 characters or fewer.");
+        }
 
         if (result.Length > raw.Length * 15)
+        {
             response = false;
+            silentFailures.Add("Result is more than 15 times longer than the source.");
+        }
 
         // Small source with 'or' is usually an alternative
         if ((result.Contains(" or") || result.Contains("(or"))
@@ -410,11 +440,13 @@ public static partial class LineValidation
         if (result.Contains("<color") && raw.Contains("</color>") && !result.Contains("</color>"))
         {
             response = false;
+            silentFailures.Add("A <color> tag is opened but never closed.");
         }
         // Color invalidation - if it has a end tag but no start tag
         if (result.Contains("</color") && raw.Contains("<color") && !result.Contains("<color"))
         {
             response = false;
+            silentFailures.Add("A </color> tag is closed but never opened.");
         }
 
         // Random additions
@@ -436,7 +468,7 @@ public static partial class LineValidation
             correctionPrompts.AddPromptWithValues(config, "CorrectAdditionalPrompt", "\\n");
         }
 
-        if (ChineseCharRegex().IsMatch(result) && !ChinesePlaceholderRegex().IsMatch(result))
+        if (CjkCharRegex().IsMatch(result) && !ChinesePlaceholderRegex().IsMatch(result))
         {
             response = false;
             correctionPrompts.AddPromptWithValues(config, "CorrectChinesePrompt");
@@ -447,7 +479,8 @@ public static partial class LineValidation
                 Valid = response,
                 Result = result,
                 CorrectionPrompt = correctionPrompts.ToString(),
-                RequiresSentenceBySentenceCorrection = true
+                RequiresSentenceBySentenceCorrection = true,
+                SilentFailures = silentFailures,
             };
             return validationResult;
         }
@@ -509,7 +542,10 @@ public static partial class LineValidation
             if ((raw.Length == 1 && result.Length > 6)
                 || (raw.Length == 2 && result.Length > 12)
                 || (raw.Length == 3 && result.Length > 17))
+            {
                 response = false;
+                silentFailures.Add("Result is too long for a short name.");
+            }
         }
 
         if (hooks?.CustomColumnValidator != null)
@@ -540,7 +576,119 @@ public static partial class LineValidation
             Valid = response,
             Result = result,
             CorrectionPrompt = correctionPrompts.ToString(),
+            SilentFailures = silentFailures,
+            SoftCorrectionPrompt = response && InventsGender(raw, result) && config.Prompts.TryGetValue("CorrectInventedGenderPrompt", out var genderPrompt)
+                ? genderPrompt
+                : string.Empty,
         };
+    }
+
+    /// <summary>
+    /// True when <paramref name="translated"/> probably names someone: a capitalised word of three or more letters
+    /// that does not start a sentence. Titles such as "Sect Leader" count too, which errs towards skipping.
+    /// </summary>
+    public static bool NamesSomeone(string translated) =>
+        CapitalisedWordRegex().Matches(translated).Any(match => !StartsSentence(translated, match.Index));
+
+    private static bool StartsSentence(string text, int index)
+    {
+        var i = index - 1;
+        while (i >= 0 && char.IsWhiteSpace(text[i]))
+            i--;
+
+        return i < 0 || text[i] is '.' or '!' or '?' or '(' or ':' or '"' or '\u201C';
+    }
+
+    /// <summary>
+    /// True when <paramref name="translated"/> uses a pronoun for the opposite gender to the known
+    /// <paramref name="gender"/> and <paramref name="raw"/> states no gender of its own (<see cref="LineContext.Male"/> / <see cref="LineContext.Female"/>) and none
+    /// for the right one. A line that names a second person can legitimately use both, so it is only a candidate
+    /// to re-check, not proof of an error.
+    /// </summary>
+    public static bool ContradictsGender(string raw, string translated, string gender)
+    {
+        // A source that states a gender itself (他/她, a kinship term or title) can name a second person of either
+        // gender, so a pronoun that differs from the speaker's is expected there.
+        if (GenderedSourceRegex().IsMatch(raw) || RoleReferentRegex().IsMatch(raw))
+            return false;
+
+        var male = MalePronounRegex().IsMatch(WithoutNameTails(translated));
+        var female = FemalePronounRegex().IsMatch(WithoutNameTails(translated));
+        return gender == LineContext.Male ? female && !male : gender == LineContext.Female && male && !female;
+    }
+
+    /// <summary>
+    /// Like <see cref="ContradictsGender"/>, but for a source whose only gender signal is a kinship term or title
+    /// (妹妹, 先生...) with no explicit 他/她: e.g. a female speaker's "（妹妹说错了）" translated "His younger sister
+    /// was wrong". The pronoun may belong to the relative rather than the speaker, so this is a lower-confidence
+    /// candidate for a re-check, never proof.
+    /// </summary>
+    public static bool ContradictsGenderDespiteKinshipTerm(string raw, string translated, string gender)
+    {
+        if (!GenderedSourceRegex().IsMatch(raw) || ExplicitPronounSourceRegex().IsMatch(raw) || RoleReferentRegex().IsMatch(raw))
+            return false;
+
+        var male = MalePronounRegex().IsMatch(WithoutNameTails(translated));
+        var female = FemalePronounRegex().IsMatch(WithoutNameTails(translated));
+        var contradicts = gender == LineContext.Male ? female && !male : gender == LineContext.Female && male && !female;
+
+        // A pronoun that agrees with the gender of the kinship term itself ("她" for 小师妹, "he" for 兄长) belongs to
+        // that relative, not to the speaker, so it is the right pronoun however the speaker differs.
+        return contradicts && !(female ? FemaleSourceTermRegex() : MaleSourceTermRegex()).IsMatch(raw);
+    }
+
+    /// <summary>
+    /// True when <paramref name="translated"/> opens with a he/she subject ("She's going to marry..."). In a continuation
+    /// split that pronoun usually points back to the previous sentence's subject, which this split cannot see.
+    /// </summary>
+    public static bool OpensWithPronounSubject(string translated) => PronounSubjectOpenerRegex().IsMatch(translated);
+
+    /// <summary>True when <paramref name="translated"/> refers to someone only as "they/them/their", with no he/she at all.</summary>
+    public static bool UsesOnlyNeutralPronouns(string translated) =>
+        NeutralPronounRegex().IsMatch(translated) && !GenderedPronounRegex().IsMatch(WithoutNameTails(translated));
+
+    /// <summary>
+    /// True when <paramref name="raw"/> is subject-less narration (只见, 只听, 行至, 忽然听闻...) that names no
+    /// speaker of its own, yet <paramref name="result"/> narrates it as "I/me/my". The game narrates to the
+    /// player in second person, so this should read "you" or have no subject. Spoken lines and parenthesised
+    /// thoughts are not matched, nor is a line that mentions 你/您 (another character addressing the player, so "I" is right).
+    /// </summary>
+    /// <summary>
+    /// True when <paramref name="raw"/> itself states a gender: 他/她/它 or a gendered kinship term or title (师兄, 姑娘...).
+    /// A pronoun for someone else in such a line cannot be judged from a named character's gender alone.
+    /// </summary>
+    public static bool SourceStatesGender(string raw) => GenderedSourceRegex().IsMatch(raw);
+
+    public static bool NarratesAsFirstPerson(string raw, string result) =>
+        raw.Length <= 80 && NarrationOpenerRegex().IsMatch(raw) && !SelfReferenceRegex().IsMatch(raw) && !raw.Contains('你') && !raw.Contains('您') && FirstPersonPronounRegex().IsMatch(result);
+
+    /// <summary>
+    /// True when <paramref name="result"/> gives someone a he/she/his/her/him that the short, ungendered
+    /// <paramref name="raw"/> never established: a parenthesised stage direction or an unnamed-role line
+    /// (此人, 对方, 乞丐...) with no 他/她 or gendered kinship/title character. Deliberately narrow - a
+    /// named character in running narration is left alone rather than forced into "they".
+    /// </summary>
+    public static bool InventsGender(string raw, string result, bool skipWhenResultNamesSomeone = false, IReadOnlyCollection<string>? unknownGenderTokens = null)
+    {
+        // In running prose a pronoun after a named character is usually right (the game, or an earlier sentence,
+        // established who they are), which a single line cannot tell apart from an invented one.
+        if (skipWhenResultNamesSomeone && NamesSomeone(result))
+            return false;
+
+        if (!GenderedPronounRegex().IsMatch(WithoutNameTails(result)) || GenderedSourceRegex().IsMatch(raw))
+            return false;
+
+        // A token for someone whose gender is unknown (the player, a runtime-chosen person) - the pronoun is invented
+        // however the line is shaped. Tokens lengthen a line, so allow a little more room. A translation that also names
+        // someone is skipped: the pronoun may belong to that person, not to the token.
+        if (unknownGenderTokens != null && raw.Length <= 100 && unknownGenderTokens.Any(token => raw.Contains(token, StringComparison.Ordinal)))
+            return !NamesSomeone(result);
+
+        if (raw.Length > 60)
+            return false;
+
+        var trimmed = raw.TrimStart();
+        return trimmed.StartsWith('(') || trimmed.StartsWith('（') || UnnamedRoleRegex().IsMatch(raw);
     }
 
     private static readonly (string WideChars, string AcceptableInResult)[] WideBracketFamilies =
@@ -803,14 +951,83 @@ public static partial class LineValidation
     [GeneratedRegex(ChineseCharPattern)]
     private static partial Regex ChineseCharRegex();
 
+    [GeneratedRegex(@"\p{IsCJKUnifiedIdeographs}")]
+    private static partial Regex CjkCharRegex();
+
     [GeneratedRegex(ChinesePlaceholderPattern)]
     private static partial Regex ChinesePlaceholderRegex();
+
+    /// <summary>
+    /// Blanks a name that ends in "He" (晁和 becomes "Chao He") before the pronoun checks run, so the name is not mistaken
+    /// for "he". Only a capitalised word directly before a capital "He" counts; a sentence-initial "He" after a full
+    /// stop does not match.
+    /// </summary>
+    private static string WithoutNameTails(string text) => NameEndingInHeRegex().Replace(text, "$1_");
+
+    [GeneratedRegex(@"\b([A-Z][a-z]+) He\b")]
+    private static partial Regex NameEndingInHeRegex();
+
+    [GeneratedRegex(@"\b(?:he|she|his|her|him|himself|herself)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex GenderedPronounRegex();
+
+    [GeneratedRegex(@"\b[A-Z][a-z]{2,}\b")]
+    private static partial Regex CapitalisedWordRegex();
+
+    [GeneratedRegex(@"\b(?:he|his|him|himself)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex MalePronounRegex();
+
+    [GeneratedRegex(@"\b(?:she|her|hers|herself)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex FemalePronounRegex();
+
+    [GeneratedRegex(@"\b(?:they|them|their|theirs|themselves)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex NeutralPronounRegex();
+
+    // 他/她/它 plus gendered kinship, titles and roles: any of these means the source does state a gender.
+    [GeneratedRegex("[他她它牠哥姐弟妹妮父母爹娘兄嫂郎女男叔婶爷妻婆翁妇]|公子|姑娘|少爷|小姐|先生|夫人|丈夫|夫君|儿子|奶奶|好汉|大汉|汉子|青年|少年|老头|老汉|老太|老鸨|鸨母|和尚|尼姑|道姑|妪")]
+    private static partial Regex GenderedSourceRegex();
+
+    // The same terms split by the gender they state, so a kinship term's own pronoun is not read as a contradiction.
+    [GeneratedRegex("[她牠姐妹妮母娘嫂女妻婆妇婶]|姑娘|小姐|夫人|奶奶")]
+    private static partial Regex FemaleSourceTermRegex();
+
+    // A person other than the context character who is named only by a role or an insult (乞丐, 老兵, 大侠, 老朽...):
+    // a he/she in such a line may belong to them, so it cannot be judged against the context character's gender.
+    [GeneratedRegex("此人|这人|那人|对方|乞丐|隐者|路人|店小二|小二|老兵|大侠|老朽|老夫|老家伙|登徒子")]
+    private static partial Regex RoleReferentRegex();
+
+    [GeneratedRegex(@"^[\s(\[""“]*(?:he|she)", RegexOptions.IgnoreCase)]
+    private static partial Regex PronounSubjectOpenerRegex();
+
+    [GeneratedRegex("[他哥弟父爹兄郎男叔爷翁]|公子|少爷|先生|丈夫|夫君|儿子|好汉|大汉|汉子|青年|少年|老头|老汉|和尚")]
+    private static partial Regex MaleSourceTermRegex();
+
+    // An explicit pronoun in the source: the translation is following the source, so it is not an invented gender.
+    [GeneratedRegex("[他她它牠]")]
+    private static partial Regex ExplicitPronounSourceRegex();
+
+    // Specific unnamed people only. 来人 ("guards!"), 有人 ("someone"), 旁人 ("others") and 何人 ("who") are summons or
+    // indefinites, not a reference to one person, so a he/she near them is not an invented gender.
+    [GeneratedRegex("此人|这人|那人|对方|乞丐|隐者|路人|店小二|小二")]
+    private static partial Regex UnnamedRoleRegex();
+
+    [GeneratedRegex(@"^[（(]?\s*(?:只见|只听|但见|眼见|行至|话音刚落|等了不多时|正[^，。,]{1,8}间)|忽然听闻|只听闻|只听得")]
+    private static partial Regex NarrationOpenerRegex();
+
+    // Words that make a first-person subject legitimate: the speaker names themself.
+    [GeneratedRegex("我|咱|老子|老夫|在下|贫道|贫僧|本官|本座|为师|弟子|徒儿|小的|自己|某")]
+    private static partial Regex SelfReferenceRegex();
+
+    [GeneratedRegex(@"\b(?:I|[Mm]y|[Mm]e|myself)\b")]
+    private static partial Regex FirstPersonPronounRegex();
 
     [GeneratedRegex(@"<[^>]+>")]
     private static partial Regex HtmlTagRegex();
 
     [GeneratedRegex(@"(<[^>]+>).*(</[^>]+>)")]
     private static partial Regex EncaseColorTagRegex();
+
+    [GeneratedRegex(@"[。！？!?.]\s*\n")]
+    private static partial Regex StructuralNewlineBreakRegex();
 
     [GeneratedRegex(@"\d")]
     private static partial Regex DigitRegex();

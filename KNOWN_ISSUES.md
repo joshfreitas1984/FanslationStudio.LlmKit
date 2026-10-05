@@ -18,7 +18,7 @@
   re-export matching order, and the known cost of the fragment model.
 - [`docs/features/prefab-text/prefabtext-workflow.md`](docs/features/prefab-text/prefabtext-workflow.md) — `TextFileType.PrefabText` design:
   a flat, row/column-less alternative to the CSV pipeline for dumped prefab/UI text.
-- [`docs/features/quality-review/quality-review-pass-architecture.md`](docs/features/quality-review/quality-review-pass-architecture.md) —
+- [`docs/features/translation-pipeline/quality-review-pass.md`](docs/features/translation-pipeline/quality-review-pass.md) —
   post-translation quality review pass: `TranslationSplit` Qc\* fields and the `SubIndex == 0`
   anchor convention, `QualityReviewWorkflow` mechanics, the staleness/freshness problem and its fix
   (`QualityReviewHelpers.IsQcReviewFresh`, merge preservation), score-gated packaging, and the
@@ -49,5 +49,5 @@
   — the original design plan for the quality review pass (spans this repo + `DragonHierOverLlm`),
   including the open questions/tradeoffs that were resolved along the way and the model-selection
   sample-run methodology. Predates most of the feature being built - for current-state reference
-  use [`docs/features/quality-review/quality-review-pass-architecture.md`](docs/features/quality-review/quality-review-pass-architecture.md)
+  use [`docs/features/translation-pipeline/quality-review-pass.md`](docs/features/translation-pipeline/quality-review-pass.md)
   instead.

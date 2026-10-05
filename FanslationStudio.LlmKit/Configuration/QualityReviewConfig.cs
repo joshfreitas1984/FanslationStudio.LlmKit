@@ -71,7 +71,7 @@ public class QualityReviewConfig
     /// after being told exactly what's wrong" case - this budget is spent inside one LLM round-trip
     /// session (a live conversation, not a fresh cold-started run), so it converges a stuck
     /// bad-words rejection in seconds instead of over several separate QC passes. See
-    /// docs/quality-review-pass-architecture.md "Inline rule-check retries".
+    /// docs/features/translation-pipeline/quality-review-pass.md "Inline rule-check retries".
     /// </summary>
     public int InlineRuleCheckRetries { get; set; } = 0;
 
@@ -165,4 +165,42 @@ public class QualityReviewConfig
     /// since both detection calls see the same prompt and return the same answer.
     /// </summary>
     public double? DetectionTemperature { get; set; }
+
+    /// <summary>
+    /// Pre-fills the detection reply (calls 1/2) with <see cref="Workflow.QualityReviewWorkflow.DetectionReplyPrefill"/>
+    /// by sending it as a trailing assistant message, so the model generates only the answer
+    /// (<c>NONE</c>, a category list) instead of also spending decode steps on the fixed
+    /// <c>DEFECTS:</c> label. Decode time is ~50ms per output token and dominates a detection call,
+    /// so a Pass (<c>DEFECTS: NONE</c>, 6 tokens) drops to 2 and a one-category Defect by 4.
+    /// The model's judgement is unchanged. Detection only: correction/verification/repair calls
+    /// are never pre-filled. Requires an Ollama build that continues a final assistant message
+    /// (measured on 0.35.1 with Qwen3.8 and <c>think: false</c>). On by default; set false to send the plain request
+    /// if another Ollama build or model does not continue the assistant message correctly.
+    /// </summary>
+    public bool DetectionPrefillEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Runs the validation gate (the same rule check a finished correction must pass before it is
+    /// accepted) on every correction/repair candidate inside the verify/repair loop of
+    /// <see cref="Workflow.QualityReviewWorkflow.GetLlmVerdictAsync"/>, before the verification call.
+    /// A candidate that fails skips verification and goes straight to a repair call that is told the
+    /// gate's concrete failure reason (e.g. "Restore `{3}`..."); repairs count against
+    /// <see cref="MaxScoreRepairIterations"/>. Without this, a candidate that drops a placeholder is
+    /// verified, repaired against a bare category name (usually returned unchanged), and then rejected
+    /// by the gate anyway. The final gate in ReviewColumnAsync still runs either way. On by default;
+    /// see docs/investigations/quality-review-postmortems.md "Correction cost" for the measurement.
+    /// </summary>
+    public bool PreVerificationGateEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Verifies with BaseQualityReviewVerificationEvidencePrompt instead of
+    /// BaseQualityReviewVerificationPrompt: the verifier must quote, per unresolved/new defect, the
+    /// SOURCE text the candidate fails to render or the wrong words in the candidate. A claim whose
+    /// quote is not actually there is dropped (see
+    /// <see cref="Workflow.QcVerificationResponseParser.FilterByEvidence"/>) - aimed at the verifier
+    /// calling it DROPPED_CONTENT when a correction removes words that were never in SOURCE - and the
+    /// surviving quotes are sent to the repair call as VERIFIER EVIDENCE instead of a bare category.
+    /// Off by default.
+    /// </summary>
+    public bool VerificationEvidenceEnabled { get; set; }
 }

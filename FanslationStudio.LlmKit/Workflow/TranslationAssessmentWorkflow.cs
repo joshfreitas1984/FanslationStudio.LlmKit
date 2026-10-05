@@ -4,7 +4,6 @@ using FanslationStudio.LlmKit.Utility;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.RegularExpressions;
 
 namespace FanslationStudio.LlmKit.Workflow;
 
@@ -88,6 +87,7 @@ public static class TranslationAssessmentWorkflow
         using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(300) };
         var textFileByPath = textFiles.ToDictionary(x => x.Path, StringComparer.OrdinalIgnoreCase);
         var runStopwatch = Stopwatch.StartNew();
+        var completedSampleIds = report.Results.Where(x => x.Status == "completed").Select(x => x.SampleId).ToHashSet();
         var completedBeforeRun = report.Results.Count(x => x.Status == "completed");
         if (completedBeforeRun > 0)
             Console.WriteLine($"  Resuming {modelName}: {completedBeforeRun}/{samples.Count} samples already complete");
@@ -95,7 +95,7 @@ public static class TranslationAssessmentWorkflow
         for (var sampleIndex = 0; sampleIndex < samples.Count; sampleIndex++)
         {
             var sample = samples[sampleIndex];
-            if (report.Results.Any(x => x.SampleId == sample.SampleId && x.Status == "completed"))
+            if (completedSampleIds.Contains(sample.SampleId))
                 continue;
 
             if (!textFileByPath.TryGetValue(sample.FilePath, out var textFile))
@@ -127,10 +127,16 @@ public static class TranslationAssessmentWorkflow
                 Source = sample.Source,
                 Translation = result.Result,
                 Status = result.Valid ? "completed" : "failed",
-                StructuralPass = result.Valid && !Regex.IsMatch(result.Result, LineValidation.ChineseCharPattern),
+                StructuralPass = result.Valid && !LineValidation.ContainsCjk(result.Result),
                 ElapsedMilliseconds = stopwatch.ElapsedMilliseconds,
                 Error = result.Valid ? string.Empty : result.CorrectionPrompt,
             });
+            // Keep the resume set in step with report.Results, which now holds only this attempt.
+            if (result.Valid)
+                completedSampleIds.Add(sample.SampleId);
+            else
+                completedSampleIds.Remove(sample.SampleId);
+
             WriteYamlAtomically(resultPath, report);
             Console.WriteLine($"    {(result.Valid ? "completed" : "failed")} in {stopwatch.ElapsedMilliseconds}ms");
         }
@@ -195,7 +201,7 @@ public static class TranslationAssessmentWorkflow
                 {
                     var split = line.Splits[splitIndex];
                     if (!split.SafeToTranslate || string.IsNullOrWhiteSpace(split.Text)
-                        || !Regex.IsMatch(split.Text, LineValidation.ChineseCharPattern))
+                        || !LineValidation.ContainsCjk(split.Text))
                         continue;
 
                     totalCorpusCharacters += split.Text.Length;
@@ -271,7 +277,7 @@ public static class TranslationAssessmentWorkflow
                 continue;
 
             var source = CompoundFieldSplitter.Reconstruct(template.Template, fragments.Select(x => x.Text).ToList());
-            if (string.IsNullOrWhiteSpace(source) || !Regex.IsMatch(source, LineValidation.ChineseCharPattern))
+            if (string.IsNullOrWhiteSpace(source) || !LineValidation.ContainsCjk(source))
                 continue;
 
             var identity = $"{textFile.Path}|{line.RawIndex}|{lineIndex}|fullCell|{template.SplitPath}|{template.Split}|{source}";

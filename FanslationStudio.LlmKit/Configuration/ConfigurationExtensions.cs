@@ -57,15 +57,8 @@ public static class ConfigurationExtensions
                 Prompts = new Dictionary<string, string>()
             };
 
-            // Load Presets - add more here
-            if (model.ModelPreset == ModelPreset.Qwen25)
-                runtimeConfig = MergeModelConfig(GetQwen25Preset(deserializer, model), runtimeConfig);
-            else if (model.ModelPreset == ModelPreset.Qwen38)
-                runtimeConfig = MergeModelConfig(GetQwen38Preset(deserializer, model), runtimeConfig);
-            else if (model.ModelPreset == ModelPreset.HyMT2)
-                runtimeConfig = MergeModelConfig(GetHyMT2Preset(deserializer, model), runtimeConfig);
-            else if (model.ModelPreset == ModelPreset.HyMT2Moe)
-                runtimeConfig = MergeModelConfig(GetHyMT2MoePreset(deserializer, model), runtimeConfig);
+            if (model.ModelPreset != ModelPreset.None)
+                runtimeConfig = MergeModelConfig(GetPresetModelConfig(model.ModelPreset, model.ModelPresetType), runtimeConfig);
 
 
             // Set the merged config to runtime
@@ -126,18 +119,6 @@ public static class ConfigurationExtensions
         else if (config.ApiKeyRequired ?? false)
             throw new InvalidOperationException($"API key is required but '{apiKeyFile}' not found.");
     }
-
-    private static ModelExecutionConfig GetQwen25Preset(IDeserializer deserializer, ModelConfig model) =>
-        GetPresetModelConfig(ModelPreset.Qwen25, model.ModelPresetType);
-
-    private static ModelExecutionConfig GetQwen38Preset(IDeserializer deserializer, ModelConfig model) =>
-        GetPresetModelConfig(ModelPreset.Qwen38, model.ModelPresetType);
-
-    private static ModelExecutionConfig GetHyMT2Preset(IDeserializer deserializer, ModelConfig model) =>
-        GetPresetModelConfig(ModelPreset.HyMT2, model.ModelPresetType);
-
-    private static ModelExecutionConfig GetHyMT2MoePreset(IDeserializer deserializer, ModelConfig model) =>
-        GetPresetModelConfig(ModelPreset.HyMT2Moe, model.ModelPresetType);
 
     /// <summary>
     /// Public entry point onto a preset's embedded Model/Url/ModelParams/Prompts (the same data
@@ -262,23 +243,81 @@ public static class ConfigurationExtensions
         if (!Directory.Exists(glossaryDirectory))
             return;
 
+        var index = new GlossaryIndex(executionValues.GlossaryLines);
+
         foreach (var file in Directory.EnumerateFiles(glossaryDirectory))
         {
             var newLines = deserializer.Deserialize<List<GlossaryLine>>(File.ReadAllText(file, Encoding.UTF8)) ?? [];
             foreach (var newLine in newLines)
-            {
-                var existing = executionValues.GlossaryLines.FirstOrDefault(l =>
-                    (!string.IsNullOrEmpty(newLine.Raw) && l.Raw == newLine.Raw) ||
-                    (!string.IsNullOrEmpty(newLine.RawSimplified) && l.RawSimplified == newLine.RawSimplified) ||
-                    (!string.IsNullOrEmpty(newLine.RawTraditional) && l.RawTraditional == newLine.RawTraditional));
-
-                if (existing != null)
-                    executionValues.GlossaryLines[executionValues.GlossaryLines.IndexOf(existing)] = newLine;
-                else
-                    executionValues.GlossaryLines.Add(newLine);
-            }
+                index.ReplaceOrAdd(newLine);
         }
     }
+
+    /// <summary>
+    /// Keyed view over a glossary list for workspace overrides: a new entry replaces the earliest
+    /// existing entry sharing its Raw, RawSimplified or RawTraditional (non-empty keys only), or is
+    /// appended. Same result as a FirstOrDefault scan per entry, without the O(n*m) cost.
+    /// </summary>
+    internal sealed class GlossaryIndex
+    {
+        private readonly List<GlossaryLine> _lines;
+        private readonly Dictionary<string, SortedSet<int>> _byRaw = [];
+        private readonly Dictionary<string, SortedSet<int>> _bySimplified = [];
+        private readonly Dictionary<string, SortedSet<int>> _byTraditional = [];
+
+        public GlossaryIndex(List<GlossaryLine> lines)
+        {
+            _lines = lines;
+            for (var i = 0; i < lines.Count; i++)
+                Track(i, lines[i]);
+        }
+
+        public void ReplaceOrAdd(GlossaryLine newLine)
+        {
+            var existing = Math.Min(First(_byRaw, newLine.Raw),
+                Math.Min(First(_bySimplified, newLine.RawSimplified), First(_byTraditional, newLine.RawTraditional)));
+
+            if (existing == int.MaxValue)
+            {
+                _lines.Add(newLine);
+                Track(_lines.Count - 1, newLine);
+                return;
+            }
+
+            Untrack(existing, _lines[existing]);
+            _lines[existing] = newLine;
+            Track(existing, newLine);
+        }
+
+        private static int First(Dictionary<string, SortedSet<int>> map, string key) =>
+            !string.IsNullOrEmpty(key) && map.TryGetValue(key, out var set) && set.Count > 0 ? set.Min : int.MaxValue;
+
+        private void Track(int i, GlossaryLine line)
+        {
+            Add(_byRaw, line.Raw, i);
+            Add(_bySimplified, line.RawSimplified, i);
+            Add(_byTraditional, line.RawTraditional, i);
+        }
+
+        private void Untrack(int i, GlossaryLine line)
+        {
+            if (line.Raw != null && _byRaw.TryGetValue(line.Raw, out var a)) a.Remove(i);
+            if (line.RawSimplified != null && _bySimplified.TryGetValue(line.RawSimplified, out var b)) b.Remove(i);
+            if (line.RawTraditional != null && _byTraditional.TryGetValue(line.RawTraditional, out var c)) c.Remove(i);
+        }
+
+        private static void Add(Dictionary<string, SortedSet<int>> map, string? key, int i)
+        {
+            if (key == null)
+                return;
+
+            if (!map.TryGetValue(key, out var set))
+                map[key] = set = [];
+
+            set.Add(i);
+        }
+    }
+
     public static ModelExecutionConfig MergeModelConfig(ModelExecutionConfig baseConfig, ModelExecutionConfig? overrideConfig)
     {
         if (overrideConfig == null)

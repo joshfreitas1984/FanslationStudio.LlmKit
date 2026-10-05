@@ -1,3 +1,4 @@
+using FanslationStudio.LlmKit.Configuration;
 using FanslationStudio.LlmKit.Support;
 using FanslationStudio.LlmKit.Utility;
 
@@ -46,54 +47,15 @@ public static class DynamicStringWorkflow
         string workingDirectory, TextFileToSplit textFile, CompoundFieldSplitterOptions? options = null)
     {
         var dumpedPath = $"{workingDirectory}/Raw/Dumped/DynamicStrings/{textFile.Path}";
-        var exportPath = $"{workingDirectory}/Raw/Export";
-        var convertedPath = $"{workingDirectory}/Converted";
-
-        Directory.CreateDirectory(exportPath);
-        Directory.CreateDirectory(convertedPath);
 
         var foundLines = File.ReadAllLines(dumpedPath)
             .Where(dumpedLine => !string.IsNullOrEmpty(dumpedLine))
-            .Select(dumpedLine =>
-            {
-                // Reverse StringMapExtractor.EscapeNewlinesForFlatFile's "\n" escape - see the
-                // XML doc above for why this needs to happen before Decompose/Raw are computed.
-                var line = dumpedLine.Replace("\\n", "\n");
-                var (template, fragments) = CompoundFieldSplitter.Decompose(line, options, textFile.EnableSizeShrink);
-
-                if (fragments.Count == 0)
-                {
-                    return new TranslationLine
-                    {
-                        Raw = line,
-                        Splits = [new TranslationSplit(0, 0, line)],
-                    };
-                }
-
-                if (CompoundFieldSplitter.IsTrivialTemplate(template, fragments.Count))
-                {
-                    return new TranslationLine
-                    {
-                        Raw = line,
-                        Splits = [new TranslationSplit(0, 0, fragments[0])],
-                    };
-                }
-
-                return new TranslationLine
-                {
-                    Raw = line,
-                    Templates = [new FieldTemplate(0, template)],
-                    Splits = fragments.Select((fragment, index) => new TranslationSplit(0, index, fragment)).ToList(),
-                };
-            })
+            // Reverse StringMapExtractor.EscapeNewlinesForFlatFile's "\n" escape - see the XML doc
+            // above for why this needs to happen before Decompose/Raw are computed.
+            .Select(dumpedLine => ExportHelpers.DecomposeFlatLine(dumpedLine.Replace("\\n", "\n"), options, textFile.EnableSizeShrink))
             .ToList();
 
-        var serializer = YamlHelper.CreateSerializer();
-        var yaml = serializer.Serialize(foundLines);
-        FileHelper.WriteAllTextWithRetry($"{exportPath}/{textFile.Path}.yaml", yaml);
-
-        if (!File.Exists($"{convertedPath}/{textFile.Path}.yaml"))
-            File.Copy($"{exportPath}/{textFile.Path}.yaml", $"{convertedPath}/{textFile.Path}.yaml");
+        ExportHelpers.WriteExport(workingDirectory, textFile, foundLines);
     }
 
     /// <summary>
@@ -105,19 +67,19 @@ public static class DynamicStringWorkflow
     /// </code>
     /// Same fallback-to-raw-on-failure semantics as <see cref="PrefabTextWorkflow.PackagePrefabTextAsync"/>.
     /// </summary>
-    public static async Task<(int Passed, int QcRejected, int RawFallback)> PackageDynamicStringsAsync(string workingDirectory, TextFileToSplit textFile)
+    /// <param name="config">Already-loaded configuration; read from <paramref name="workingDirectory"/> when null.</param>
+    public static async Task<(int Passed, int QcRejected, int RawFallback)> PackageDynamicStringsAsync(string workingDirectory, TextFileToSplit textFile,
+        LlmConfig? config = null)
     {
         var outputPath = $"{workingDirectory}/Mod";
         Directory.CreateDirectory(outputPath);
 
-        var config = Configuration.ConfigurationExtensions.GetConfiguration(workingDirectory);
+        config ??= ConfigurationExtensions.GetConfiguration(workingDirectory);
         var qualityReview = config.QualityReview;
 
         var results = new List<DynamicStringResult>();
         var seenBareRaw = new HashSet<string>();
-        var passedCount = 0;
-        var qcRejectedCount = 0;
-        var rawFallbackCount = 0;
+        var counts = new PackagingCounts();
 
         await FileIteration.IterateTranslatedFilesAsync(workingDirectory, [textFile], async (_, _, fileLines) =>
         {
@@ -129,18 +91,7 @@ public static class DynamicStringWorkflow
                 // QcRejected whose Translated also turned out unusable) is a real, reportable
                 // failure even though it now deliberately packages nothing rather than raw
                 // Chinese text (see ReconstructLine's doc comment).
-                switch (reason)
-                {
-                    case PackagingFailureReason.QcRejected:
-                        qcRejectedCount++;
-                        break;
-                    case PackagingFailureReason.RawFallback:
-                        rawFallbackCount++;
-                        break;
-                    case PackagingFailureReason.None when result != null:
-                        passedCount++;
-                        break;
-                }
+                counts.Record(reason, result != null);
 
                 if (result == null)
                     continue;
@@ -176,7 +127,7 @@ public static class DynamicStringWorkflow
         var serializer = YamlHelper.CreateSerializer();
         await FileHelper.WriteAllTextWithRetryAsync($"{outputPath}/{textFile.Path}.yaml", serializer.Serialize(results));
 
-        return (passedCount, qcRejectedCount, rawFallbackCount);
+        return counts.ToTuple();
     }
 
     // Matches a real String.Format-style placeholder ("{0}", "{12}", ...) OR one of the game's own
@@ -230,75 +181,36 @@ public static class DynamicStringWorkflow
     /// <see cref="PackageDynamicStringsAsync"/> for why this extra bare label/translation pair
     /// needs to be packaged as its own dictionary entry alongside the full reconstructed line.
     /// </summary>
-    private static (string? Result, PackagingFailureReason Reason, (string Raw, string Result)? BareFragment) ReconstructLine(TranslationLine line, TextFileToSplit textFile, Configuration.QualityReviewConfig qualityReview)
+    private static (string? Result, PackagingFailureReason Reason, (string Raw, string Result)? BareFragment) ReconstructLine(TranslationLine line, TextFileToSplit textFile, QualityReviewConfig qualityReview)
     {
         var template = line.Templates.FirstOrDefault(t => t.Split == 0);
         if (template != null)
         {
             var fragments = line.Splits.Where(s => s.Split == 0).OrderBy(s => s.SubIndex).ToList();
 
-            // Whole-cell QC state lives only on the column's SubIndex == 0 fragment - see
-            // TranslationSplit.QcTranslated's doc comment. Only trust it if still fresh relative
-            // to the fragments' CURRENT Translated values (see QualityReviewHelpers.IsQcReviewFresh)
-            // - a retranslation since the last review must never be silently overridden by a stale
-            // score/correction just because nobody has re-run the quality review pass yet.
-            var anchor = fragments.FirstOrDefault(f => f.SubIndex == 0);
-            var qcFresh = anchor != null && QualityReviewHelpers.IsQcReviewFresh(anchor, template, fragments, qualityReview);
+            // A low score/unaccepted DEFECT category only skips the QcTranslated shortcut; the
+            // already-good pre-QC fragments still reconstruct normally (see this method's doc comment).
+            var resolved = PackagingHelpers.ResolveFragments(fragments, template, textFile, qualityReview,
+                anchorFallsBackToFirst: false, transform: CompoundFieldSplitter.NormalizeLabelNumberSpacing);
 
-            // A low score/unaccepted DEFECT category means "don't trust QcTranslated" - it must
-            // NOT mean "discard the already-good pre-QC Translated fragments too" (that used to
-            // fall through to `line.Raw`, dumping raw Chinese into Files/Mod - see this method's
-            // doc comment). Only skip the QcTranslated shortcut below; still reconstruct from
-            // fragments normally.
-            var qcRejected = qcFresh && !QualityReviewHelpers.PassesQcScoreGate(anchor!.QcQualityScore, anchor.QcDefectCategory, qualityReview);
-
-            if (qcFresh && !qcRejected && !string.IsNullOrEmpty(anchor!.QcTranslated))
-                // Known limitation: bypassing Reconstruct() here means the single-fragment "bare
-                // label" dictionary entry (see the doc comment on PackageDynamicStringsAsync's
-                // bareFragment handling, needed for NPC dialogue-option buttons) can't be derived
-                // from a whole-cell QC correction without the same ambiguous reverse-mapping this
-                // design deliberately avoids - so a corrected multi-part line loses its bare-label
-                // entry. The full reconstructed entry still packages correctly either way.
-                return (anchor.QcTranslated, PackagingFailureReason.None, null);
-
-            var translatedFragments = new List<string>();
-
-            foreach (var fragment in fragments)
-            {
-                if (!textFile.PackageOutput || fragment.FlaggedForRetranslation || !fragment.SafeToTranslate)
-                    return (null, PackagingFailureReason.RawFallback, null);
-
-                if (!string.IsNullOrEmpty(fragment.Translated))
-                    translatedFragments.Add(CompoundFieldSplitter.NormalizeLabelNumberSpacing(fragment.Text, fragment.Translated));
-                else if (!string.IsNullOrEmpty(fragment.Text))
-                    return (null, PackagingFailureReason.RawFallback, null);
-                else
-                    translatedFragments.Add(fragment.Text);
-            }
-
-            var reconstructed = CompoundFieldSplitter.Reconstruct(template.Template, translatedFragments);
-            var bareFragment = fragments.Count == 1
+            // Known limitation: a whole-cell QC correction bypasses Reconstruct(), so the
+            // single-fragment "bare label" dictionary entry (see the doc comment on
+            // PackageDynamicStringsAsync's bareFragment handling, needed for NPC dialogue-option
+            // buttons) can't be derived from it without the same ambiguous reverse-mapping this
+            // design deliberately avoids - so a corrected multi-part line loses its bare-label
+            // entry. The full reconstructed entry still packages correctly either way.
+            var bareFragment = resolved.TranslatedFragments is { Count: 1 } translatedFragments
                 ? (fragments[0].Text, translatedFragments[0])
                 : ((string Raw, string Result)?)null;
 
-            return (reconstructed, qcRejected ? PackagingFailureReason.QcRejected : PackagingFailureReason.None, bareFragment);
+            return (resolved.Text, resolved.Reason, bareFragment);
         }
 
         var split = line.Splits.FirstOrDefault(s => s.Split == 0);
         if (split == null)
             return (null, PackagingFailureReason.None, null);
 
-        var plainQcFresh = QualityReviewHelpers.IsQcReviewFresh(split, null, [split], qualityReview);
-
-        // See the templated branch above for why a score-gate rejection must fall back to the
-        // already-good Translated text, not all the way to raw Chinese.
-        var plainQcRejected = plainQcFresh && !QualityReviewHelpers.PassesQcScoreGate(split.QcQualityScore, split.QcDefectCategory, qualityReview);
-
-        var effectiveTranslated = plainQcFresh && !plainQcRejected && !string.IsNullOrEmpty(split.QcTranslated) ? split.QcTranslated : split.Translated;
-
-        if (!string.IsNullOrEmpty(effectiveTranslated) && !split.FlaggedForRetranslation && split.SafeToTranslate)
-            return (CompoundFieldSplitter.NormalizeLabelNumberSpacing(split.Text, effectiveTranslated), plainQcRejected ? PackagingFailureReason.QcRejected : PackagingFailureReason.None, null);
-
-        return (null, PackagingFailureReason.RawFallback, null);
+        var plain = PackagingHelpers.ResolvePlainSplit(split, qualityReview, CompoundFieldSplitter.NormalizeLabelNumberSpacing);
+        return (plain.Text, plain.Reason, null);
     }
 }

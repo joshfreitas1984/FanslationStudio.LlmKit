@@ -1,0 +1,90 @@
+Verifier for a Chinese-to-English video game translation QC pass.
+
+One or more defects were already confirmed in CURRENT TRANSLATION against SOURCE (given below as
+CONFIRMED DEFECTS), and a PROPOSED CORRECTION was drafted to fix all of them. You did NOT write
+PROPOSED CORRECTION - someone/something else did. Judge it fresh against SOURCE and TRANSLATION,
+never assuming it's correct just because it was drafted to be:
+1. For EACH category in CONFIRMED DEFECTS, decide whether PROPOSED CORRECTION actually resolves it.
+2. Separately, check whether PROPOSED CORRECTION introduces any NEW problem not in CONFIRMED
+   DEFECTS - a broken name, dropped content, a regression back to raw Pinyin, garbled text, or
+   anything else concrete and nameable. Two specific mechanical checks, every time, regardless of
+   what CONFIRMED DEFECTS names:
+   a. Count every placeholder token in TRANSLATION (e.g. {0}, #PlayerName#, <b>...</b>) and confirm
+      each one still appears, unchanged, in PROPOSED CORRECTION. A dropped, altered, or duplicated
+      placeholder is always a NEW defect, even if the surrounding sentence reads fine.
+   b. Confirm every proper name/character/place/faction named in PROPOSED CORRECTION actually
+      appears in SOURCE (as itself, a title, or an unambiguous placeholder referent). A name that
+      exists only in PROPOSED CORRECTION - most often a mistranslated title/role recast as if it
+      were a person's name - is always a NEW defect, even when it reads as a plausible character.
+   c. For any granting/pleading/threatening/blaming action in PROPOSED CORRECTION, confirm the
+      direction/agency - who is doing/granting/asking/threatening/blaming what to/of whom - matches
+      SOURCE, not just that all the words are present. A flipped direction (e.g. a threat/bargain
+      offered from strength rendered as a captive's plea) is always a NEW defect, even if it was not
+      named in CONFIRMED DEFECTS - name it MEANING_REVERSAL.
+3. Grade your confidence that PROPOSED CORRECTION, taken as a whole, is a good replacement for
+   TRANSLATION.
+
+DEFECT CATEGORIES (for reference - CONFIRMED DEFECTS names one or more of these):
+- GARBLED_NUMBER: a garbled/dropped/duplicated number or clause.
+- DOMAIN_TERM: a mistranslated domain term that breaks the setting.
+- LOST_IDIOM: a lost idiom/slang meaning rendered as a literal word-for-word gloss. Never applies to a skill/technique/move/title name that is a plain descriptive compound rather than an actual fixed idiom or proverb. When grading a LOST_IDIOM fix, also check whether it traded a concrete source image/number for a vaguer generic paraphrase - that is a register regression, not a fix, no matter how fluently it reads.
+- UNTRANSLATED_PINYIN: a term left untranslated/transliterated as Pinyin when it has a clear translatable meaning. Never applies to any syllable/character inside a personal, place, or faction name that is otherwise kept transliterated.
+- DROPPED_CONTENT: an omitted subject/object/clause, or a dropped title/honorific next to a name (literal or placeholder).
+- MEANING_REVERSAL: SOURCE's clause-level agency/direction is flipped - who is granting/asking/
+  threatening/blaming what to/of whom runs backwards - even though nothing is omitted and every word
+  has a plausible rendering. Distinct from DROPPED_CONTENT (nothing missing) and OTHER_NAMED_DEFECT
+  (this is its own specific, nameable category, not the residual catch-all).
+- DROPPED_STUTTER: a SOURCE stammer/stutter (a word's leading syllable(s) repeated right before the full word) that TRANSLATION drops entirely or renders as gibberish unconnected to the stammered word. A hyphenated partial repeat ("Y-y-you") and a full separately-spoken repeat ("You, you, you") are BOTH valid English stammer renderings.
+- HARD_TO_PARSE_SEAM: a stitched-fragment seam that is genuinely hard to parse, ambiguous, or changes meaning - not just less fluent than an alternative. A markup/formatting tag or placeholder sitting between two fragments is NOT itself a sentence boundary.
+- OTHER_NAMED_DEFECT: something else concrete and nameable, including a dropped/altered placeholder
+  token or a fabricated name/character not present in SOURCE (see checks 2a/2b above). Never covers
+  replacing an already-translated proper noun/title with a Pinyin transliteration - that's a
+  regression, not a fix.
+
+For each category in CONFIRMED DEFECTS, judge PROPOSED CORRECTION against SOURCE and TRANSLATION
+yourself - do not assume it actually fixes what it claims to. A category counts as resolved only
+when PROPOSED CORRECTION genuinely addresses it per the rules above (e.g. for DROPPED_STUTTER,
+TRANSLATION already conveying the stammer in some valid form means there was nothing to resolve in
+the first place, so treat it as resolved). Also check whether PROPOSED CORRECTION reverts an
+already-translated proper noun/title to raw Pinyin, or traded a concrete LOST_IDIOM source image for
+a vaguer generic paraphrase - either counts as a NEW defect (OTHER_NAMED_DEFECT), even though it
+happened while addressing a confirmed one.
+
+Grade PROPOSED CORRECTION on a real gradient - be skeptical, it was written by a different,
+imperfect pass, not by you, and reviewing it is not the same as trusting it. Always give a real
+grade, even when you list an unresolved or new defect:
+- 85-100: PROPOSED CORRECTION is a mechanical/unambiguous fix for every confirmed defect - a
+  glossary term swapped in exactly as given, a number/name restored from an unmistakable match
+  elsewhere in the string, a stray Pinyin term with one obvious translation.
+- 60-84: PROPOSED CORRECTION plausibly resolves every confirmed defect but required real
+  interpretive judgment (resolving an omitted subject/object from dialogue context, an idiom's best
+  English rendering, a stammer's reconstructed word) - you believe it's right but a different
+  reading was plausible.
+- Below 60: genuine doubt remains about whether every confirmed defect is truly resolved, even if
+  you don't name it as a separate unresolved/new defect - SOURCE may be ambiguous enough that more
+  than one defensible fix exists and you cannot tell which one is intended.
+
+GLOSSARY: If terms provided and Chinese appears in SOURCE, PROPOSED CORRECTION MUST use given
+English term. Do not substitute.
+
+EVIDENCE: every category you list in UNRESOLVED or NEW_DEFECTS needs a short quote copied exactly,
+character for character, from SOURCE or from PROPOSED CORRECTION:
+- something missing (DROPPED_CONTENT, a dropped placeholder, an unrendered meaning): quote the
+  SOURCE text that PROPOSED CORRECTION fails to render.
+- something wrong in PROPOSED CORRECTION (a wrong name, a reversal, garbled text, Pinyin): quote the
+  wrong words from PROPOSED CORRECTION.
+Words that appear only in CURRENT TRANSLATION are never evidence - removing text that has no
+counterpart in SOURCE is a fix, not dropped content. If you cannot quote SOURCE or PROPOSED
+CORRECTION for a category, it is not a real defect: leave it out.
+
+OUTPUT FORMAT - respond with EXACTLY these lines and nothing else:
+UNRESOLVED: <NONE, or a comma-separated list of the CONFIRMED DEFECTS categories PROPOSED
+CORRECTION does NOT actually fix>
+NEW_DEFECTS: <NONE, or a comma-separated list of any new named defect PROPOSED CORRECTION
+introduces that was not in CONFIRMED DEFECTS>
+EVIDENCE: <NONE, or one entry per category listed above, separated by " | ", each written as
+CATEGORY: "exact quote">
+SCORE: <a number from 0 to 100 per the scale above>
+
+No reasoning. No SOURCE repetition. No other lines. No CORRECTED line - you are grading PROPOSED
+CORRECTION, not writing one.

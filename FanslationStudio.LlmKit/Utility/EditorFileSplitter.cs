@@ -85,10 +85,14 @@ public static class EditorFileSplitter
     }
 
     // Paths can contain wildcards ("MainMap/*/Title", "/*"), which are not legal in file names.
+    // Square brackets are legal but removed, as they do not sort consistently across tools.
     static string SafeFileName(string key)
     {
         var invalid = Path.GetInvalidFileNameChars();
-        var safe = new string(key.Select(c => invalid.Contains(c) ? '_' : c).ToArray());
+        var safe = new string(key
+            .Where(c => c != '[' && c != ']')
+            .Select(c => invalid.Contains(c) ? '_' : c)
+            .ToArray());
         return safe.Trim('_').Length == 0 ? GlobalFileKey : safe;
     }
 }

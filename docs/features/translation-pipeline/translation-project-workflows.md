@@ -70,6 +70,35 @@ The normal translation loop is:
 
 Pass the same `GameHooks` instance to every translation entry point. A hook supplied only to one pass makes behavior depend on which command was run.
 
+#### Repairing an old corpus: pronoun defects
+
+`PronounDefectWorkflow.RunAsync(workingDirectory, textFiles, flagForRetranslation, hooks)` finds translations written before the pronoun prompt rules and line context existed, and writes them to `TestResults/PronounRetranslation.yaml`:
+
+| Category | Meaning |
+| --- | --- |
+| `InventedGender` | A he/she/his/her/him where the source states no gender (a stage direction or an unnamed role such as 此人). |
+| `WrongGender` | A pronoun that contradicts the speaker's gender, when a `LineContextProvider` knows it. |
+| `WrongGenderKinshipTerm` | The same, where the source's only gender signal is a kinship term or title. Lower confidence; a false positive costs one extra retranslation. |
+| `NarratedAsFirstPerson` | Subject-less narration (只见, 只听, 行至...) written as "I". |
+
+The same check also runs inside `ApplyAllRulesToCurrentTranslation`, **on by default**, because that pass clears every flag before re-evaluating each split: without the check in it, a rules pass silently wipes pronoun flags set earlier (measured: 70 flags down to 2). There is no once-per-run guard: a line the model cannot fix is flagged again every time, so `TranslateLinesBruteForce` keeps retranslating it (bounded at 30 iterations). That is intentional - a stuck line is the cue to add it to the gold set and fix the prompt - and it means the rules pass and brute force never disagree about a line. Configure it in `Config.yaml`:
+
+```yaml
+pronounCheck:
+  enabled: true                       # false if it keeps flagging lines the model cannot fix
+  skipWhenTranslationNamesSomeone: false   # true for running-prose games
+  autoRepairPronouns: false           # true: rewrite a still-gendered line to they/their/them instead of shipping it
+```
+
+`autoRepairPronouns` (off by default) is the deterministic last step of "never guess a gender". During translation, a line that still has an invented he/she/his/her/him after the retries and the one soft correction is rewritten by `PronounRepair` (he performs → they perform, his → their, she was → they were) rather than shipped gendered. It only rewrites what it can do safely and otherwise leaves the line alone (and so flagged): a second present-tense verb or plural noun after "and/but/or" in the same sentence (`He washes himself and goes home`, `the bow and arrows`) makes it give up, and a capital `He` after a capitalised word is read as a name (`Chao He`). A known-gender line (line context) is never repaired. It applies when a line is translated, not in the rules pass, so existing translations are changed only by retranslating them. Note it will turn a correct pronoun for an unnamed-gender character into "they" (it cannot know the pronoun was right), which is what `skipWhenTranslationNamesSomeone: true` avoids in prose games.
+
+
+`PronounDefectWorkflow` reads the same section for its default options. A game that sets `GameHooks.UnknownGenderPersonTokens` (see [game hooks](game-hooks.md)) also gets a he/she next to one of those tokens counted as an invented gender, unless the translation names someone else.
+
+Run it as a dry run first (`flagForRetranslation: false`, the default). It writes only the report, so the count can be read before committing to a retranslation; `Converted` is untouched. Judged on the pre-QC `Translated`, with `QcRewrote` marking lines QC already corrected. Without a line-context provider only `InventedGender` and `NarratedAsFirstPerson` can be found.
+
+With `flagForRetranslation: true` it sets `FlaggedForRetranslation` on each hit. Flagged lines are not packaged until retranslated, so run the flag pass and a translate-flagged pass back to back. QC state resets automatically when a retranslation changes the text, so lines are re-reviewed afterward.
+
 ### 4. Run quality review after translation is complete
 
 `QualityReviewWorkflow.RunAsync(...)` is an optional second LLM pass. Run it only after ordinary translation has produced complete, valid candidates. It reviews reconstructed columns, not unfinished individual splits, and skips unsafe, missing, or flagged translations.

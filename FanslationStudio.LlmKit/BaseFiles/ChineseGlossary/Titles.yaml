@@ -517,12 +517,12 @@
 - raw: 侠客
   rawSimplified: 侠客
   rawTraditional: 俠客
-  result: Wanderer
+  result: Hero
   badtrans: false
 - raw: 江湖侠客
   rawSimplified: 江湖侠客
   rawTraditional: 江湖俠客
-  result: Jianghu Wanderer
+  result: Jianghu Hero
   badtrans: false
 - raw: 江湖奇人
   rawSimplified: 江湖奇人

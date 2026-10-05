@@ -22,6 +22,18 @@ public class LlmConfig
     public bool SkipLineValidation { get; set; }
     public bool CorrectionPromptsEnabled { get; set; }
     public bool TranslateFlagged { get; set; }
+
+    /// <summary>
+    /// Off by default. When true, <see cref="GameHooks.LineContextProvider"/> (if the game set one) supplies a
+    /// per-line context - e.g. the speaker and their gender - that is added to that line's system prompt.
+    /// </summary>
+    public bool LineContextEnabled { get; set; }
+
+    /// <summary>
+    /// The pronoun check run by the rules pass (<see cref="Workflow.TranslationWorkflow.ApplyAllRulesToCurrentTranslation"/>)
+    /// and the default for <see cref="Workflow.PronounDefectWorkflow"/>. On by default; see <see cref="PronounCheckConfig"/>.
+    /// </summary>
+    public PronounCheckConfig PronounCheck { get; set; } = new();
     public List<ModelConfig> Models { get; set; } = new();
     public GlossaryPresetConfig GlossaryPreset { get; set; } = new();
 
@@ -181,7 +193,11 @@ public class QualityEvaluatorAssessmentConfig
     /// (<see cref="Workflow.QualityReviewWorkflow.GetLlmVerdictAsync"/>'s calls 4/5) instead of a
     /// single verify-only pass: a rejected draft goes back through the SAME corrector model's
     /// <see cref="Workflow.QualityReviewWorkflow.GetCorrectionRepairAsync"/>, then <see cref="JudgeModelName"/>
-    /// re-verifies, up to <see cref="QualityReviewConfig.MaxScoreRepairIterations"/> times - answering
+    /// re-verifies, up to <see cref="QualityReviewConfig.MaxScoreRepairIterations"/> repairs per row.
+    /// Like production, a draft the validation gate rejects is repaired against the gate's reason before
+    /// any verify call (<see cref="QualityReviewConfig.PreVerificationGateEnabled"/>), judge evidence
+    /// reaches the repair (<see cref="QualityReviewConfig.VerificationEvidenceEnabled"/>), and an
+    /// unchanged repair stops the row. Answering
     /// whether a cheap corrector's higher initial failure rate is rescued by repair, not just how
     /// often its first draft succeeds. Written to a separate `CorrectionGenerationWithRepair` output
     /// directory so single-shot and repair-loop numbers are never conflated. Default false preserves
@@ -196,6 +212,33 @@ public class QualityEvaluatorAssessmentConfig
 // When we pick up the split - using the dictionary key for the split
 // Api Key would be Key<ApiKey>.txt
 // Presets for Model params would have a structured/unstructured. - you can say whether you want structured or unstructured
+
+/// <summary>Config.yaml's <c>pronounCheck</c> section.</summary>
+public class PronounCheckConfig
+{
+    /// <summary>
+    /// Flag translations with an invented or wrong gender, or subject-less narration written as "I", for
+    /// retranslation during the rules pass. A line the model cannot fix is flagged every time, so brute force
+    /// keeps retranslating it (at most 30 iterations): that is the cue to add it to the gold set and tune the
+    /// prompt. Turn it off if it keeps flagging lines you cannot fix.
+    /// </summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// Leave out an invented-gender hit whose translation names a character. Set this for a game whose text is
+    /// running prose, where a pronoun after a named character is usually right (see
+    /// <see cref="Workflow.PronounDefectWorkflow.PronounDefectOptions.Prose"/>).
+    /// </summary>
+    public bool SkipWhenTranslationNamesSomeone { get; set; }
+
+    /// <summary>
+    /// Off by default; a game opts in with <c>autoRepairPronouns: true</c>. When the model still writes an invented he/she/his/her/him after the retries and the soft correction, rewrite it
+    /// to they/their/them (fixing the verb) instead of shipping it. Only a rewrite the verb rules can do safely is used
+    /// (see <see cref="PronounRepair"/>). It is the deterministic end of "never guess a gender": a line the model cannot
+    /// fix does not stay stuck, and a 14B model that ignores the instruction cannot keep a guessed gender in.
+    /// </summary>
+    public bool AutoRepairPronouns { get; set; }
+}
 
 public class RuntimeValues
 {
@@ -220,6 +263,13 @@ public class RuntimeValues
     /// across every parallel worker, for the lifetime of the run.
     /// </summary>
     public Dictionary<string, List<GlossaryLine>> FileRestrictedEntriesByText { get; set; } = new();
+
+    /// <summary>
+    /// Per-split context from <see cref="GameHooks.LineContextProvider"/>, built once per run before any
+    /// translation starts (keyed by split instance - <see cref="TranslationSplit"/> has no value equality).
+    /// Empty unless <see cref="LlmConfig.LineContextEnabled"/>.
+    /// </summary>
+    public ConcurrentDictionary<TranslationSplit, LineContext> LineContexts { get; set; } = new();
 }
 
 public class ModelUrlConfig

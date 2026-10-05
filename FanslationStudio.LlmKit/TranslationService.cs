@@ -12,7 +12,7 @@ using YamlDotNet.Serialization;
 
 namespace FanslationStudio.LlmKit;
 
-public static class TranslationService
+public static partial class TranslationService
 {
     public const int BatchlessLog = 25;
     public const int BatchlessBuffer = 25;
@@ -135,10 +135,13 @@ public static class TranslationService
     /// against other fragments of the SAME column (see <see cref="ColumnIdentity"/>), never against
     /// a whole-cell split or a fragment of a different column that merely shares bare text.
     /// </summary>
-    private static (bool IsFragment, string ColumnIdentity, string Text) DedupKey(TranslationLine line, TranslationSplit split)
+    private static (bool IsFragment, string ColumnIdentity, string Text, string Context) DedupKey(TranslationLine line, TranslationSplit split,
+        IReadOnlyDictionary<TranslationSplit, LineContext>? contexts = null)
     {
         var isFragment = IsCompoundFragment(line, split);
-        return (isFragment, isFragment ? ColumnIdentity(split) : string.Empty, split.Text);
+        // Identical text only shares a translation when it also shares a context (e.g. the same speaker).
+        var context = contexts != null && contexts.TryGetValue(split, out var lineContext) ? lineContext.Prompt : string.Empty;
+        return (isFragment, isFragment ? ColumnIdentity(split) : string.Empty, split.Text, context);
     }
 
     /// <summary>
@@ -191,6 +194,17 @@ public static class TranslationService
         ConcurrentDictionary<string, string>? fragmentCache = null,
         HashSet<string>? overrideKeys = null)
     {
+        var corpus = TranslationCorpus.Load(workingDirectory, textFiles, copyMissingFromExport: false);
+        FillTranslationCache(corpus, charsToCache, cache, config, fragmentCache, overrideKeys);
+        await Task.CompletedTask;
+    }
+
+    private static void FillTranslationCache(TranslationCorpus corpus,
+        int charsToCache, ConcurrentDictionary<string, string> cache,
+        LlmConfig config,
+        ConcurrentDictionary<string, string>? fragmentCache,
+        HashSet<string>? overrideKeys)
+    {
         // Build the O(1) file-restriction lookup once per run before any splits are processed -
         // see BuildFileRestrictedIndex/RuntimeValues.FileRestrictedEntriesByText.
         BuildFileRestrictedIndex(config);
@@ -232,43 +246,30 @@ public static class TranslationService
             overrideKeys?.Add(line.Raw);
         }
 
-
-        // File with old files
-        var oldFolder = $"{workingDirectory}/TestResults/OldFiles";
-
-        var deserializer = YamlHelper.CreateDeserializer();
-
-        foreach (var file in Directory.EnumerateFiles(oldFolder))
+        // Fill with old files
+        foreach (var line in corpus.OldFileLines)
         {
-            var content = File.ReadAllText(file);
-            var lines = deserializer.Deserialize<List<TranslationLine>>(content);
-
-            foreach (var line in lines)
+            foreach (var split in line.Splits)
             {
-                foreach (var split in line.Splits)
-                {
-                    // Skip splits whose text matches a file-restricted glossary/manual entry -
-                    // see IsFileRestrictedText.
-                    if (IsFileRestrictedText(split.Text, config))
-                        continue;
+                // Skip splits whose text matches a file-restricted glossary/manual entry -
+                // see IsFileRestrictedText.
+                if (IsFileRestrictedText(split.Text, config))
+                    continue;
 
-                    // A compound-field fragment's bare text must never seed (or be satisfied by)
-                    // the same cache slot a genuine whole-cell translation uses, NOR the slot of a
-                    // fragment belonging to a different column - see IsCompoundFragment/
-                    // ColumnIdentity's doc comments.
-                    if (fragmentCache != null && IsCompoundFragment(line, split))
-                        fragmentCache.TryAdd(FragmentCacheKey(split), split.Translated);
-                    else
-                        cache.TryAdd(split.Text, split.Translated);
-                }
+                // A compound-field fragment's bare text must never seed (or be satisfied by)
+                // the same cache slot a genuine whole-cell translation uses, NOR the slot of a
+                // fragment belonging to a different column - see IsCompoundFragment/
+                // ColumnIdentity's doc comments.
+                if (fragmentCache != null && IsCompoundFragment(line, split))
+                    fragmentCache.TryAdd(FragmentCacheKey(split), split.Translated);
+                else
+                    cache.TryAdd(split.Text, split.Translated);
             }
         }
 
-        await FileIteration.IterateTranslatedFilesAsync(workingDirectory,
-            textFiles,
-            async (outputFile, textFileToTranslate, fileLines) =>
+        foreach (var file in corpus.Files)
         {
-            foreach (var line in fileLines)
+            foreach (var line in file.Lines)
             {
                 foreach (var split in line.Splits)
                 {
@@ -289,9 +290,7 @@ public static class TranslationService
                         cache.TryAdd(split.Text, split.Translated);
                 }
             }
-
-            await Task.CompletedTask;
-        });
+        }
 
         //Add it to config to make it easier to use
         config.Runtime.TranslationCache = cache;
@@ -331,15 +330,27 @@ public static class TranslationService
     }
 
     /// <summary>
-    /// Loads config and the run-wide translation cache once, shared by both
-    /// <see cref="TranslateViaLlmAsyncBatched"/> and <see cref="TranslateViaLlmAsyncPooled"/>.
-    /// Caller owns the returned <see cref="HttpClient"/> and must dispose it.
+    /// Run-wide state shared by every work item of one translation pass (either scheduler): config,
+    /// the translation caches and the HTTP client.
     /// </summary>
-    private static async Task<(LlmConfig Config, ConcurrentDictionary<string, string> Cache, ConcurrentDictionary<string, string> FragmentCache, HashSet<string> OverrideKeys, HttpClient Client)> PrepareTranslationRunAsync(
-        string workingDirectory, TextFileToSplit[] textFiles, GameHooks? hooks = null)
+    private sealed class TranslationRun : IDisposable
     {
-        var config = ConfigurationExtensions.GetConfiguration(workingDirectory, hooks);
+        public required LlmConfig Config { get; init; }
+        public required ConcurrentDictionary<string, string> Cache { get; init; }
+        public required ConcurrentDictionary<string, string> FragmentCache { get; init; }
+        public required HashSet<string> OverrideKeys { get; init; }
+        public required HttpClient Client { get; init; }
+        public required bool ForceRetranslation { get; init; }
 
+        public void Dispose() => Client.Dispose();
+    }
+
+    /// <summary>
+    /// Builds the run-wide translation cache from <paramref name="corpus"/>, shared by both
+    /// <see cref="TranslateViaLlmAsyncBatched"/> and <see cref="TranslateViaLlmAsyncPooled"/>.
+    /// </summary>
+    private static TranslationRun PrepareTranslationRun(LlmConfig config, TranslationCorpus corpus, bool forceRetranslation, HttpClient? client = null)
+    {
         // Translation Cache - dedups repeated strings within this run and across history
         // (manual translations, glossary, TestResults/OldFiles, already-translated splits).
         // ConcurrentDictionary because splits are translated in parallel (both schedulers) and
@@ -353,14 +364,18 @@ public static class TranslationService
         var translationCache = new ConcurrentDictionary<string, string>();
         var fragmentCache = new ConcurrentDictionary<string, string>();
         var overrideKeys = new HashSet<string>();
-        await FillTranslationCacheAsync(workingDirectory, TranslationCacheMaxChars, translationCache, config, textFiles, fragmentCache, overrideKeys);
+        FillTranslationCache(corpus, TranslationCacheMaxChars, translationCache, config, fragmentCache, overrideKeys);
+        LineContexts.Build(config, corpus.WorkingDirectory, corpus.Files.Select(file => (file.TextFile, (IReadOnlyList<TranslationLine>)file.Lines)));
 
-        var client = new HttpClient
+        return new TranslationRun
         {
-            Timeout = TimeSpan.FromSeconds(300)
+            Config = config,
+            Cache = translationCache,
+            FragmentCache = fragmentCache,
+            OverrideKeys = overrideKeys,
+            Client = client ?? new HttpClient { Timeout = TimeSpan.FromSeconds(300) },
+            ForceRetranslation = forceRetranslation,
         };
-
-        return (config, translationCache, fragmentCache, overrideKeys, client);
     }
 
     /// <summary>
@@ -372,11 +387,22 @@ public static class TranslationService
         TextFileToSplit[] textFiles, GameHooks? hooks = null)
     {
         var config = ConfigurationExtensions.GetConfiguration(workingDirectory, hooks);
+        await TranslateViaLlmAsync(config, TranslationCorpus.Load(workingDirectory, textFiles, copyMissingFromExport: true), forceRetranslation);
+    }
+
+    /// <summary>
+    /// Same as the public overload, against an already-loaded config and corpus - lets a multi-pass
+    /// caller reuse both across passes. Files missing from <paramref name="corpus"/> are seeded from
+    /// <c>Raw/Export</c> first.
+    /// </summary>
+    internal static async Task TranslateViaLlmAsync(LlmConfig config, TranslationCorpus corpus, bool forceRetranslation, HttpClient? client = null)
+    {
+        corpus.LoadMissing(copyMissingFromExport: true);
 
         if (config.UseContinuousWorkerPool)
-            await TranslateViaLlmAsyncPooled(workingDirectory, forceRetranslation, textFiles, hooks);
+            await TranslatePooledAsync(config, corpus, forceRetranslation, client);
         else
-            await TranslateViaLlmAsyncBatched(workingDirectory, forceRetranslation, textFiles, hooks);
+            await TranslateBatchedAsync(config, corpus, forceRetranslation, client);
     }
 
     /// <summary>
@@ -389,41 +415,29 @@ public static class TranslationService
     public static async Task TranslateViaLlmAsyncBatched(string workingDirectory, bool forceRetranslation,
         TextFileToSplit[] textFiles, GameHooks? hooks = null)
     {
-        string inputPath = $"{workingDirectory}/Raw/Export";
-        string outputPath = $"{workingDirectory}/Converted";
+        var config = ConfigurationExtensions.GetConfiguration(workingDirectory, hooks);
+        await TranslateBatchedAsync(config, TranslationCorpus.Load(workingDirectory, textFiles, copyMissingFromExport: true), forceRetranslation);
+    }
 
-        // Create output folder
-        if (!Directory.Exists(outputPath))
-            Directory.CreateDirectory(outputPath);
-
-        var (config, translationCache, fragmentCache, overrideKeys, client) = await PrepareTranslationRunAsync(workingDirectory, textFiles, hooks);
-        using var _ = client;
-        var charsToCache = TranslationCacheMaxChars;
+    private static async Task TranslateBatchedAsync(LlmConfig config, TranslationCorpus corpus, bool forceRetranslation, HttpClient? client = null)
+    {
+        using var run = PrepareTranslationRun(config, corpus, forceRetranslation, client);
 
         int incorrectLineCount = 0;
         int totalRecordsProcessed = 0;
 
-        foreach (var textFileToTranslate in textFiles)
+        foreach (var file in corpus.Files)
         {
-            var inputFile = $"{inputPath}/{textFileToTranslate.Path}";
-            var outputFile = $"{outputPath}/{textFileToTranslate.Path}.yaml";
-
-            if (!File.Exists(outputFile))
-                File.Copy(inputFile, outputFile);
-
-            var content = File.ReadAllText(outputFile);
-
-            Console.WriteLine($"Processing File: {textFileToTranslate.Path}");
+            Console.WriteLine($"Processing File: {file.TextFile.Path}");
 
             var serializer = YamlHelper.CreateSerializer();
-            var deserializer = YamlHelper.CreateDeserializer();
-            var fileLines = deserializer.Deserialize<List<TranslationLine>>(content);
+            var fileLines = file.Lines;
+            var writer = new BufferedFileWriter(file.OutputFile, () => serializer.Serialize(fileLines), BatchlessBuffer);
 
             var batchSize = config.BatchSize ?? 20;
             var totalLines = fileLines.Count;
             var stopWatch = Stopwatch.StartNew();
             int recordsProcessed = 0;
-            int bufferedRecords = 0;
 
             int logProcessed = 0;
 
@@ -434,154 +448,161 @@ public static class TranslationService
                 // Use a slice of the list directly
                 var batch = fileLines.GetRange(i, batchRange);
 
-                // Get Unique splits incase the batch has the same entry multiple times (eg. NPC Names).
-                // Grouped by (IsCompoundFragment, ColumnIdentity-if-fragment, Text), not bare Text
-                // alone - two splits with the same source text but different fragment-ness, or two
-                // fragments of DIFFERENT columns (e.g. "ItemName" vs "Desc") that merely happen to
-                // share bare text, must never be treated as duplicates of each other (see
-                // IsCompoundFragment/ColumnIdentity's doc comments).
-                var uniqueSplits = batch
-                    .SelectMany(line => line.Splits.Select(split => (Line: line, Split: split)))
-                    .GroupBy(x => DedupKey(x.Line, x.Split))
-                    .Select(group => group.First())
-                    .ToList(); // Materialize to prevent multiple enumerations;
-
-                // Process the unique in parallel
-                await Task.WhenAll(uniqueSplits.Select(async item =>
+                // Process the unique splits in parallel - see UniqueWorkItems.
+                await Task.WhenAll(UniqueWorkItems(batch, config.Runtime.LineContexts).Select(async item =>
                 {
                     var (line, split) = item;
-                    if (string.IsNullOrEmpty(split.Text) || !split.SafeToTranslate)
+                    var (work, _) = await TranslateWorkItemAsync(run, file.TextFile, line, split);
+
+                    if (work == SplitWork.Ineligible)
                         return;
 
-                    var isFragment = IsCompoundFragment(line, split);
-
-                    // File-restricted glossary/manual entries (only:/exclude:) must never be read
-                    // from or written into this shared cache - see IsFileRestrictedText.
-                    var isFileRestricted = IsFileRestrictedText(split.Text, config);
-
-                    var cachedTranslation = string.Empty;
-                    var cacheHit = !isFileRestricted
-                        && TryGetCachedTranslation(split, isFragment, translationCache, fragmentCache, overrideKeys, out cachedTranslation)
-                        // We use this for name files etc which will be in cache
-                        && textFileToTranslate.EnableGlossary;
-
-                    if (string.IsNullOrEmpty(split.Translated)
-                        || forceRetranslation
-                        || (config.TranslateFlagged && split.FlaggedForRetranslation))
+                    if (work == SplitWork.Processed)
                     {
-                        var original = split.Translated;
-
-                        if (cacheHit)
-                            split.Translated = cachedTranslation;
-                        else if (TryGetOnlyFileDirectTranslation(split.Text, textFileToTranslate.Path, config, out var directResult))
-                            // Exact "only" match for this file - use it directly, no LLM call.
-                            split.Translated = directResult;
-                        else
-                        {
-                            var result = await TranslateSplitAsync(config, split.Text, client, textFileToTranslate, column: split.Split);
-                            split.Translated = result.Valid ? result.Result : string.Empty;
-                        }
-
-                        if (!string.Equals(original, split.Translated, StringComparison.Ordinal))
-                            QualityReviewHelpers.FindQcAnchor(line, split).ResetQcState();
-
-                        split.ResetFlags(split.Translated != original);
-                        recordsProcessed++;
-                        totalRecordsProcessed++;
-                        bufferedRecords++;
+                        Interlocked.Increment(ref recordsProcessed);
+                        Interlocked.Increment(ref totalRecordsProcessed);
+                        writer.RecordChange();
                     }
 
                     if (string.IsNullOrEmpty(split.Translated))
-                        incorrectLineCount++;
-                    else
-                    {
-                        //Two translations could be doing this at the same time
-                        if (!cacheHit && !isFileRestricted && split.Text.Length <= charsToCache)
-                            CacheTranslation(split, isFragment, translationCache, fragmentCache);
-                    }
+                        Interlocked.Increment(ref incorrectLineCount);
                 }));
 
-                // Duplicates - same dedup key as uniqueSplits above.
-                var duplicates = batch
-                    .SelectMany(line => line.Splits.Select(split => (Line: line, Split: split)))
-                    .GroupBy(x => DedupKey(x.Line, x.Split))
-                    .Where(group => group.Count() > 1);
-
-                foreach (var dupeGroup in duplicates)
-                {
-                    var firstSplit = dupeGroup.First().Split;
-
-                    // Skip first one - it should be ok
-                    foreach (var (line, split) in dupeGroup.Skip(1))
-                    {
-                        if (split.Translated != firstSplit.Translated
-                            || string.IsNullOrEmpty(split.Translated)
-                            || forceRetranslation
-                            || (config.TranslateFlagged && split.FlaggedForRetranslation))
-                        {
-                            var originalDupe = split.Translated;
-                            split.Translated = firstSplit.Translated;
-
-                            if (!string.Equals(originalDupe, split.Translated, StringComparison.Ordinal))
-                                QualityReviewHelpers.FindQcAnchor(line, split).ResetQcState();
-
-                            split.ResetFlags();
-                            recordsProcessed++;
-                            totalRecordsProcessed++;
-                            bufferedRecords++;
-                        }
-                    }
-                }
+                var propagated = PropagateDuplicates(DuplicateGroups(batch, config.Runtime.LineContexts), forceRetranslation, config);
+                recordsProcessed += propagated;
+                totalRecordsProcessed += propagated;
+                for (var p = 0; p < propagated; p++)
+                    writer.RecordChange();
 
                 logProcessed++;
 
                 if (batchSize != 1 || (logProcessed % BatchlessLog == 0))
-                    Console.WriteLine($"Line: {i + batchRange} of {totalLines} File: {textFileToTranslate.Path} Unprocessable: {incorrectLineCount} Processed: {totalRecordsProcessed}");
-
-                if (bufferedRecords > BatchlessBuffer)
-                {
-                    Console.WriteLine($"Writing Buffer....");
-                    FileHelper.WriteAllTextWithRetry(outputFile, serializer.Serialize(fileLines));
-                    bufferedRecords = 0;
-                }
+                    Console.WriteLine($"Line: {i + batchRange} of {totalLines} File: {file.TextFile.Path} Unprocessable: {incorrectLineCount} Processed: {totalRecordsProcessed}");
             }
 
             var elapsed = stopWatch.ElapsedMilliseconds;
             var speed = recordsProcessed == 0 ? 0 : elapsed / recordsProcessed;
             Console.WriteLine($"Done: {totalLines} ({elapsed} ms ~ {speed}/line)");
-            FileHelper.WriteAllTextWithRetry(outputFile, serializer.Serialize(fileLines));
+            writer.Flush();
         }
     }
 
+    private enum SplitWork
+    {
+        /// <summary>Empty or unsafe-to-translate - nothing to do and nothing to count.</summary>
+        Ineligible,
+        /// <summary>Already translated and not due for retranslation.</summary>
+        Unchanged,
+        /// <summary>Translated (from cache, a direct override or the LLM) this pass.</summary>
+        Processed,
+    }
+
+    private static bool NeedsTranslation(TranslationSplit split, bool forceRetranslation, LlmConfig config) =>
+        string.IsNullOrEmpty(split.Translated)
+        || forceRetranslation
+        || (config.TranslateFlagged && split.FlaggedForRetranslation);
+
     /// <summary>
-    /// Per-file bookkeeping used by <see cref="TranslateViaLlmAsyncPooled"/> - one instance per
-    /// entry in <paramref name="textFiles"/>, shared across every worker translating that file's
-    /// splits so buffered-write flushing and progress counters stay correct under concurrency.
+    /// One representative per dedup group (see <see cref="DedupKey"/>) - the only splits actually
+    /// sent for translation; the rest are filled in by <see cref="PropagateDuplicates"/>.
+    /// </summary>
+    private static IEnumerable<(TranslationLine Line, TranslationSplit Split)> UniqueWorkItems(IEnumerable<TranslationLine> lines,
+        IReadOnlyDictionary<TranslationSplit, LineContext>? contexts = null) =>
+        lines
+            .SelectMany(line => line.Splits.Select(split => (Line: line, Split: split)))
+            .GroupBy(x => DedupKey(x.Line, x.Split, contexts))
+            .Select(group => group.First())
+            .ToList();
+
+    /// <summary>
+    /// Every dedup group (see <see cref="DedupKey"/>) with more than one member, first member being
+    /// the representative <see cref="UniqueWorkItems"/> translates. Grouping depends only on source
+    /// text and templates, so it can be computed once per file and reused for every propagation.
+    /// </summary>
+    private static List<List<(TranslationLine Line, TranslationSplit Split)>> DuplicateGroups(IEnumerable<TranslationLine> lines,
+        IReadOnlyDictionary<TranslationSplit, LineContext>? contexts = null) =>
+        lines
+            .SelectMany(line => line.Splits.Select(split => (Line: line, Split: split)))
+            .GroupBy(x => DedupKey(x.Line, x.Split, contexts))
+            .Where(group => group.Skip(1).Any())
+            .Select(group => group.ToList())
+            .ToList();
+
+    /// <summary>
+    /// Translates (or fills from cache / a direct "only" override) one unique split if it needs it,
+    /// and records a fresh result in the run-wide cache. Shared by both schedulers. Returns the
+    /// failed <see cref="ValidationResult"/> when an LLM attempt ended unprocessable.
+    /// </summary>
+    private static async Task<(SplitWork Work, ValidationResult? Failure)> TranslateWorkItemAsync(TranslationRun run,
+        TextFileToSplit textFile, TranslationLine line, TranslationSplit split)
+    {
+        if (string.IsNullOrEmpty(split.Text) || !split.SafeToTranslate)
+            return (SplitWork.Ineligible, null);
+
+        var config = run.Config;
+        var isFragment = IsCompoundFragment(line, split);
+
+        // File-restricted glossary/manual entries (only:/exclude:) must never be read from or
+        // written into this shared cache - see IsFileRestrictedText.
+        var isFileRestricted = IsFileRestrictedText(split.Text, config);
+
+        // A split with a context (e.g. its speaker's gender) can translate differently from identical text
+        // elsewhere, so it neither reads from nor writes to the shared cache.
+        var hasContext = run.Config.Runtime.LineContexts.TryGetValue(split, out var lineContext);
+
+        var cachedTranslation = string.Empty;
+        var cacheHit = !isFileRestricted
+            && !hasContext
+            && TryGetCachedTranslation(split, isFragment, run.Cache, run.FragmentCache, run.OverrideKeys, out cachedTranslation)
+            // We use this for name files etc which will be in cache
+            && textFile.EnableGlossary;
+
+        var work = SplitWork.Unchanged;
+        ValidationResult? failure = null;
+
+        if (NeedsTranslation(split, run.ForceRetranslation, config))
+        {
+            var original = split.Translated;
+
+            if (cacheHit)
+                split.Translated = cachedTranslation;
+            else if (TryGetOnlyFileDirectTranslation(split.Text, textFile.Path, config, out var directResult))
+                // Exact "only" match for this file - use it directly, no LLM call.
+                split.Translated = directResult;
+            else
+            {
+                var result = await TranslateSplitAsync(config, split.Text, run.Client, textFile, lineContext?.Prompt ?? string.Empty, split.Split, lineContext?.GenderKnown ?? false);
+                split.Translated = result.Valid ? result.Result : string.Empty;
+
+                if (!result.Valid)
+                    failure = result;
+            }
+
+            if (!string.Equals(original, split.Translated, StringComparison.Ordinal))
+                QualityReviewHelpers.FindQcAnchor(line, split).ResetQcState();
+
+            split.ResetFlags(split.Translated != original);
+            work = SplitWork.Processed;
+        }
+
+        //Two translations could be doing this at the same time
+        if (!string.IsNullOrEmpty(split.Translated) && !cacheHit && !isFileRestricted && !hasContext && split.Text.Length <= TranslationCacheMaxChars)
+            CacheTranslation(split, isFragment, run.Cache, run.FragmentCache);
+
+        return (work, failure);
+    }
+
+    /// <summary>
+    /// Per-file bookkeeping used by <see cref="TranslatePooledAsync"/> - one instance per loaded
+    /// file, shared across every worker translating that file's splits.
     /// </summary>
     private sealed class PooledFileState
     {
-        public required TextFileToSplit TextFile { get; init; }
-        public required string OutputFile { get; init; }
-        public required List<TranslationLine> FileLines { get; init; }
-        public required ISerializer Serializer { get; init; }
-        public readonly object WriteLock = new();
+        public required CorpusFile File { get; init; }
+        public required List<List<(TranslationLine Line, TranslationSplit Split)>> DuplicateGroups { get; init; }
+        public BufferedFileWriter Writer { get; set; } = null!;
         public readonly Stopwatch Stopwatch = Stopwatch.StartNew();
         public int RecordsProcessed;
-        public int BufferedRecords;
-
-        /// <summary>
-        /// How many of THIS file's work items are still to be dispatched this run - set once (from
-        /// the flattened <c>workItems</c> pool, so it reflects exactly what's actually going to run)
-        /// and decremented as each of the file's items finishes, regardless of whether it actually
-        /// needed translation. When this hits 0, nothing will touch the file again this run, so
-        /// <see cref="TranslateViaLlmAsyncPooled"/> flushes it immediately instead of waiting for
-        /// every OTHER file in the shared pool to drain too - see that method's finally block.
-        /// Without this, a small file that finishes early (never crosses <c>BatchlessBuffer</c> on
-        /// its own) sits unwritten in memory for the rest of a potentially multi-hour run, exactly as
-        /// exposed to a mid-run crash/kill as a file still being actively translated - the same gap
-        /// <c>QcFileState.PendingItems</c> was added to close in the quality-review pass.
-        /// </summary>
-        public int PendingItems;
     }
 
     /// <summary>
@@ -599,96 +620,75 @@ public static class TranslationService
     /// prompt semantics (a given Chinese string can legitimately translate differently in two files
     /// with different glossary/prompt settings, so this intentionally does not dedup across files
     /// beyond what the existing run-wide <see cref="TranslationCacheMaxChars"/> cache already does).
-    /// Duplicate propagation is done as a fast, LLM-call-free pass per file, run opportunistically
-    /// before every buffered write for that file (so a cancelled/killed run only loses duplicates
-    /// translated since the last flush) and once more after the whole pool drains.
+    /// Duplicate propagation is done as a fast, LLM-call-free pass per file, run before every
+    /// write of that file (see <see cref="BufferedFileWriter"/>), so a cancelled/killed run only
+    /// loses duplicates translated since the last flush.
     /// </summary>
     public static async Task TranslateViaLlmAsyncPooled(string workingDirectory, bool forceRetranslation,
         TextFileToSplit[] textFiles, GameHooks? hooks = null)
     {
-        string inputPath = $"{workingDirectory}/Raw/Export";
-        string outputPath = $"{workingDirectory}/Converted";
+        var config = ConfigurationExtensions.GetConfiguration(workingDirectory, hooks);
+        await TranslatePooledAsync(config, TranslationCorpus.Load(workingDirectory, textFiles, copyMissingFromExport: true), forceRetranslation);
+    }
 
-        if (!Directory.Exists(outputPath))
-            Directory.CreateDirectory(outputPath);
-
-        var (config, translationCache, fragmentCache, overrideKeys, client) = await PrepareTranslationRunAsync(workingDirectory, textFiles, hooks);
-        using var _ = client;
+    private static async Task TranslatePooledAsync(LlmConfig config, TranslationCorpus corpus, bool forceRetranslation, HttpClient? client = null)
+    {
+        using var run = PrepareTranslationRun(config, corpus, forceRetranslation, client);
 
         var maxConcurrency = config.MaxConcurrency ?? config.BatchSize ?? 20;
 
-        // Load every file up-front (no translation yet) so work items from every file can be
-        // flattened into one pool below.
-        var fileStates = new List<PooledFileState>();
-        foreach (var textFileToTranslate in textFiles)
-        {
-            var inputFile = $"{inputPath}/{textFileToTranslate.Path}";
-            var outputFile = $"{outputPath}/{textFileToTranslate.Path}.yaml";
-
-            if (!File.Exists(outputFile))
-                File.Copy(inputFile, outputFile);
-
-            var content = await File.ReadAllTextAsync(outputFile);
-
-            var serializer = YamlHelper.CreateSerializer();
-            var deserializer = YamlHelper.CreateDeserializer();
-            var fileLines = deserializer.Deserialize<List<TranslationLine>>(content);
-
-            fileStates.Add(new PooledFileState
-            {
-                TextFile = textFileToTranslate,
-                OutputFile = outputFile,
-                FileLines = fileLines,
-                Serializer = serializer,
-            });
-        }
-
         int incorrectLineCount = 0;
         int totalRecordsProcessed = 0;
+
+        var fileStates = new List<PooledFileState>();
+        foreach (var corpusFile in corpus.Files)
+        {
+            var state = new PooledFileState
+            {
+                File = corpusFile,
+                DuplicateGroups = DuplicateGroups(corpusFile.Lines, config.Runtime.LineContexts),
+            };
+
+            var serializer = YamlHelper.CreateSerializer();
+            state.Writer = new BufferedFileWriter(corpusFile.OutputFile, () => serializer.Serialize(corpusFile.Lines), BatchlessBuffer,
+                beforeFlush: () =>
+                {
+                    // Duplicate propagation before every write, so a cancelled/killed run loses at
+                    // most the duplicates translated since the last flush.
+                    var propagated = PropagateDuplicates(state.DuplicateGroups, forceRetranslation, config);
+                    Interlocked.Add(ref state.RecordsProcessed, propagated);
+                    Interlocked.Add(ref totalRecordsProcessed, propagated);
+                    return propagated > 0;
+                });
+
+            fileStates.Add(state);
+        }
 
         // Diagnostic-only: captures why each split that ends up unprocessable (empty Translated
         // after retries are exhausted) failed validation, so a run can be inspected without
         // waiting for it to finish - flushed to disk periodically (see WriteUnprocessableItemsLog
         // below, called at the same cadence as the progress log) as well as once more at the end.
         var unprocessableItems = new ConcurrentBag<(string FilePath, string Raw, string Result, string Reason)>();
-        var unprocessableLogPath = $"{workingDirectory}/TestResults/UnprocessableItems.log";
+        var unprocessableLogPath = $"{corpus.WorkingDirectory}/TestResults/UnprocessableItems.log";
 
         // Unique-per-file splits (same dedup semantics as the batched scheduler), flattened across
-        // every file into one global work list for the pool to consume. See DedupKey's doc comment
-        // for why a fragment and an unrelated whole-cell split - or two fragments of different
-        // columns - must never be treated as duplicates of each other just because they share the
-        // same source text.
+        // every file into one global work list for the pool to consume.
         var workItems = fileStates
-            .SelectMany(file => file.FileLines
-                .SelectMany(line => line.Splits.Select(split => (Line: line, Split: split)))
-                .GroupBy(x => DedupKey(x.Line, x.Split))
-                .Select(group => group.First())
-                .Select(x => (File: file, Line: x.Line, Split: x.Split)))
+            .SelectMany(file => UniqueWorkItems(file.File.Lines, config.Runtime.LineContexts).Select(x => (File: file, x.Line, x.Split)))
             .ToList();
 
-        // Same "does this item actually need work" condition used inside the loop below - computed
-        // up front purely for a more useful denominator in the progress log. Deliberately NOT
-        // workItems.Count(...) - workItems is already deduped to one representative per
-        // (IsCompoundFragment, Text) group, but the "Processed" counter this is compared against
-        // (totalRecordsProcessed) also counts every duplicate split PropagateDuplicates fills in
-        // from that representative's result, which are a strictly larger population than
-        // workItems. Counting pendingCount against the deduped set let "Processed" run past
-        // "pending" whenever a run had a lot of duplicate/ambiguous text (e.g. after flagging many
-        // splits that happen to share common short source text for retranslation) - see
-        // docs/compoundfieldsplitter-design.md. Summing over every split in every file (not just
-        // workItems) matches what totalRecordsProcessed actually accumulates over the run.
-        var pendingCount = fileStates.Sum(f => f.FileLines
+        // Same "does this item actually need work" condition used for each item - computed up front
+        // purely for a more useful denominator in the progress log. Summed over every split (not
+        // just the deduped workItems), since "Processed" also counts every duplicate that
+        // PropagateDuplicates fills in from its representative's result.
+        var pendingCount = fileStates.Sum(f => f.File.Lines
             .SelectMany(l => l.Splits)
-            .Count(s => string.IsNullOrEmpty(s.Translated)
-                || forceRetranslation
-                || (config.TranslateFlagged && s.FlaggedForRetranslation)));
+            .Count(s => NeedsTranslation(s, forceRetranslation, config)));
 
         Console.WriteLine($"Pooled translation: {workItems.Count} unique split(s) across {fileStates.Count} file(s) ({pendingCount} need translation), max concurrency {maxConcurrency}");
 
-        // Set once from the final flattened pool, so it reflects exactly what this run will
-        // dispatch - see PooledFileState.PendingItems.
         foreach (var fileGroup in workItems.GroupBy(wi => wi.File))
-            fileGroup.Key.PendingItems = fileGroup.Count();
+            fileGroup.Key.Writer.SetPendingItems(fileGroup.Count());
 
         // Progress-logging state: lets each "Processed: N" line report how long that interval of
         // BatchlessLog items took and how many retry/correction round-trips happened in it, instead
@@ -704,60 +704,28 @@ public static class TranslationService
         {
             var (file, line, split) = item;
 
-            // Wraps the whole per-item body (including every early return below) so the
-            // PendingItems decrement/last-item flush in the finally block always runs exactly once
-            // per dispatched item, regardless of which path this item takes.
+            // Every dispatched item reports ItemDone exactly once, whichever path it takes - the
+            // file's last item triggers its final flush.
             try
             {
+                var (work, failure) = await TranslateWorkItemAsync(run, file.File.TextFile, line, split);
 
-                if (string.IsNullOrEmpty(split.Text) || !split.SafeToTranslate)
+                if (work == SplitWork.Ineligible)
                     return;
 
-                var isFragment = IsCompoundFragment(line, split);
-
-                // File-restricted glossary/manual entries (only:/exclude:) must never be read from or
-                // written into this shared cache - see IsFileRestrictedText.
-                var isFileRestricted = IsFileRestrictedText(split.Text, config);
-
-                var cachedTranslation = string.Empty;
-                var cacheHit = !isFileRestricted
-                    && TryGetCachedTranslation(split, isFragment, translationCache, fragmentCache, overrideKeys, out cachedTranslation)
-                    // We use this for name files etc which will be in cache
-                    && file.TextFile.EnableGlossary;
-
-                if (string.IsNullOrEmpty(split.Translated)
-                    || forceRetranslation
-                    || (config.TranslateFlagged && split.FlaggedForRetranslation))
+                if (failure != null)
                 {
-                    var original = split.Translated;
+                    var reason = string.IsNullOrEmpty(failure.CorrectionPrompt)
+                        ? "(no correction prompt captured - likely an HttpRequestException/connection failure, see console for 'Request error' lines)"
+                        : failure.CorrectionPrompt;
+                    var escalationNote = failure.EscalationAttempted ? " [escalation attempted: yes]" : " [escalation attempted: no]";
+                    unprocessableItems.Add((file.File.TextFile.Path, split.Text, failure.Result, reason + escalationNote));
+                }
 
-                    if (cacheHit)
-                        split.Translated = cachedTranslation;
-                    else if (TryGetOnlyFileDirectTranslation(split.Text, file.TextFile.Path, config, out var directResult))
-                        // Exact "only" match for this file - use it directly, no LLM call.
-                        split.Translated = directResult;
-                    else
-                    {
-                        var result = await TranslateSplitAsync(config, split.Text, client, file.TextFile, column: split.Split);
-                        split.Translated = result.Valid ? result.Result : string.Empty;
-
-                        if (!result.Valid)
-                        {
-                            var reason = string.IsNullOrEmpty(result.CorrectionPrompt)
-                                ? "(no correction prompt captured - likely an HttpRequestException/connection failure, see console for 'Request error' lines)"
-                                : result.CorrectionPrompt;
-                            var escalationNote = result.EscalationAttempted ? " [escalation attempted: yes]" : " [escalation attempted: no]";
-                            unprocessableItems.Add((file.TextFile.Path, split.Text, result.Result, reason + escalationNote));
-                        }
-                    }
-
-                    if (!string.Equals(original, split.Translated, StringComparison.Ordinal))
-                        QualityReviewHelpers.FindQcAnchor(line, split).ResetQcState();
-
-                    split.ResetFlags(split.Translated != original);
+                if (work == SplitWork.Processed)
+                {
                     Interlocked.Increment(ref file.RecordsProcessed);
                     var totalProcessed = Interlocked.Increment(ref totalRecordsProcessed);
-                    var buffered = Interlocked.Increment(ref file.BufferedRecords);
 
                     if (totalProcessed % BatchlessLog == 0)
                     {
@@ -781,66 +749,27 @@ public static class TranslationService
                         }
                     }
 
-                    if (buffered > BatchlessBuffer)
-                    {
-                        lock (file.WriteLock)
-                        {
-                            // Re-check under the lock - another worker may have already flushed.
-                            if (file.BufferedRecords > BatchlessBuffer)
-                            {
-                                Console.WriteLine($"Writing Buffer.... ({file.TextFile.Path})");
-                                // Opportunistic duplicate propagation before every flush (not just at the
-                                // end of the whole file) so a cancelled/killed run loses at most the
-                                // in-flight duplicates since the last flush, not every duplicate in the
-                                // file. Safe to call repeatedly - it only copies over translations that
-                                // already exist on the first occurrence of each duplicate group.
-                                PropagateDuplicates(file, forceRetranslation, config, ref totalRecordsProcessed);
-                                FileHelper.WriteAllTextWithRetry(file.OutputFile, file.Serializer.Serialize(file.FileLines));
-                                file.BufferedRecords = 0;
-                            }
-                        }
-                    }
+                    file.Writer.RecordChange();
                 }
 
                 if (string.IsNullOrEmpty(split.Translated))
                     Interlocked.Increment(ref incorrectLineCount);
-                else if (!cacheHit && !isFileRestricted && split.Text.Length <= TranslationCacheMaxChars)
-                    //Two translations could be doing this at the same time
-                    CacheTranslation(split, isFragment, translationCache, fragmentCache);
-
             }
             finally
             {
-                // Last item dispatched for this file this run (see PooledFileState.PendingItems) -
-                // nothing else will touch it, so flush now instead of leaving it in memory until
-                // every OTHER file in the shared pool drains too (the final per-file loop below).
-                // Counted down regardless of outcome/early-return above (an already-translated or
-                // unsafe-to-translate last item still means the file is done) - and checked even when
-                // the buffer-threshold branch above just flushed it; a redundant write of unchanged
-                // content is harmless.
-                if (Interlocked.Decrement(ref file.PendingItems) == 0)
-                {
-                    lock (file.WriteLock)
-                    {
-                        PropagateDuplicates(file, forceRetranslation, config, ref totalRecordsProcessed);
-                        FileHelper.WriteAllTextWithRetry(file.OutputFile, file.Serializer.Serialize(file.FileLines));
-                        file.BufferedRecords = 0;
-                    }
-                }
+                file.Writer.ItemDone();
             }
         });
 
         // Final pass per file: duplicates may still remain if a file's last flush happened before
-        // its final unique split(s) finished translating, plus this writes every file at least
-        // once even if it never crossed the buffered-write threshold.
+        // its final unique split(s) finished translating. Writes only files that changed.
         foreach (var file in fileStates)
         {
-            PropagateDuplicates(file, forceRetranslation, config, ref totalRecordsProcessed);
+            file.Writer.Flush();
 
             var elapsed = file.Stopwatch.ElapsedMilliseconds;
             var speed = file.RecordsProcessed == 0 ? 0 : elapsed / file.RecordsProcessed;
-            Console.WriteLine($"Done: {file.FileLines.Count} ({elapsed} ms ~ {speed}/line) File: {file.TextFile.Path}");
-            FileHelper.WriteAllTextWithRetry(file.OutputFile, file.Serializer.Serialize(file.FileLines));
+            Console.WriteLine($"Done: {file.File.Lines.Count} ({elapsed} ms ~ {speed}/line) File: {file.File.TextFile.Path}");
         }
 
         Console.WriteLine($"Total Lines: {totalRecordsProcessed} records, Unprocessable: {incorrectLineCount}");
@@ -872,30 +801,19 @@ public static class TranslationService
     }
 
     /// <summary>
-    /// Propagates a translated split's result to every other split in the same file that shares the
-    /// same source <see cref="TranslationSplit.Text"/> - a fast, LLM-call-free pass. Called both
-    /// opportunistically before every buffered write (so a cancelled run only loses duplicates
-    /// translated since the last flush, not every duplicate in the file) and once more at the end of
-    /// <see cref="TranslateViaLlmAsyncPooled"/> to catch anything translated after the last flush.
-    /// Safe to call repeatedly/concurrently for the same file since it is only ever invoked while
-    /// holding <see cref="PooledFileState.WriteLock"/> for that file, and counters are updated
-    /// atomically since other files' workers may be incrementing <paramref name="totalRecordsProcessed"/>
-    /// at the same time.
+    /// Copies each duplicate group's representative translation onto the group's other members -
+    /// a fast, LLM-call-free pass shared by both schedulers. A group whose representative has no
+    /// translation is left alone, so a failed representative never erases a duplicate's existing
+    /// translation. Safe to call repeatedly; returns how many splits it changed.
     /// </summary>
-    private static void PropagateDuplicates(PooledFileState file, bool forceRetranslation, LlmConfig config,
-        ref int totalRecordsProcessed)
+    private static int PropagateDuplicates(IEnumerable<List<(TranslationLine Line, TranslationSplit Split)>> duplicateGroups,
+        bool forceRetranslation, LlmConfig config)
     {
-        // See DedupKey's doc comment for why a fragment and an unrelated whole-cell split, or two
-        // fragments of different columns, sharing the same source text must never be propagated
-        // onto each other.
-        var duplicates = file.FileLines
-            .SelectMany(line => line.Splits.Select(split => (Line: line, Split: split)))
-            .GroupBy(x => DedupKey(x.Line, x.Split))
-            .Where(group => group.Count() > 1);
+        var propagated = 0;
 
-        foreach (var dupeGroup in duplicates)
+        foreach (var dupeGroup in duplicateGroups)
         {
-            var firstSplit = dupeGroup.First().Split;
+            var firstSplit = dupeGroup[0].Split;
 
             if (string.IsNullOrEmpty(firstSplit.Translated))
                 continue;
@@ -903,10 +821,11 @@ public static class TranslationService
             // Skip first one - it should be ok
             foreach (var (line, split) in dupeGroup.Skip(1))
             {
+                // Differing text, or a still-flagged duplicate that this pass retranslates - an
+                // identical, unflagged duplicate needs nothing (and repeated propagation before
+                // every flush must not keep re-marking it as changed).
                 if (split.Translated != firstSplit.Translated
-                    || string.IsNullOrEmpty(split.Translated)
-                    || forceRetranslation
-                    || (config.TranslateFlagged && split.FlaggedForRetranslation))
+                    || ((forceRetranslation || config.TranslateFlagged) && split.FlaggedForRetranslation))
                 {
                     var originalDupe = split.Translated;
                     split.Translated = firstSplit.Translated;
@@ -915,11 +834,12 @@ public static class TranslationService
                         QualityReviewHelpers.FindQcAnchor(line, split).ResetQcState();
 
                     split.ResetFlags();
-                    Interlocked.Increment(ref file.RecordsProcessed);
-                    Interlocked.Increment(ref totalRecordsProcessed);
+                    propagated++;
                 }
             }
         }
+
+        return propagated;
     }
 
     /// <summary>
@@ -934,12 +854,12 @@ public static class TranslationService
     /// performance bug in an earlier version of this method.
     /// </summary>
     private static async Task<ValidationResult[]> TranslatePiecesWithRetryAsync(IReadOnlyList<string> pieces,
-        LlmConfig config, HttpClient client, TextFileToSplit textFile, int? column = null)
+        LlmConfig config, HttpClient client, TextFileToSplit textFile, int? column = null, string additionalPrompts = "", bool genderKnown = false)
     {
-        return await Task.WhenAll(pieces.Select(piece => TranslateSplitAsync(config, piece, client, textFile, column: column)));
+        return await Task.WhenAll(pieces.Select(piece => TranslateSplitAsync(config, piece, client, textFile, additionalPrompts, column, genderKnown)));
     }
 
-    public static async Task<(bool split, string result)> SplitOnCharsIfNeededAsync(string splitCharacters, LlmConfig config, string raw, HttpClient client, TextFileToSplit textFile, int? column = null)
+    public static async Task<(bool split, string result)> SplitOnCharsIfNeededAsync(string splitCharacters, LlmConfig config, string raw, HttpClient client, TextFileToSplit textFile, int? column = null, string additionalPrompts = "", bool genderKnown = false)
     {
         if (raw.Contains(splitCharacters))
         {
@@ -957,7 +877,7 @@ public static class TranslationService
             // Pieces are independent of each other - translate them concurrently, and retry only
             // the pieces that fail validation instead of discarding the whole cell the first time
             // any single piece fails. Order is preserved throughout.
-            var translations = await TranslatePiecesWithRetryAsync(splits, config, client, textFile, column);
+            var translations = await TranslatePiecesWithRetryAsync(splits, config, client, textFile, column, additionalPrompts, genderKnown);
 
             // If any piece still fails after retries, we have to kill the lot
             if (translations.Any(t => !t.Valid) && !config.SkipLineValidation)
@@ -982,7 +902,7 @@ public static class TranslationService
     public static async Task<(bool split, string result)> SplitBracketsRegexIfNeededAsync(LlmConfig config,
         string raw, HttpClient client,
         TextFileToSplit textFile,
-        int? column = null)
+        int? column = null, string additionalPrompts = "", bool genderKnown = false)
     {
         // Collect all matches across all patterns and sort by position so multiple bracket types in
         // the same string are all handled in a single pass (e.g. "天竺国《无量寿经》【副本】4000钱")
@@ -1011,7 +931,7 @@ public static class TranslationService
         // concurrently, with failed pieces retried without discarding pieces that already
         // succeeded).
         var innerTranslations = await TranslatePiecesWithRetryAsync(
-            nonOverlappingMatches.Select(match => match.Value[1..^1]).ToList(), config, client, textFile, column);
+            nonOverlappingMatches.Select(match => match.Value[1..^1]).ToList(), config, client, textFile, column, additionalPrompts, genderKnown);
 
         if (innerTranslations.Any(t => !t.Valid) && !config.SkipLineValidation)
             return (true, string.Empty);
@@ -1043,7 +963,7 @@ public static class TranslationService
         // already retries internally (up to RetryCount whole-cell attempts, plus up to RetryCount
         // sentence-correction attempts) before returning, so retrying its result again here would
         // square the worst-case call count instead of adding to it.
-        var fullTrans = await TranslateSplitAsync(config, template, client, textFile, column: column);
+        var fullTrans = await TranslateSplitAsync(config, template, client, textFile, additionalPrompts, column, genderKnown);
 
         if (!fullTrans.Valid && !config.SkipLineValidation)
             return (true, string.Empty);
@@ -1080,15 +1000,14 @@ public static class TranslationService
         HttpClient client,
         TextFileToSplit textFile,
         string additionalPrompts = "",
-        int? column = null)
+        int? column = null,
+        bool genderKnown = false)
     {
         if (string.IsNullOrEmpty(raw))
             return new ValidationResult(true, string.Empty); //Is ok because raw was empty
 
-        var pattern = LineValidation.ChineseCharPattern;
-
         // If it is already translated or just special characters return it
-        if (!Regex.IsMatch(raw, pattern))
+        if (!LineValidation.ContainsCjk(raw))
             return new ValidationResult(true, raw);
 
         if (textFile.TextFileType == TextFileType.LocalTextString)
@@ -1103,17 +1022,17 @@ public static class TranslationService
         var preparedRaw = LineValidation.PrepareRaw(raw, tokenReplacer);
 
         // If it is already translated or just special characters return it
-        if (!Regex.IsMatch(preparedRaw, pattern))
+        if (!LineValidation.ContainsCjk(preparedRaw))
             return new ValidationResult(true, LineValidation.CleanupLineBeforeSaving(preparedRaw, preparedRaw, textFile, tokenReplacer));
 
-        var (regexSplit, regexResult) = await SplitBracketsRegexIfNeededAsync(config, raw, client, textFile, column);
+        var (regexSplit, regexResult) = await SplitBracketsRegexIfNeededAsync(config, raw, client, textFile, column, additionalPrompts, genderKnown);
         if (regexSplit)
             return new ValidationResult(LineValidation.CleanupLineBeforeSaving(regexResult, preparedRaw, textFile, tokenReplacer));
 
         // We do segementation here since saves context window by splitting // "。" doesnt work like u think it would        
         foreach (var splitCharacters in config.SplitCharactersList)
         {
-            var (split, result) = await SplitOnCharsIfNeededAsync(splitCharacters, config, preparedRaw, client, textFile, column);
+            var (split, result) = await SplitOnCharsIfNeededAsync(splitCharacters, config, preparedRaw, client, textFile, column, additionalPrompts, genderKnown);
 
             // Because its recursive we want to bail out on the first successful one
             if (split)
@@ -1122,8 +1041,8 @@ public static class TranslationService
 
         if (ColorTagHelpers.StartsWithHalfColorTag(preparedRaw, out string start, out string end))
         {
-            var startResult = await TranslateSplitAsync(config, start, client, textFile, column: column);
-            var endResult = await TranslateSplitAsync(config, end, client, textFile, column: column);
+            var startResult = await TranslateSplitAsync(config, start, client, textFile, additionalPrompts, column, genderKnown);
+            var endResult = await TranslateSplitAsync(config, end, client, textFile, additionalPrompts, column, genderKnown);
             var combinedResult = $"{startResult.Result}{endResult.Result}";
 
             if (!config.SkipLineValidation && (!startResult.Valid || !endResult.Valid))
@@ -1136,7 +1055,7 @@ public static class TranslationService
         {
             var leadingMark = preparedRaw[0];
             var remainder = preparedRaw[1..];
-            var remainderResult = await TranslateSplitAsync(config, remainder, client, textFile, column: column);
+            var remainderResult = await TranslateSplitAsync(config, remainder, client, textFile, additionalPrompts, column, genderKnown);
 
             if (!config.SkipLineValidation && !remainderResult.Valid)
                 return new ValidationResult(false, string.Empty);
@@ -1144,10 +1063,9 @@ public static class TranslationService
             return new ValidationResult(LineValidation.CleanupLineBeforeSaving($"{leadingMark}{remainderResult.Result}", preparedRaw, textFile, tokenReplacer));
         }
 
-        var cacheHit = !IsFileRestrictedText(preparedRaw, config)
-            && config.Runtime.TranslationCache.ContainsKey(preparedRaw);
-        if (cacheHit)
-            return new ValidationResult(LineValidation.CleanupLineBeforeSaving(config.Runtime.TranslationCache[preparedRaw], preparedRaw, textFile, tokenReplacer));
+        if (!IsFileRestrictedText(preparedRaw, config)
+            && config.Runtime.TranslationCache.TryGetValue(preparedRaw, out var cachedTranslation))
+            return new ValidationResult(LineValidation.CleanupLineBeforeSaving(cachedTranslation, preparedRaw, textFile, tokenReplacer));
 
         if (TryGetOnlyFileDirectTranslation(preparedRaw, textFile.Path, config, out var directResult))
             // Exact "only" match for this file - use it directly, no LLM call.
@@ -1203,6 +1121,7 @@ public static class TranslationService
             // round-trips instead of a bounded ~2x RetryCount total, which was the real cause of a
             // noticeable slowdown after this retry-scoping change was introduced.
             var sentenceRetryCount = 0;
+            var lastLlmResult = string.Empty;
 
             while (!validationResult.Valid && retryCount < maxRetries)
             {
@@ -1215,6 +1134,7 @@ public static class TranslationService
                 }
 
                 var llmResult = await TranslateMessagesAsync(client, config, executingModel, messages, executingModel.EnableThinking ?? false);
+                lastLlmResult = llmResult;
                 preparedResult = LineValidation.PrepareResult(preparedRaw, llmResult, config.Hooks, textFile, column);
                 validationResult = LineValidation.CheckTransalationSuccessful(executingModel, preparedRaw, preparedResult, textFile, config.Hooks, column);
                 validationResult.Result = LineValidation.CleanupLineBeforeSaving(validationResult.Result, preparedRaw, textFile, tokenReplacer);
@@ -1263,7 +1183,7 @@ public static class TranslationService
                         // next outer retry iteration, same as before this change.
                         if (!validationResult.Valid)
                         {
-                            messages = GenerateBaseMessages(executingModel, config.Runtime.GlossaryLines, preparedRaw, textFile);
+                            messages = GenerateBaseMessages(executingModel, config.Runtime.GlossaryLines, preparedRaw, textFile, additionalPrompts);
                             var correctionPrompt = CalulateCorrectionPrompt(executingModel, validationResult, preparedRaw, correctedResult);
                             AddCorrectionMessages(messages, correctedResult, correctionPrompt);
                         }
@@ -1273,7 +1193,7 @@ public static class TranslationService
                         var correctionPrompt = CalulateCorrectionPrompt(executingModel, validationResult, preparedRaw, llmResult);
 
                         // Regenerate base messages so we dont hit token limit by constantly appending retry history
-                        messages = GenerateBaseMessages(executingModel, config.Runtime.GlossaryLines, preparedRaw, textFile);
+                        messages = GenerateBaseMessages(executingModel, config.Runtime.GlossaryLines, preparedRaw, textFile, additionalPrompts);
                         AddCorrectionMessages(messages, llmResult, correctionPrompt);
                     }
                 }
@@ -1281,8 +1201,61 @@ public static class TranslationService
                 retryCount++;
             }
 
+            // Soft correction (see ValidationResult.SoftCorrectionPrompt): one extra attempt on a line that is
+            // already valid. Only a result that is itself valid and clean replaces it, so this can never turn a
+            // shippable line into a failed one.
+            if (validationResult.Valid
+                && validationResult.SoftCorrectionPrompt.Length > 0
+                && !genderKnown
+                && config.CorrectionPromptsEnabled
+                && !config.SkipLineValidation)
+            {
+                var accepted = validationResult;
+                var softMessages = GenerateBaseMessages(executingModel, config.Runtime.GlossaryLines, preparedRaw, textFile, additionalPrompts);
+                AddCorrectionMessages(softMessages, lastLlmResult, accepted.SoftCorrectionPrompt + executingModel.Prompts["BaseCorrectionSuffixPrompt"]);
+
+                if (isEscalation)
+                    Interlocked.Increment(ref _escalationAttemptCounter);
+                else
+                    Interlocked.Increment(ref _retryAttemptCounter);
+
+                var softResult = await TranslateMessagesAsync(client, config, executingModel, softMessages, executingModel.EnableThinking ?? false);
+                var softPrepared = LineValidation.PrepareResult(preparedRaw, softResult, config.Hooks, textFile, column);
+                var softValidation = LineValidation.CheckTransalationSuccessful(executingModel, preparedRaw, softPrepared, textFile, config.Hooks, column);
+                softValidation.Result = LineValidation.CleanupLineBeforeSaving(softValidation.Result, preparedRaw, textFile, tokenReplacer);
+
+                if (softValidation.Valid && softValidation.SoftCorrectionPrompt.Length == 0)
+                    return softValidation;
+
+                // Still gendered. Rewrite the pronouns deterministically (the soft attempt if it was valid, otherwise the
+                // accepted line); a line the model cannot fix then ships as "they" instead of staying flagged.
+                return TryRepairInventedGender(config, preparedRaw, softValidation.Valid ? softValidation : accepted) ?? accepted;
+            }
+
             return validationResult;
         }
+    }
+
+    /// <summary>
+    /// <see cref="PronounRepair"/> applied to a valid line that still invents a gender. Returns null (keep the line as
+    /// it is) when repair is off, nothing can be rewritten safely, or the rewrite still reads as gendered.
+    /// </summary>
+    private static ValidationResult? TryRepairInventedGender(LlmConfig config, string preparedRaw, ValidationResult candidate)
+    {
+        if (!config.PronounCheck.AutoRepairPronouns || !candidate.Valid)
+            return null;
+
+        var repaired = PronounRepair.Neutralise(candidate.Result);
+        if (repaired == null || LineValidation.InventsGender(preparedRaw, repaired))
+            return null;
+
+        return new ValidationResult
+        {
+            Valid = true,
+            Result = repaired,
+            CorrectionPrompt = candidate.CorrectionPrompt,
+            SilentFailures = candidate.SilentFailures,
+        };
     }
 
     public static void AddCorrectionMessages(List<object> messages, string result, string correctionPrompt)
@@ -1304,7 +1277,7 @@ public static class TranslationService
         var correctedSentences = await Task.WhenAll(sentences.Select(async sentence =>
         {
             // Only correct sentences that contain Chinese characters
-            if (Regex.IsMatch(sentence, LineValidation.ChineseCharPattern) && !Regex.IsMatch(sentence, LineValidation.ChinesePlaceholderPattern))
+            if (LineValidation.ContainsCjk(sentence) && !LineValidation.ContainsChinesePlaceholder(sentence))
             {
                 // For individual sentence correction, use a minimal prompt without the full original text
                 // This prevents the LLM from re-translating everything
@@ -1434,9 +1407,13 @@ public static class TranslationService
 
         if (splitFile.EnableGlossary)
         {
-            basePrompt.AppendLine("");
-            basePrompt.AppendLine(config.Prompts["BaseGlossaryPrompt"]);
-            basePrompt.AppendLine(GlossaryLine.AppendPromptsFor(raw, glossaryLines, splitFile.Path));
+            var glossaryPrompt = GlossaryLine.AppendPromptsFor(raw, glossaryLines, splitFile.Path);
+            if (glossaryPrompt.Length > 0)
+            {
+                basePrompt.AppendLine("");
+                basePrompt.AppendLine(config.Prompts["BaseGlossaryPrompt"]);
+                basePrompt.AppendLine(glossaryPrompt);
+            }
         }
 
         if (splitFile.EnableBasePrompts)
@@ -1491,41 +1468,51 @@ public static class TranslationService
         // Generate based on what would have been created
         var requestData = LlmHelpers.GenerateLlmRequestData(modelToUse, messages, enableThinking);
 
-        // Send correction & Get result
-        HttpContent content = new StringContent(requestData, Encoding.UTF8, "application/json");
-
         try
         {
-            // Set Bearer token if required and not already set
-            var requiresApiKey = modelToUse.ApiKeyRequired ?? false;
+            // A fresh HttpRequestMessage per send - the HttpClient is shared by every concurrent
+            // worker, so auth must never be set via its DefaultRequestHeaders (not thread-safe, and
+            // a model that needs no key would otherwise race one that does).
+            HttpRequestMessage BuildRequest()
+            {
+                var request = new HttpRequestMessage(HttpMethod.Post, modelToUse.Url)
+                {
+                    Content = new StringContent(requestData, Encoding.UTF8, "application/json")
+                };
 
-            if (requiresApiKey)
-                client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", modelToUse.ApiKey);
-            else
-                client.DefaultRequestHeaders.Authorization = null;
+                if (modelToUse.ApiKeyRequired ?? false)
+                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", modelToUse.ApiKey);
 
-            HttpResponseMessage response = await client.PostAsync(modelToUse.Url, content);
-            string responseBody = await response.Content.ReadAsStringAsync();
+                return request;
+            }
 
-            if ((int)response.StatusCode == 429)
+            async Task<(int Status, string? Reason, string Body)> SendAsync()
+            {
+                using var request = BuildRequest();
+                using var response = await client.SendAsync(request);
+                return ((int)response.StatusCode, response.ReasonPhrase, await response.Content.ReadAsStringAsync());
+            }
+
+            var (status, reasonPhrase, responseBody) = await SendAsync();
+
+            if (status == 429)
             {
                 // Too Many Requests - simple exponential backoff
-                int retryDelay = 5000; // start with 2 seconds
-                int maxDelay = 60000; // max 30 seconds
+                int retryDelay = 5000;
+                int maxDelay = 60000;
                 int retries = 0;
                 var backoffStopwatch = Stopwatch.StartNew();
-                while ((int)response.StatusCode == 429 && retries < 5)
+                while (status == 429 && retries < 5)
                 {
                     Console.WriteLine($"Received 429 Too Many Requests. Backing off attempt {retries + 1}/5, waiting {retryDelay}ms...");
                     await Task.Delay(retryDelay);
                     retryDelay = Math.Min(retryDelay * 2, maxDelay);
-                    response = await client.PostAsync(modelToUse.Url, content);
-                    responseBody = await response.Content.ReadAsStringAsync();
+                    (status, reasonPhrase, responseBody) = await SendAsync();
                     retries++;
                 }
 
                 if (retries > 0)
-                    Console.WriteLine($"429 backoff finished after {retries} attempt(s), {backoffStopwatch.ElapsedMilliseconds}ms blocked, final status {(int)response.StatusCode}.");
+                    Console.WriteLine($"429 backoff finished after {retries} attempt(s), {backoffStopwatch.ElapsedMilliseconds}ms blocked, final status {status}.");
             }
 
             // EnsureSuccessStatusCode()'s own message is just "... 400 (Bad Request)" with no body -
@@ -1533,12 +1520,12 @@ public static class TranslationService
             // responseBody, which would otherwise be read and immediately discarded. Every caller
             // catches HttpRequestException and logs e.Message, so folding the body in here is the
             // difference between a diagnosable error and a guessing game.
-            if (!response.IsSuccessStatusCode)
-                throw new HttpRequestException($"Response status code does not indicate success: {(int)response.StatusCode} ({response.ReasonPhrase}). Body: {responseBody}");
+            if (status is < 200 or > 299)
+                throw new HttpRequestException($"Response status code does not indicate success: {status} ({reasonPhrase}). Body: {responseBody}");
 
             using var jsonDoc = JsonDocument.Parse(responseBody);
 
-            var isOpenAiShape = responseBody.Contains("\"choices\":");
+            var isOpenAiShape = jsonDoc.RootElement.TryGetProperty("choices", out _);
             var messageElement = isOpenAiShape
                 ? jsonDoc.RootElement.GetProperty("choices")[0].GetProperty("message")
                 : jsonDoc.RootElement.GetProperty("message");
@@ -1594,7 +1581,9 @@ public static class TranslationService
         if (string.IsNullOrEmpty(input))
             return input;
 
-        // Regex to remove <think>...</think> tags and their content, including multiline
-        return Regex.Replace(input, @"<think>.*?</think>\n\n", string.Empty, RegexOptions.Singleline | RegexOptions.IgnoreCase);
+        return ThinkTagsRegex().Replace(input, string.Empty);
     }
+
+    [GeneratedRegex(@"<think>.*?</think>\n\n", RegexOptions.Singleline | RegexOptions.IgnoreCase)]
+    private static partial Regex ThinkTagsRegex();
 }

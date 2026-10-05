@@ -26,6 +26,12 @@ modelParams:
   # quant via /api/ps: 4096 -> 8192 only grows the loaded footprint ~14.1GB -> ~14.4GB (the model
   # was already ~1.1GB CPU-split at 4096 alongside desktop VRAM use), so the headroom is ~free.
   # Re-measure prompt_eval_count against this ceiling after any large QC prompt growth.
+  # num_ctx lowered 8192 -> 6144 2026-10-03: the larger KV cache was the main QC slowdown, more
+  # than the prompt growth itself (gold-set median detection 873ms at 8192 vs 694ms at 6144, same
+  # prompt, recall/precision unchanged; 8192 also sat at ~15.8/16.3GB VRAM and crashed the runner
+  # once). Full-corpus measurement: the detection system prompt alone is 4585 tokens and the
+  # largest whole detection prompt 5450, so 6144 leaves ~690. QualityReviewWorkflow re-checks this
+  # at the start of every review pass and fails fast if a prompt would not fit.
   # Tried OLLAMA_FLASH_ATTENTION=1 + OLLAMA_KV_CACHE_TYPE=q8_0 the same day: KV cache 512 -> 272MB
   # (hybrid model - only 16/64 layers have KV), but still 63/66 layers offloaded, and the gold-set
   # run was ~12% slower (avg 1469 -> 1653ms) with quality unchanged within noise. Not worth it.
@@ -34,7 +40,7 @@ modelParams:
   # ~15.9/16.3GB and the first quarter of the gold-set run stalled badly (26 calls >5s vs 1 on the
   # default split). Any other VRAM user (a game, browser) makes that worse - an earlier run with a
   # stray llama-server alive went ~15x slower. Left off (Ollama's default split) as the safe choice.
-  num_ctx: 8192
+  num_ctx: 6144
   num_predict: 4096
 structuredTextModelParams:
   temperature: 0

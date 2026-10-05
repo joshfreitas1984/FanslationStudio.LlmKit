@@ -5,7 +5,6 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
 using System.Text.RegularExpressions;
-using YamlDotNet.Serialization;
 
 namespace FanslationStudio.LlmKit.Workflow;
 
@@ -46,12 +45,69 @@ public static class QualityReviewWorkflow
         string.IsNullOrEmpty(template.SplitPath) ? $"#{template.Split}" : template.SplitPath;
 
     /// <summary>
+    /// One column of a <see cref="TranslationLine"/> as every QC pass sees it - see
+    /// <see cref="EnumerateColumns"/>. <see cref="Anchor"/> is the fragment carrying the column's QC
+    /// state: the <see cref="TranslationSplit.SubIndex"/> == 0 fragment, else the lowest SubIndex.
+    /// </summary>
+    internal sealed class QcColumn
+    {
+        private string? _rawText;
+
+        public required string Key { get; init; }
+        public required TranslationSplit Anchor { get; init; }
+
+        /// <summary>Sorted by <see cref="TranslationSplit.SubIndex"/>.</summary>
+        public required List<TranslationSplit> Fragments { get; init; }
+
+        public FieldTemplate? Template { get; init; }
+
+        /// <summary>The whole source cell - reconstructed from every fragment's Text for a templated
+        /// column (cached; QC never changes Text).</summary>
+        public string RawText => _rawText ??= Template != null
+            ? CompoundFieldSplitter.Reconstruct(Template.Template, Fragments.Select(f => f.Text).ToList())
+            : Anchor.Text;
+
+        /// <summary>See <see cref="QualityReviewHelpers.ComputeEffectiveTranslatedText"/> - recomputed on
+        /// every call, since Translated is not owned by QC.</summary>
+        public string ComputeEffectiveTranslated() => QualityReviewHelpers.ComputeEffectiveTranslatedText(Anchor, Template, Fragments);
+    }
+
+    /// <summary>
+    /// Groups <paramref name="line"/>'s splits into columns by <see cref="ColumnKey(TranslationSplit)"/>
+    /// (the first template with a matching key is the column's template). The single shared column
+    /// iterator for the review pass, the rule check, every reset sweep and the flagged report.
+    /// </summary>
+    internal static IEnumerable<QcColumn> EnumerateColumns(TranslationLine line)
+    {
+        Dictionary<string, FieldTemplate>? templatesByKey = null;
+        if (line.Templates is { Count: > 0 })
+        {
+            templatesByKey = new Dictionary<string, FieldTemplate>(line.Templates.Count);
+            foreach (var template in line.Templates)
+                templatesByKey.TryAdd(ColumnKey(template), template);
+        }
+
+        foreach (var columnGroup in line.Splits.GroupBy(ColumnKey))
+        {
+            var fragments = columnGroup.OrderBy(s => s.SubIndex).ToList();
+
+            yield return new QcColumn
+            {
+                Key = columnGroup.Key,
+                Anchor = fragments.FirstOrDefault(f => f.SubIndex == 0) ?? fragments[0],
+                Fragments = fragments,
+                Template = templatesByKey?.GetValueOrDefault(columnGroup.Key),
+            };
+        }
+    }
+
+    /// <summary>
     /// Captures from "CORRECTED:" to the end of the response (Singleline - dot matches newline),
     /// not just its first physical line - a multi-sentence correction is frequently joined with a
     /// real line break rather than SOURCE/TRANSLATION's literal "\n", and an earlier single-line-
     /// anchored version of this regex silently truncated those. <see cref="ContainsLeakedProtocolText"/>
     /// still independently guards the original leak concern this regex was narrowed to prevent. See
-    /// "Postmortems" (bug #2) in `docs/quality-review-pass-architecture.md` (FanslationStudio.LlmKit).
+    /// "Postmortems" (bug #2) in `docs/investigations/quality-review-postmortems.md` (FanslationStudio.LlmKit).
     /// </summary>
     private static readonly Regex CorrectedLineRegex = new(@"^\s*CORRECTED:\s*(.*)$", RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Singleline | RegexOptions.Compiled);
 
@@ -128,41 +184,36 @@ public static class QualityReviewWorkflow
             || TrailingNoneRegex.IsMatch(correctedText);
     }
 
-    private sealed class QcFileState
+    /// <summary>
+    /// One QC-enabled Converted file held in memory for a review pass. <see cref="Writer"/> owns its
+    /// write-back: a changed column records a change, every finished work item (Skipped included)
+    /// counts down the file's pending items, and the file is only ever re-serialized when something
+    /// actually changed - throttled periodically while being reviewed, and once more when its last
+    /// pending item finishes, so a small file that finishes early isn't left unwritten for the rest
+    /// of a multi-hour run.
+    /// </summary>
+    internal sealed class QcFileState
     {
         public required TextFileToSplit TextFile { get; init; }
-        public required string OutputFile { get; init; }
         public required List<TranslationLine> FileLines { get; init; }
-        public required ISerializer Serializer { get; init; }
-        public readonly object WriteLock = new();
-        public int BufferedRecords;
+        public BufferedFileWriter Writer { get; set; } = null!;
 
-        /// <summary>
-        /// How many of THIS file's work items are still to be dispatched this run - set once
-        /// (after exclusion/freshness-filtering/sampling decide the final work item list, so it
-        /// reflects what's actually going to happen, not the whole corpus) and decremented as each
-        /// of the file's items finishes, regardless of outcome (a Skipped item still counts - once
-        /// nothing is left pending for a file, nothing will touch it again this run, so it's due for
-        /// a flush even if it was a skip). When this hits 0, RunAsync's loop flushes the file
-        /// immediately rather than waiting for every OTHER file to finish too - see the loop body.
-        /// Without this, a small file that finishes early (never crosses BatchlessBuffer on its own)
-        /// sits unwritten in memory for the rest of a potentially multi-hour run, just as exposed to
-        /// a mid-run crash/interruption as a file still being actively reviewed.
-        /// </summary>
-        public int PendingItems;
+        /// <summary>The run whose <see cref="QcTimingStats.IoMs"/>/<see cref="QcTimingStats.IoWrites"/>
+        /// a flush is charged to - null while no review pass is dispatching (not counted).</summary>
+        public QcTimingStats? Timing { get; set; }
     }
 
-    /// <summary>One work item per column (a group of <see cref="TranslationSplit"/>s sharing the
-    /// same <see cref="TranslationSplit.Split"/> index within one line) - a plain column has exactly
+    /// <summary>One work item per column (see <see cref="QcColumn"/>) - a plain column has exactly
     /// one fragment, a templated/compound column has several, anchored on the fragment with
     /// <see cref="TranslationSplit.SubIndex"/> == 0 (see TranslationSplit.QcTranslated's doc
     /// comment for why only that fragment carries QC state for a templated column).</summary>
     private sealed class QcWorkItem
     {
         public required QcFileState File { get; init; }
-        public required TranslationSplit Anchor { get; init; }
-        public FieldTemplate? Template { get; init; }
-        public required List<TranslationSplit> Fragments { get; init; }
+        public required QcColumn Column { get; init; }
+        public TranslationSplit Anchor => Column.Anchor;
+        public FieldTemplate? Template => Column.Template;
+        public List<TranslationSplit> Fragments => Column.Fragments;
     }
 
     private enum QcOutcome { Skipped, Passed, Corrected, RejectedByGate }
@@ -174,10 +225,9 @@ public static class QualityReviewWorkflow
     /// <see cref="LlmMs"/>/<see cref="LlmCalls"/> only count a real cache-miss LLM round trip (see
     /// where this is used inside the <see cref="ReviewLlmCache"/> factory - a cache hit just awaits
     /// the same already-timed Task and adds nothing here). <see cref="IoMs"/>/<see cref="IoWrites"/>
-    /// only count an actual periodic buffered flush to disk (see the outcome != Skipped guard around
-    /// it in <see cref="RunAsync"/>'s loop body) - the one-time final write-back loop at the end of
-    /// <see cref="RunAsync"/> is deliberately not counted here, since it always happens exactly once
-    /// regardless of how the run went and isn't part of the "what's eating this interval" question.
+    /// only count an actual flush to disk by a file's <see cref="BufferedFileWriter"/> while work
+    /// items are being dispatched - the final dirty-file write-back after dispatch is deliberately
+    /// not counted here, since it isn't part of the "what's eating this interval" question.
     /// All fields updated via <see cref="Interlocked"/> - this instance is shared/mutated
     /// concurrently across every <c>Parallel.ForEachAsync</c> worker.
     /// </summary>
@@ -260,6 +310,290 @@ public static class QualityReviewWorkflow
         Interlocked.Increment(ref timing.LlmCalls);
     }
 
+    private static void RecordIoWrite(QcTimingStats? timing, long elapsedMs)
+    {
+        if (timing == null)
+            return;
+
+        Interlocked.Add(ref timing.IoMs, elapsedMs);
+        Interlocked.Increment(ref timing.IoWrites);
+    }
+
+    /// <summary>One QC call's raw response, or the request error that stopped it - see <see cref="SendQcCallAsync"/>.</summary>
+    private readonly record struct QcCallResponse(bool Success, string Content, string? StopReason, string? Error);
+
+    /// <summary>
+    /// The one place a QC call goes over the wire: times the round trip against
+    /// <paramref name="timing"/> (see <see cref="RecordLlmCall"/>) whether or not it succeeds, and
+    /// turns a request error/timeout into a logged, unsuccessful <see cref="QcCallResponse"/> rather
+    /// than an exception - every QC call treats that as "no verdict this run", never a crash.
+    /// </summary>
+    private static async Task<QcCallResponse> SendQcCallAsync(
+        HttpClient client,
+        LlmConfig config,
+        ModelExecutionConfig modelConfig,
+        List<object> messages,
+        QcTimingStats? timing,
+        string callName,
+        string rawText,
+        bool enableThinking = false)
+    {
+        var llmStopwatch = Stopwatch.StartNew();
+        try
+        {
+            var (content, stopReason) = await TranslationService.TranslateMessagesWithStopReasonAsync(client, config, modelConfig, messages, enableThinking: enableThinking);
+            RecordLlmCall(timing, llmStopwatch);
+            return new QcCallResponse(true, content, stopReason, null);
+        }
+        catch (Exception e) when (e is HttpRequestException or OperationCanceledException)
+        {
+            RecordLlmCall(timing, llmStopwatch);
+            Console.WriteLine($"Quality review {callName} request error for '{rawText}': {e.Message}");
+            return new QcCallResponse(false, string.Empty, null, e.Message);
+        }
+    }
+
+    /// <summary>
+    /// The user prompt every QC call sends: SOURCE and CURRENT TRANSLATION, then any call-specific
+    /// labelled <paramref name="extraFields"/> (in order), then the glossary block - omitted entirely
+    /// when <paramref name="glossaryPrompt"/> is empty (no applicable term).
+    /// </summary>
+    internal static string BuildQcUserPrompt(string maskedRaw, string maskedTranslated, string? glossaryPrompt, params (string Label, string Value)[] extraFields)
+    {
+        // The game's line context (see GameHooks.LineContextProvider) rides in the same string as the glossary.
+        string? lineContext = null;
+        if (glossaryPrompt != null && glossaryPrompt.Contains(LineContexts.QcSeparator))
+        {
+            var parts = glossaryPrompt.Split(LineContexts.QcSeparator, 2);
+            glossaryPrompt = parts[0];
+            lineContext = parts[1];
+        }
+
+        var userPrompt = new StringBuilder();
+        userPrompt.AppendLine($"SOURCE (Chinese): {maskedRaw}");
+        userPrompt.AppendLine($"CURRENT TRANSLATION (English): {maskedTranslated}");
+        foreach (var (label, value) in extraFields)
+            userPrompt.AppendLine($"{label}: {value}");
+        if (!string.IsNullOrEmpty(lineContext))
+        {
+            userPrompt.AppendLine("Line context from the game (treat as fact; a pronoun that matches it is correct, so never change it):");
+            userPrompt.AppendLine(lineContext);
+        }
+        if (!string.IsNullOrEmpty(glossaryPrompt))
+        {
+            userPrompt.AppendLine("Relevant glossary terms (must be preserved if they appear in SOURCE):");
+            userPrompt.AppendLine(glossaryPrompt);
+        }
+
+        return userPrompt.ToString();
+    }
+
+    private static List<object> BuildQcMessages(ModelExecutionConfig modelConfig, string systemPromptName, string userPrompt) =>
+    [
+        LlmHelpers.GenerateSystemPrompt(modelConfig.Prompts[systemPromptName]),
+        LlmHelpers.GenerateUserPrompt(userPrompt),
+    ];
+
+    /// <summary>
+    /// Makes <paramref name="candidate"/> use SOURCE's line-break form. The correction prompts ask for a
+    /// literal two-character "\n", which is right for game text that stores it that way but wrong for
+    /// text with real line breaks (the candidate would show a literal "\n" in game), and a model also
+    /// sometimes answers with a real break for literal-"\n" text. Unchanged when SOURCE uses both forms
+    /// or neither.
+    /// </summary>
+    internal static string MatchSourceNewlines(string candidate, string source)
+    {
+        var sourceHasReal = source.Contains('\n');
+        var sourceHasLiteral = source.Contains("\\n");
+
+        if (sourceHasReal && !sourceHasLiteral && candidate.Contains("\\n"))
+            return candidate.Replace("\\n", "\n");
+
+        if (sourceHasLiteral && !sourceHasReal && candidate.Contains('\n'))
+            return candidate.Replace("\r\n", "\n").Replace("\n", "\\n");
+
+        return candidate;
+    }
+
+    /// <summary>
+    /// The VERIFIER EVIDENCE line for a repair: <paramref name="verification"/>'s quotes for the
+    /// <paramref name="targetDefects"/> being repaired, or null when it has none (evidence off, or no
+    /// quote for those categories).
+    /// </summary>
+    internal static string? FormatVerifierEvidence(QcVerificationResult verification, IEnumerable<QcDefectCategory> targetDefects)
+    {
+        var entries = verification.Evidence?
+            .Where(entry => targetDefects.Contains(entry.Key))
+            .Select(entry => $"{QcDefectCategoryTokens.ToToken(entry.Key)}: \"{entry.Value}\"")
+            .ToList();
+        return entries is { Count: > 0 } ? string.Join(" | ", entries) : null;
+    }
+
+    private static string FormatDefectTokens(IEnumerable<QcDefectCategory> categories) =>
+        string.Join(", ", categories.Select(QcDefectCategoryTokens.ToToken));
+
+    /// <summary>
+    /// Shared by call 3 (<see cref="GenerateCorrectionAsync"/>) and call 5
+    /// (<see cref="GetCorrectionRepairAsync"/>): the text after <c>CORRECTED:</c>, or null when the
+    /// response has none, says <c>NONE</c>, or leaked QC-protocol text (logged with
+    /// <paramref name="leakLogMessage"/>).
+    /// </summary>
+    private static string? ParseCorrectionResponse(string llmResponse, string leakLogMessage)
+    {
+        var correctedMatch = CorrectedLineRegex.Match(llmResponse);
+        var correctedRaw = correctedMatch.Success ? correctedMatch.Groups[1].Value.Trim() : string.Empty;
+
+        if (ContainsLeakedProtocolText(correctedRaw))
+        {
+            Console.WriteLine($"{leakLogMessage} Raw response: {llmResponse}");
+            return null;
+        }
+
+        var hasCorrection = correctedMatch.Success
+            && !string.IsNullOrEmpty(correctedRaw)
+            && !correctedRaw.Equals("NONE", StringComparison.OrdinalIgnoreCase);
+
+        return hasCorrection ? correctedRaw : null;
+    }
+
+    /// <summary>
+    /// Looks up <see cref="QualityReviewConfig.ModelName"/> in the configured models - the QC model
+    /// every review call and the validation gate run against.
+    /// </summary>
+    private static bool TryGetQcModelConfig(LlmConfig config, out ModelExecutionConfig modelConfig)
+    {
+        modelConfig = null!;
+        return !string.IsNullOrEmpty(config.QualityReview.ModelName)
+            && config.Runtime.Models.TryGetValue(config.QualityReview.ModelName, out modelConfig!);
+    }
+
+    /// <inheritdoc cref="TryGetQcModelConfig"/>
+    private static ModelExecutionConfig ResolveQcModelConfig(LlmConfig config)
+    {
+        if (!TryGetQcModelConfig(config, out var modelConfig))
+        {
+            throw new InvalidOperationException(
+                $"QualityReview.ModelName '{config.QualityReview.ModelName}' does not match any configured model. " +
+                $"Configured model names: {string.Join(", ", config.Runtime.Models.Keys)}");
+        }
+
+        return modelConfig;
+    }
+
+    /// <summary>
+    /// The model a rule check runs the validation gate against - the QC model when it resolves (the
+    /// same one <see cref="RunAsync"/> validated the correction with), otherwise the translation
+    /// pipeline's default so the rule check still works with QC itself misconfigured.
+    /// </summary>
+    private static ModelExecutionConfig RuleCheckModelConfig(LlmConfig config, ModelExecutionConfig? qcModelConfig, string rawText) =>
+        qcModelConfig ?? LlmHelpers.CalculateModelConfig(config, rawText);
+
+    /// <summary>
+    /// The validation gate a QC candidate (a fresh correction in <see cref="ReviewColumnAsync"/>, or an
+    /// already-accepted <see cref="TranslationSplit.QcTranslated"/> in <see cref="ApplyRulesToQcColumn"/>)
+    /// must pass: <see cref="TranslationWorkflow.EvaluateRules"/> - the single shared rule list
+    /// ApplyTranslationRules runs against Translated, so a new rule added there applies here too -
+    /// layered under <see cref="CheckCapitalizationRegression"/>, a QC-specific check that needs the
+    /// known-good <paramref name="baselineTranslated"/> a fresh translation attempt doesn't have.
+    /// Returns the first failure reason, or null when the candidate is clean.
+    ///
+    /// preparedRaw gets the CJK-punctuation-normalized half of LineValidation.PrepareRaw (e.g. the CJK
+    /// ellipsis glyph "…" -> "..." so IsMissingRequiredEllipsis can actually match it) - called with a
+    /// null tokenReplacer so it does NOT also run the token-masking half, which would corrupt the
+    /// caller's own tokenReplacer; splitRaw stays the untouched rawText, matching what the Translated
+    /// path passes for the same parameter.
+    /// </summary>
+    /// <summary>
+    /// The <see cref="GetLlmVerdictAsync"/> candidate validator for
+    /// <see cref="QualityReviewConfig.PreVerificationGateEnabled"/> (null when it is off): restores a
+    /// masked candidate with <paramref name="tokenReplacer"/> (the one that masked this text), runs the
+    /// same post-LLM repair as the accept path, then <see cref="EvaluateQcCandidate"/>. A candidate equal
+    /// to <paramref name="effectiveTranslated"/> passes - the accept path treats it as "no change".
+    /// </summary>
+    internal static Func<string, string?>? BuildCandidateValidator(
+        LlmConfig config,
+        ModelExecutionConfig modelConfig,
+        string rawText,
+        string effectiveTranslated,
+        StringTokenReplacer tokenReplacer,
+        TextFileToSplit textFile,
+        int split)
+    {
+        if (!config.QualityReview.PreVerificationGateEnabled)
+            return null;
+
+        return maskedCandidate =>
+        {
+            var restored = LineValidation.PrepareResult(rawText, tokenReplacer.Restore(maskedCandidate), config.Hooks, textFile, split);
+            return restored == effectiveTranslated
+                ? null
+                : EvaluateQcCandidate(config, modelConfig, rawText, restored, effectiveTranslated, textFile, split)?.Trim();
+        };
+    }
+
+    private static string? EvaluateQcCandidate(
+        LlmConfig config,
+        ModelExecutionConfig modelConfig,
+        string rawText,
+        string candidate,
+        string baselineTranslated,
+        TextFileToSplit textFile,
+        int split)
+    {
+        var preparedRaw = LineValidation.PrepareRaw(rawText, null);
+        var ruleResult = TranslationWorkflow.EvaluateRules(config, modelConfig, preparedRaw, rawText, candidate, textFile, split);
+        var capsFailureReason = CheckCapitalizationRegression(baselineTranslated, candidate);
+
+        return capsFailureReason ?? ruleResult.AllReasons.FirstOrDefault();
+    }
+
+    /// <summary>
+    /// Counts one more rule-check/low-score failure toward <see cref="QualityReviewConfig.MaxRuleCheckRetries"/>:
+    /// same underlying <paramref name="baselineTranslated"/> as the last failure keeps counting,
+    /// anything else (first failure ever, or Translated changed since - a retranslation, manual fix,
+    /// or repair) is a different piece of text with no accumulated history and starts over at 1.
+    /// Returns true once the count exceeds the cap (give up).
+    /// </summary>
+    private static bool RecordRuleCheckFailure(LlmConfig config, TranslationSplit anchor, string baselineTranslated)
+    {
+        anchor.QcRuleCheckFailureCount = anchor.QcRuleCheckFailureBaseline == baselineTranslated
+            ? anchor.QcRuleCheckFailureCount + 1
+            : 1;
+        anchor.QcRuleCheckFailureBaseline = baselineTranslated;
+
+        return anchor.QcRuleCheckFailureCount > config.QualityReview.MaxRuleCheckRetries;
+    }
+
+    /// <summary>Clears the retry counter/baseline; returns true if there was anything to clear.</summary>
+    private static bool ClearRuleCheckFailureHistory(TranslationSplit anchor)
+    {
+        var hadFailureHistory = anchor.QcRuleCheckFailureCount != 0 || anchor.QcRuleCheckFailureBaseline != string.Empty;
+        anchor.QcRuleCheckFailureCount = 0;
+        anchor.QcRuleCheckFailureBaseline = string.Empty;
+        return hadFailureHistory;
+    }
+
+    /// <summary>
+    /// The terminal "given up" shape shared by a correction the validation gate keeps rejecting
+    /// (<see cref="ReviewColumnAsync"/>) and an accepted correction that keeps breaking the rules
+    /// (<see cref="ApplyRulesToQcColumn"/>): <see cref="QcStatus.FailedValidation"/>, flagged for a
+    /// human via <see cref="GetFlaggedQcReviews"/>, with an Unknown defect. QcQualityScore must be
+    /// cleared - packaging's low-score gate (TranslationPackaging.cs) checks
+    /// "qcFresh &amp;&amp; QcQualityScore &lt; minAcceptableScore" BEFORE it ever reaches the
+    /// QcTranslated-empty fallback to Translated, so a stale/low score left behind would make the
+    /// whole line fail outright (raw source shipped) instead of the intended clean fallback to the
+    /// last known-good Translated. Callers leave QcReviewedText matching the reviewed text so
+    /// IsQcReviewFresh reports the column as already handled.
+    /// </summary>
+    private static void MarkQcGivenUp(TranslationSplit anchor)
+    {
+        anchor.QcStatus = QcStatus.FailedValidation;
+        anchor.QcQualityScore = null;
+        anchor.QcDefectCategory = QcDefectCategory.Unknown;
+        anchor.QcDefectCategories = DefectCategoriesFor(QcDefectCategory.Unknown);
+        anchor.FlaggedForQcReview = true;
+    }
+
     /// <summary>
     /// Runs the quality review pass. See docs/plans/quality-review-pass.md.
     /// </summary>
@@ -287,19 +621,28 @@ public static class QualityReviewWorkflow
     {
         var config = ConfigurationExtensions.GetConfiguration(workingDirectory, hooks);
 
-        if (!config.QualityReview.Enabled)
-        {
-            Console.WriteLine("Quality review pass is disabled (qualityReview.enabled: false in Config.yaml) - nothing to do.");
+        if (!IsReviewEnabled(config))
             return 0;
-        }
 
-        if (string.IsNullOrEmpty(config.QualityReview.ModelName)
-            || !config.Runtime.Models.TryGetValue(config.QualityReview.ModelName, out var modelConfig))
-        {
-            throw new InvalidOperationException(
-                $"QualityReview.ModelName '{config.QualityReview.ModelName}' does not match any configured model. " +
-                $"Configured model names: {string.Join(", ", config.Runtime.Models.Keys)}");
-        }
+        var modelConfig = ResolveReviewModelConfig(config);
+        var fileStates = await LoadFileStatesAsync(workingDirectory, textFiles);
+
+        return await ReviewFileStatesAsync(config, modelConfig, fileStates, sampleSize);
+    }
+
+    private static bool IsReviewEnabled(LlmConfig config)
+    {
+        if (config.QualityReview.Enabled)
+            return true;
+
+        Console.WriteLine("Quality review pass is disabled (qualityReview.enabled: false in Config.yaml) - nothing to do.");
+        return false;
+    }
+
+    /// <summary><see cref="ResolveQcModelConfig"/>, plus the detection prompt a review pass can't run without.</summary>
+    private static ModelExecutionConfig ResolveReviewModelConfig(LlmConfig config)
+    {
+        var modelConfig = ResolveQcModelConfig(config);
 
         if (!modelConfig.Prompts.ContainsKey("BaseQualityReviewPrompt"))
         {
@@ -308,9 +651,18 @@ public static class QualityReviewWorkflow
                 "add a BaseQualityReviewPrompt.txt file under its CustomPromptsPath folder.");
         }
 
-        var maxConcurrency = config.QualityReview.MaxConcurrency ?? config.MaxConcurrency ?? config.BatchSize ?? 20;
+        return modelConfig;
+    }
+
+    /// <summary>
+    /// Loads every QC-enabled Converted file that exists, each with its own <see cref="BufferedFileWriter"/>.
+    /// Loaded once per <see cref="RunAsync"/> call, or once for a whole <see cref="RunBruteForce"/> loop.
+    /// </summary>
+    internal static async Task<List<QcFileState>> LoadFileStatesAsync(string workingDirectory, TextFileToSplit[] textFiles)
+    {
         var outputPath = $"{workingDirectory}/Converted";
         var deserializer = YamlHelper.CreateDeserializer();
+        var serializer = YamlHelper.CreateSerializer();
 
         var fileStates = new List<QcFileState>();
         foreach (var textFile in textFiles)
@@ -325,48 +677,98 @@ public static class QualityReviewWorkflow
             var content = await File.ReadAllTextAsync(outputFile);
             var fileLines = deserializer.Deserialize<List<TranslationLine>>(content);
 
-            fileStates.Add(new QcFileState
-            {
-                TextFile = textFile,
-                OutputFile = outputFile,
-                FileLines = fileLines,
-                Serializer = YamlHelper.CreateSerializer(),
-            });
+            var state = new QcFileState { TextFile = textFile, FileLines = fileLines };
+            state.Writer = new BufferedFileWriter(
+                outputFile,
+                () => serializer.Serialize(fileLines),
+                TranslationService.BatchlessBuffer,
+                onWrite: elapsedMs => RecordIoWrite(state.Timing, elapsedMs));
+            fileStates.Add(state);
         }
 
-        // Build one work item per column, across every line in every file.
+        return fileStates;
+    }
+
+    /// <summary>
+    /// One full review pass over already-loaded <paramref name="fileStates"/> - see <see cref="RunAsync"/>.
+    /// Only files a reviewed column actually changed are ever written back.
+    /// </summary>
+    internal static async Task<int> ReviewFileStatesAsync(LlmConfig config, ModelExecutionConfig modelConfig, List<QcFileState> fileStates, int? sampleSize)
+    {
+        // The same per-line context the translator saw (see GameHooks.LineContextProvider); empty unless lineContextEnabled.
+        LineContexts.Build(config, config.Runtime.WorkingDirectory ?? string.Empty, fileStates.Select(f => (f.TextFile, (IReadOnlyList<TranslationLine>)f.FileLines)));
+
+        var maxConcurrency = config.QualityReview.MaxConcurrency ?? config.MaxConcurrency ?? config.BatchSize ?? 20;
+        var workItems = BuildWorkItems(config, fileStates, sampleSize);
+
+        Console.WriteLine($"Quality review: {workItems.Count} column(s) across {fileStates.Count} file(s) to consider, max concurrency {maxConcurrency}, model '{config.QualityReview.ModelName}'.");
+
+        // See QcTimingStats' doc comment - lets the progress log attribute an interval's real
+        // wall-clock cost to "LLM calls" vs "disk flush" instead of leaving that to guesswork.
+        var timing = new QcTimingStats();
+        var progress = new QcRunProgress(workItems.Count, timing);
+
+        // Set once the final work item list is settled (post exclusion/freshness-filter/sampling),
+        // so each file's pending count reflects what will actually be dispatched this run.
+        var pendingByFile = workItems.CountBy(item => item.File).ToDictionary();
+        foreach (var file in fileStates)
+        {
+            file.Writer.SetPendingItems(pendingByFile.GetValueOrDefault(file));
+            file.Timing = timing;
+        }
+
+        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(300) };
+        var reviewCache = new ReviewLlmCache();
+
+        await CheckDetectionContextBudgetAsync(config, modelConfig, client, LongestDetectionUserPrompts(config, workItems));
+
+        await Parallel.ForEachAsync(workItems, new ParallelOptions { MaxDegreeOfParallelism = maxConcurrency }, async (item, _) =>
+        {
+            var outcome = await ReviewColumnAsync(config, modelConfig, client, item, reviewCache, timing);
+            progress.Record(outcome, item.Anchor.FlaggedForQcReview);
+
+            // Skipped means nothing on this column changed (no LLM call, no Qc field mutated), so it
+            // has nothing new to persist. Every item, Skipped included, still counts down its file's
+            // pending items - the file is flushed (if dirty) once its last one finishes.
+            if (outcome != QcOutcome.Skipped)
+                item.File.Writer.RecordChange();
+
+            item.File.Writer.ItemDone();
+        });
+
+        foreach (var file in fileStates)
+        {
+            file.Timing = null;
+            file.Writer.Flush();
+        }
+
+        progress.WriteSummary();
+        return progress.ReviewedCount;
+    }
+
+    /// <summary>
+    /// One work item per column across every file, minus anything excluded by
+    /// <see cref="GameHooks.CustomQcExclusionRule"/> or already fresh, then sampled down to
+    /// <paramref name="sampleSize"/> if set.
+    /// </summary>
+    private static List<QcWorkItem> BuildWorkItems(LlmConfig config, List<QcFileState> fileStates, int? sampleSize)
+    {
         var workItems = new List<QcWorkItem>();
         var excludedCount = 0;
         foreach (var file in fileStates)
         {
             foreach (var line in file.FileLines)
             {
-                foreach (var columnGroup in line.Splits.GroupBy(ColumnKey))
+                foreach (var column in EnumerateColumns(line))
                 {
-                    var fragments = columnGroup.OrderBy(s => s.SubIndex).ToList();
-                    var anchor = fragments.FirstOrDefault(f => f.SubIndex == 0) ?? fragments[0];
-                    var template = line.Templates.FirstOrDefault(t => ColumnKey(t) == columnGroup.Key);
-
-                    if (config.Hooks?.CustomQcExclusionRule != null)
+                    if (config.Hooks?.CustomQcExclusionRule != null
+                        && config.Hooks.CustomQcExclusionRule(file.TextFile, column.Anchor.Split, column.RawText))
                     {
-                        var rawText = template != null
-                            ? CompoundFieldSplitter.Reconstruct(template.Template, fragments.Select(f => f.Text).ToList())
-                            : anchor.Text;
-
-                        if (config.Hooks.CustomQcExclusionRule(file.TextFile, anchor.Split, rawText))
-                        {
-                            excludedCount++;
-                            continue;
-                        }
+                        excludedCount++;
+                        continue;
                     }
 
-                    workItems.Add(new QcWorkItem
-                    {
-                        File = file,
-                        Anchor = anchor,
-                        Template = template,
-                        Fragments = fragments,
-                    });
+                    workItems.Add(new QcWorkItem { File = file, Column = column });
                 }
             }
         }
@@ -401,166 +803,107 @@ public static class QualityReviewWorkflow
             Console.WriteLine($"Quality review: sampling {workItems.Count} of the eligible column(s) (sampleSize={sample}).");
         }
 
-        Console.WriteLine($"Quality review: {workItems.Count} column(s) across {fileStates.Count} file(s) to consider, max concurrency {maxConcurrency}, model '{config.QualityReview.ModelName}'.");
+        return workItems;
+    }
 
-        // Set once the final work item list is settled (post exclusion/freshness-filter/sampling),
-        // so it reflects what will actually be dispatched this run - see QcFileState.PendingItems.
-        foreach (var fileGroup in workItems.GroupBy(i => i.File))
-            fileGroup.Key.PendingItems = fileGroup.Count();
+    /// <summary>
+    /// A review pass's outcome counters and periodic progress log. Every dispatched work item counts
+    /// toward the processed count, Skipped included, so the progress log's denominator reflects real
+    /// "N left" progress rather than going quiet for long stretches whenever most columns are
+    /// already-fresh Skips (see docs/features/translation-pipeline/quality-review-pass.md's "Progress logging" section).
+    /// </summary>
+    private sealed class QcRunProgress(int totalCount, QcTimingStats timing)
+    {
+        private readonly Stopwatch _runStopwatch = Stopwatch.StartNew();
+        private readonly object _logLock = new();
+        private int _processedCount;
+        private int _reviewedCount;
+        private int _correctedCount;
+        private int _rejectedCount;
+        private int _flaggedCount;
+        private long _lastLogElapsedMs, _lastLogLlmMs, _lastLogIoMs;
+        private int _lastLogLlmCalls, _lastLogIoWrites, _lastLogReviewedCount;
 
-        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(300) };
-        var reviewCache = new ReviewLlmCache();
+        public int ReviewedCount => Volatile.Read(ref _reviewedCount);
 
-        var totalCount = workItems.Count;
-        var processedCount = 0;
-        var reviewedCount = 0;
-        var correctedCount = 0;
-        var rejectedCount = 0;
-        var flaggedCount = 0;
-
-        // See QcTimingStats' doc comment - lets the progress log attribute an interval's real
-        // wall-clock cost to "LLM calls" vs "disk flush" instead of leaving that to guesswork, which
-        // is exactly what motivated adding this (a mostly-Skip run that was still slow turned out to
-        // be the flush, not the LLM - see the outcome != Skipped guard below and its comment).
-        var timing = new QcTimingStats();
-        var runStopwatch = Stopwatch.StartNew();
-        var progressLogLock = new object();
-        long lastLogElapsedMs = 0, lastLogLlmMs = 0, lastLogIoMs = 0;
-        int lastLogLlmCalls = 0, lastLogIoWrites = 0, lastLogReviewedCount = 0;
-
-        await Parallel.ForEachAsync(workItems, new ParallelOptions { MaxDegreeOfParallelism = maxConcurrency }, async (item, _) =>
+        public void Record(QcOutcome outcome, bool flagged)
         {
-            var outcome = await ReviewColumnAsync(config, modelConfig, client, item, reviewCache, timing);
-
-            // Every dispatched work item counts toward processedCount, Skipped included, so the
-            // progress log's denominator reflects real "N left" progress rather than going quiet
-            // for long stretches whenever most columns are already-fresh Skips (see
-            // docs/quality-review-pass-architecture.md's "Progress logging" section).
-            var processed = Interlocked.Increment(ref processedCount);
+            var processed = Interlocked.Increment(ref _processedCount);
 
             if (outcome != QcOutcome.Skipped)
             {
-                Interlocked.Increment(ref reviewedCount);
-                if (outcome == QcOutcome.Corrected) Interlocked.Increment(ref correctedCount);
-                if (outcome == QcOutcome.RejectedByGate) Interlocked.Increment(ref rejectedCount);
-                if (item.Anchor.FlaggedForQcReview) Interlocked.Increment(ref flaggedCount);
+                Interlocked.Increment(ref _reviewedCount);
+                if (outcome == QcOutcome.Corrected) Interlocked.Increment(ref _correctedCount);
+                if (outcome == QcOutcome.RejectedByGate) Interlocked.Increment(ref _rejectedCount);
+                if (flagged) Interlocked.Increment(ref _flaggedCount);
             }
 
             if (processed % TranslationService.BatchlessLog == 0 || processed == totalCount)
+                LogProgress(processed);
+        }
+
+        private void LogProgress(int processed)
+        {
+            lock (_logLock)
             {
-                lock (progressLogLock)
-                {
-                    var elapsedNow = runStopwatch.ElapsedMilliseconds;
-                    var intervalMs = elapsedNow - lastLogElapsedMs;
+                var elapsedNow = _runStopwatch.ElapsedMilliseconds;
+                var intervalMs = elapsedNow - _lastLogElapsedMs;
 
-                    var currentLlmMs = Volatile.Read(ref timing.LlmMs);
-                    var currentLlmCalls = Volatile.Read(ref timing.LlmCalls);
-                    var currentIoMs = Volatile.Read(ref timing.IoMs);
-                    var currentIoWrites = Volatile.Read(ref timing.IoWrites);
+                var currentLlmMs = Volatile.Read(ref timing.LlmMs);
+                var currentLlmCalls = Volatile.Read(ref timing.LlmCalls);
+                var currentIoMs = Volatile.Read(ref timing.IoMs);
+                var currentIoWrites = Volatile.Read(ref timing.IoWrites);
 
-                    // Snapshotted the same way as timing.* above, even though these are plain int
-                    // fields (not long) mutated elsewhere via Interlocked.Increment from concurrent
-                    // workers - Volatile.Read is what actually guarantees this thread observes the
-                    // latest value rather than a stale cached one, the same guarantee the writer side
-                    // gets for free from Interlocked.Increment. Using them directly (as before) is
-                    // very unlikely to misbehave on .NET's current runtime, but relying on that
-                    // incidental atomicity instead of an explicit acquire-style read is exactly the
-                    // kind of inconsistency worth closing while touching this block.
-                    var currentReviewedCount = Volatile.Read(ref reviewedCount);
-                    var currentCorrectedCount = Volatile.Read(ref correctedCount);
-                    var currentRejectedCount = Volatile.Read(ref rejectedCount);
-                    var currentFlaggedCount = Volatile.Read(ref flaggedCount);
+                // Snapshotted the same way as timing.* above - the counters are mutated by
+                // concurrent workers via Interlocked.Increment, and Volatile.Read is what actually
+                // guarantees this thread observes the latest value rather than a stale cached one.
+                var currentReviewedCount = Volatile.Read(ref _reviewedCount);
+                var currentCorrectedCount = Volatile.Read(ref _correctedCount);
+                var currentRejectedCount = Volatile.Read(ref _rejectedCount);
+                var currentFlaggedCount = Volatile.Read(ref _flaggedCount);
 
-                    var intervalLlmMs = currentLlmMs - lastLogLlmMs;
-                    var intervalLlmCalls = currentLlmCalls - lastLogLlmCalls;
-                    var intervalIoMs = currentIoMs - lastLogIoMs;
-                    var intervalIoWrites = currentIoWrites - lastLogIoWrites;
-                    var intervalReviewed = currentReviewedCount - lastLogReviewedCount;
+                var intervalLlmMs = currentLlmMs - _lastLogLlmMs;
+                var intervalLlmCalls = currentLlmCalls - _lastLogLlmCalls;
+                var intervalIoMs = currentIoMs - _lastLogIoMs;
+                var intervalIoWrites = currentIoWrites - _lastLogIoWrites;
+                var intervalReviewed = currentReviewedCount - _lastLogReviewedCount;
 
-                    // The three numbers worth actually comparing run-to-run/setting-to-setting
-                    // (raw "interval took Xms" isn't, since it moves with batch composition - a
-                    // skip-heavy interval and a review-heavy one aren't comparable at all):
-                    // - avgLlmMs: mean wall-clock cost of one real LLM round trip this interval -
-                    //   the number to watch when judging a model/prompt-size change, independent of
-                    //   concurrency.
-                    // - effectiveConcurrency: intervalLlmMs / intervalMs - how many LLM calls were
-                    //   genuinely running in parallel on average. Compare this to
-                    //   qualityReview.maxConcurrency: at (or very near) the configured max, workers
-                    //   are never sitting idle waiting on something else (io, readiness checks) -
-                    //   below it means concurrency itself isn't the bottleneck right now.
-                    // - reviewedPerSecond: real throughput (columns actually reviewed, not
-                    //   dispatched/skipped, per second) - the one number to compare directly across
-                    //   a maxConcurrency or model change to see if it actually helped.
-                    var avgLlmMs = intervalLlmCalls > 0 ? intervalLlmMs / (double)intervalLlmCalls : 0;
-                    var effectiveConcurrency = intervalMs > 0 ? intervalLlmMs / (double)intervalMs : 0;
-                    var reviewedPerSecond = intervalMs > 0 ? intervalReviewed * 1000.0 / intervalMs : 0;
+                // The three numbers worth actually comparing run-to-run/setting-to-setting
+                // (raw "interval took Xms" isn't, since it moves with batch composition - a
+                // skip-heavy interval and a review-heavy one aren't comparable at all):
+                // - avgLlmMs: mean wall-clock cost of one real LLM round trip this interval -
+                //   the number to watch when judging a model/prompt-size change, independent of
+                //   concurrency.
+                // - effectiveConcurrency: intervalLlmMs / intervalMs - how many LLM calls were
+                //   genuinely running in parallel on average. Compare this to
+                //   qualityReview.maxConcurrency: at (or very near) the configured max, workers
+                //   are never sitting idle waiting on something else (io, readiness checks) -
+                //   below it means concurrency itself isn't the bottleneck right now.
+                // - reviewedPerSecond: real throughput (columns actually reviewed, not
+                //   dispatched/skipped, per second) - the one number to compare directly across
+                //   a maxConcurrency or model change to see if it actually helped.
+                var avgLlmMs = intervalLlmCalls > 0 ? intervalLlmMs / (double)intervalLlmCalls : 0;
+                var effectiveConcurrency = intervalMs > 0 ? intervalLlmMs / (double)intervalMs : 0;
+                var reviewedPerSecond = intervalMs > 0 ? intervalReviewed * 1000.0 / intervalMs : 0;
 
-                    Console.WriteLine(
-                        $"Quality review progress: {processed}/{totalCount} column(s) processed ({totalCount - processed} remaining) - " +
-                        $"reviewed: {currentReviewedCount}, corrected: {currentCorrectedCount}, rejected by gate: {currentRejectedCount}, flagged: {currentFlaggedCount} | " +
-                        $"interval took {intervalMs}ms - llm: {intervalLlmCalls} call(s)/{intervalLlmMs}ms, io: {intervalIoWrites} write(s)/{intervalIoMs}ms " +
-                        $"(elapsed: {elapsedNow}ms) | avg {avgLlmMs:F0}ms/call, {effectiveConcurrency:F1}x effective concurrency, {reviewedPerSecond:F2} reviewed/s");
+                Console.WriteLine(
+                    $"Quality review progress: {processed}/{totalCount} column(s) processed ({totalCount - processed} remaining) - " +
+                    $"reviewed: {currentReviewedCount}, corrected: {currentCorrectedCount}, rejected by gate: {currentRejectedCount}, flagged: {currentFlaggedCount} | " +
+                    $"interval took {intervalMs}ms - llm: {intervalLlmCalls} call(s)/{intervalLlmMs}ms, io: {intervalIoWrites} write(s)/{intervalIoMs}ms " +
+                    $"(elapsed: {elapsedNow}ms) | avg {avgLlmMs:F0}ms/call, {effectiveConcurrency:F1}x effective concurrency, {reviewedPerSecond:F2} reviewed/s");
 
-                    lastLogElapsedMs = elapsedNow;
-                    lastLogLlmMs = currentLlmMs;
-                    lastLogLlmCalls = currentLlmCalls;
-                    lastLogIoMs = currentIoMs;
-                    lastLogIoWrites = currentIoWrites;
-                    lastLogReviewedCount = currentReviewedCount;
-                }
+                _lastLogElapsedMs = elapsedNow;
+                _lastLogLlmMs = currentLlmMs;
+                _lastLogLlmCalls = currentLlmCalls;
+                _lastLogIoMs = currentIoMs;
+                _lastLogIoWrites = currentIoWrites;
+                _lastLogReviewedCount = currentReviewedCount;
             }
+        }
 
-            // Skipped means nothing on this column changed (no LLM call, no Qc field mutated), so
-            // it has nothing new to persist - counting it toward the flush threshold anyway used to
-            // force a full serialize+write of the WHOLE file's FileLines on a mostly-skip run (a
-            // corpus re-review where almost everything is still fresh), burning CPU/IO and stalling
-            // one of only maxConcurrency worker slots on synchronous disk I/O for no reason. The
-            // final write-back loop at the end of RunAsync still guarantees everything reaches disk.
-            if (outcome != QcOutcome.Skipped)
-            {
-                var buffered = Interlocked.Increment(ref item.File.BufferedRecords);
-                if (buffered > TranslationService.BatchlessBuffer)
-                {
-                    lock (item.File.WriteLock)
-                    {
-                        if (item.File.BufferedRecords > TranslationService.BatchlessBuffer)
-                        {
-                            var ioStopwatch = Stopwatch.StartNew();
-                            FileHelper.WriteAllTextWithRetry(item.File.OutputFile, item.File.Serializer.Serialize(item.File.FileLines));
-                            Interlocked.Add(ref timing.IoMs, ioStopwatch.ElapsedMilliseconds);
-                            Interlocked.Increment(ref timing.IoWrites);
-                            item.File.BufferedRecords = 0;
-                        }
-                    }
-                }
-            }
-
-            // Last item dispatched for this file this run (see QcFileState.PendingItems) - nothing
-            // else will touch it, so flush now instead of leaving it in memory until every OTHER
-            // file's work finishes too (the final write-back loop below). Counted down regardless of
-            // outcome (a Skipped last item still means the file is done) - and checked even when the
-            // buffer-threshold branch above JUST flushed it, since BufferedRecords could be 0 again
-            // here for an unrelated reason; a redundant write of unchanged content is harmless.
-            if (Interlocked.Decrement(ref item.File.PendingItems) == 0)
-            {
-                lock (item.File.WriteLock)
-                {
-                    var ioStopwatch = Stopwatch.StartNew();
-                    FileHelper.WriteAllTextWithRetry(item.File.OutputFile, item.File.Serializer.Serialize(item.File.FileLines));
-                    Interlocked.Add(ref timing.IoMs, ioStopwatch.ElapsedMilliseconds);
-                    Interlocked.Increment(ref timing.IoWrites);
-                    item.File.BufferedRecords = 0;
-                }
-            }
-        });
-
-        foreach (var file in fileStates)
-            await FileHelper.WriteAllTextWithRetryAsync(file.OutputFile, file.Serializer.Serialize(file.FileLines));
-
-        Console.WriteLine($"Quality review done: {reviewedCount} reviewed, {correctedCount} corrected, {rejectedCount} rejected by validation gate, {flaggedCount} flagged for human review. " +
-            $"Totals - llm: {timing.LlmCalls} call(s)/{timing.LlmMs}ms, io: {timing.IoWrites} write(s)/{timing.IoMs}ms, elapsed: {runStopwatch.ElapsedMilliseconds}ms.");
-
-        return reviewedCount;
+        public void WriteSummary() =>
+            Console.WriteLine($"Quality review done: {_reviewedCount} reviewed, {_correctedCount} corrected, {_rejectedCount} rejected by validation gate, {_flaggedCount} flagged for human review. " +
+                $"Totals - llm: {timing.LlmCalls} call(s)/{timing.LlmMs}ms, io: {timing.IoWrites} write(s)/{timing.IoMs}ms, elapsed: {_runStopwatch.ElapsedMilliseconds}ms.");
     }
 
     /// <summary>
@@ -616,9 +959,7 @@ public static class QualityReviewWorkflow
         if (!needsReview)
             return QcOutcome.Skipped;
 
-        var rawText = item.Template != null
-            ? CompoundFieldSplitter.Reconstruct(item.Template.Template, item.Fragments.Select(f => f.Text).ToList())
-            : anchor.Text;
+        var rawText = item.Column.RawText;
 
         // Mask dynamic tokens/placeholders the same way the translation pipeline already does
         // (StringTokenReplacer), so the QC model never sees/mangles a raw `#PlayerName#`-style
@@ -627,20 +968,21 @@ public static class QualityReviewWorkflow
         var maskedRaw = tokenReplacer.Replace(rawText);
         var maskedTranslated = tokenReplacer.Replace(effectiveTranslated);
 
-        var glossaryPrompt = GlossaryLine.AppendPromptsFor(rawText, config.Runtime.GlossaryLines, item.File.TextFile.Path);
+        var glossaryPrompt = LineContexts.WithColumnContext(config,
+            GlossaryLine.AppendPromptsFor(rawText, config.Runtime.GlossaryLines, item.File.TextFile.Path), item.Column.Anchor);
 
         var cacheKey = new ReviewCacheKey(rawText, effectiveTranslated, glossaryPrompt);
-        // Timed inside the Lazy factory, not around the GetOrAdd/.Value await - that way only the
-        // thread that actually runs a fresh HTTP round trip (a cache miss) records time against
-        // timing.LlmMs; every other thread racing the same key just awaits the same in-flight Task
-        // and correctly contributes nothing (see ReviewLlmCache's doc comment for the Lazy dedup).
-        // Timing/call-count instrumentation now happens per real HTTP round trip INSIDE
-        // GetLlmVerdictAsync/GetVerificationVerdictAsync (see RecordLlmCall) rather than once here
-        // around the whole (possibly two-call) verdict - a column that also triggers a verification
-        // call genuinely makes two round trips, and timing.LlmCalls needs to reflect that instead of
-        // silently bundling both into "1 call" the way a single outer stopwatch/increment would.
+        // Timing/call-count instrumentation happens per real HTTP round trip INSIDE
+        // GetLlmVerdictAsync's calls (see SendQcCallAsync/RecordLlmCall) - only the thread that
+        // actually runs a fresh verdict (a cache miss) records time; every other thread racing the
+        // same key just awaits the same in-flight Task and correctly contributes nothing (see
+        // ReviewLlmCache's doc comment for the Lazy dedup).
+        // A cached verdict shared by another column used that column's validator; the final gate
+        // below is still this column's own.
+        var candidateValidator = BuildCandidateValidator(config, modelConfig, rawText, effectiveTranslated, tokenReplacer, item.File.TextFile, anchor.Split);
+
         var verdict = await reviewCache.GetOrAdd(cacheKey, _ => new Lazy<Task<LlmVerdict>>(
-            () => GetLlmVerdictAsync(config, modelConfig, client, rawText, maskedRaw, maskedTranslated, glossaryPrompt, timing))).Value;
+            () => GetLlmVerdictAsync(config, modelConfig, client, rawText, maskedRaw, maskedTranslated, glossaryPrompt, timing, candidateValidator))).Value;
 
         if (!verdict.Success)
             // Either the request errored, or the response didn't parse - leave the column's Qc
@@ -661,45 +1003,7 @@ public static class QualityReviewWorkflow
             ?? DefectCategoriesFor(verdict.Defect);
 
         if (verdict.CorrectedRawMasked == null)
-        {
-            // DEFECT: UNCERTAIN - a genuine "ask a human" signal, not a confidence score to weigh
-            // against MinAcceptableScore (verdict.Score is always null for it - see
-            // QcDefectCategory.Uncertain). Always flag, never retry (there's no candidate fix to
-            // retry toward) and never let AutoAcceptDefectCategories silence it - PassesQcScoreGate
-            // never even gets asked, since QcTranslated stays empty here just like an ordinary
-            // Passed column, so packaging always falls through to the untouched Translated text.
-            if (verdict.Defect == QcDefectCategory.Uncertain)
-            {
-                anchor.QcStatus = QcStatus.Passed;
-                anchor.FlaggedForQcReview = true;
-                return QcOutcome.Passed;
-            }
-
-            // Decided here, at the point the score is actually known, rather than deferred to a
-            // separate step (ApplyRulesToCurrentQcTranslated) that only runs as part of
-            // RunBruteForce - a plain RunAsync call must leave QcStatus just as accurate as a
-            // brute-forced one, not dependent on which caller happened to invoke this.
-            //
-            // NOTE: a mechanical override that force-retried/flagged a DEFECT: NONE verdict whenever
-            // the effective text matched a tag-seam regex (HasUnresolvedTagSeam) was tried and
-            // reverted here - it can't distinguish a genuinely dangling fragment (the defect it was
-            // meant to catch) from two complete, correctly-punctuated sentences that just happen to
-            // be glued together with no space (completely normal, not a defect) - that distinction
-            // needs actual grammatical understanding, which a regex can't provide. It also never
-            // produced a real fix even for a genuine miss (the model just repeats DEFECT: NONE on
-            // retry and the column ends up flagged with QcTranslated still empty, same as if nothing
-            // had been done), while forcing false retries/flags on fine translations elsewhere. A
-            // genuine model miss on this defect shape is inherent LLM noise (see
-            // docs/quality-review-pass-architecture.md's postmortems) - triage it like any other
-            // low-precision category (WriteTriageReportAsync/hand-review), don't try to force-correct
-            // it in code.
-            if (TryRetryForLowScore(config, anchor, effectiveTranslated, verdict.Score ?? 100, item.File.TextFile))
-                return QcOutcome.Passed;
-
-            anchor.QcStatus = QcStatus.Passed;
-            anchor.FlaggedForQcReview = verdict.Score is not int passedScore || passedScore < config.QualityReview.MinAcceptableScore;
-            return QcOutcome.Passed;
-        }
+            return RecordNoCorrectionVerdict(config, anchor, verdict, effectiveTranslated, item.File.TextFile);
 
         // Restore using THIS column's own tokenReplacer - its placeholderMap/sizeMap/colorMap were
         // just populated by this column's own Replace() calls above, which is deterministic given
@@ -738,83 +1042,101 @@ public static class QualityReviewWorkflow
             return QcOutcome.Passed;
         }
 
-        // Validation gate: TranslationWorkflow.EvaluateRules is the single shared rule list a
-        // candidate translation must pass - the same one ApplyTranslationRules runs against
-        // Translated and ApplyRulesToCurrentQcTranslated re-runs against an already-accepted
-        // QcTranslated, so a new rule added there applies here too with nothing else to edit.
-        //
-        // preparedRaw gets the CJK-punctuation-normalized half of LineValidation.PrepareRaw (e.g.
-        // the CJK ellipsis glyph "…" -> "..." so IsMissingRequiredEllipsis can actually match it) -
-        // called with a null tokenReplacer so it does NOT also run the token-masking half, which
-        // would corrupt this column's own tokenReplacer (already populated above for the masked LLM
-        // prompt/Restore); splitRaw stays the untouched rawText, matching what the Translated path
-        // passes for the same parameter.
-        // Layered on top: CheckCapitalizationRegression, a check specific to QC that needs a
-        // "known-good" baseline to compare against - something a fresh translation attempt from raw
-        // Chinese doesn't have, but a QC correction does.
-        var preparedRaw = LineValidation.PrepareRaw(rawText, null);
-        var ruleResult = TranslationWorkflow.EvaluateRules(config, modelConfig, preparedRaw, rawText, correctedResult, item.File.TextFile, anchor.Split);
-        var capsFailureReason = CheckCapitalizationRegression(effectiveTranslated, correctedResult);
-
-        var failureReason = capsFailureReason ?? ruleResult.AllReasons.FirstOrDefault();
+        // Validation gate - see EvaluateQcCandidate. The same gate ApplyRulesToCurrentQcTranslated
+        // re-runs against an already-accepted QcTranslated, against the same QC model config.
+        var failureReason = EvaluateQcCandidate(config, modelConfig, rawText, correctedResult, effectiveTranslated, item.File.TextFile, anchor.Split);
 
         if (failureReason != null)
-        {
-            // Same underlying Translated as last time this column was rejected? Keep counting
-            // toward the retry cap (TranslationSplit.QcRuleCheckFailureCount) - shared with
-            // ApplyRulesToCurrentQcTranslated's own retry tracking for a Corrected column going
-            // stale, since both are "this column's QC output keeps breaking a rule" from the
-            // column's point of view. Anything else (first rejection ever, or Translated changed
-            // since) starts the count over.
-            anchor.QcRuleCheckFailureCount = anchor.QcRuleCheckFailureBaseline == effectiveTranslated
-                ? anchor.QcRuleCheckFailureCount + 1
-                : 1;
-            anchor.QcRuleCheckFailureBaseline = effectiveTranslated;
-            anchor.QcRejectedCorrection = correctedResult;
-            anchor.QcFailureReason = failureReason;
-
-            if (anchor.QcRuleCheckFailureCount > config.QualityReview.MaxRuleCheckRetries)
-            {
-                // Given up: leave QcReviewedText matching (set above) so IsQcReviewFresh reports
-                // this as "already handled" - RunAsync stops re-reviewing it, and it surfaces for a
-                // human via GetFlaggedQcReviews, same terminal shape
-                // ApplyRulesToCurrentQcTranslated's own give-up path uses. QcQualityScore must be
-                // cleared too (not just QcTranslated, already empty from ResetQcState() above) -
-                // packaging's low-score gate (TranslationPackaging.cs) checks
-                // "qcFresh && QcQualityScore < minAcceptableScore" BEFORE it ever reaches the
-                // QcTranslated-empty fallback to Translated, so a stale/low verdict.Score left behind
-                // here would make the whole line fail outright (raw source shipped) instead of the
-                // intended clean fallback to the last known-good Translated.
-                anchor.QcStatus = QcStatus.FailedValidation;
-                anchor.QcQualityScore = null;
-                anchor.QcDefectCategory = QcDefectCategory.Unknown;
-                anchor.QcDefectCategories = DefectCategoriesFor(QcDefectCategory.Unknown);
-                anchor.FlaggedForQcReview = true;
-                return QcOutcome.RejectedByGate;
-            }
-
-            // Still worth another try - deliberately do NOT leave QcReviewedText matching
-            // effectiveTranslated (undoing what the ResetQcState()+assignment above just set), so
-            // IsQcReviewFresh reports this column as needing review again and the next RunAsync
-            // pass retries it automatically - no extra plumbing needed in RunBruteForce's loop.
-            // FlaggedForQcReview stays false while still retrying automatically; only surfaced once
-            // given up.
-            anchor.QcStatus = QcStatus.NotReviewed;
-            anchor.QcReviewedText = string.Empty;
-            return QcOutcome.RejectedByGate;
-        }
+            return RecordRejectedCorrection(config, anchor, effectiveTranslated, correctedResult, failureReason);
 
         // Accept immediately - do NOT re-run TryRetryForLowScore here. correctedResult has already
         // cleared the validation gate above, so a low verdict.Score is just the model's own
         // (frequently miscalibrated) confidence, not a sign the correction is wrong - re-rolling on
         // it used to discard known-good fixes for a coin-flip re-answer. See "Postmortems" (bug #3)
-        // in `docs/quality-review-pass-architecture.md` (FanslationStudio.LlmKit).
-        anchor.QcRuleCheckFailureCount = 0;
-        anchor.QcRuleCheckFailureBaseline = string.Empty;
+        // in `docs/investigations/quality-review-postmortems.md` (FanslationStudio.LlmKit).
+        ClearRuleCheckFailureHistory(anchor);
         anchor.QcStatus = QcStatus.Corrected;
         anchor.QcTranslated = correctedResult;
         anchor.FlaggedForQcReview = verdict.Score is not int correctedScore || correctedScore < config.QualityReview.MinAcceptableScore;
         return QcOutcome.Corrected;
+    }
+
+    /// <summary>
+    /// <see cref="ReviewColumnAsync"/>'s outcome when the model proposed no correction at all.
+    /// </summary>
+    private static QcOutcome RecordNoCorrectionVerdict(LlmConfig config, TranslationSplit anchor, LlmVerdict verdict, string effectiveTranslated, TextFileToSplit textFile)
+    {
+        // DEFECT: UNCERTAIN - a genuine "ask a human" signal, not a confidence score to weigh
+        // against MinAcceptableScore (verdict.Score is always null for it - see
+        // QcDefectCategory.Uncertain). Always flag, never retry (there's no candidate fix to
+        // retry toward) and never let AutoAcceptDefectCategories silence it - PassesQcScoreGate
+        // never even gets asked, since QcTranslated stays empty here just like an ordinary
+        // Passed column, so packaging always falls through to the untouched Translated text.
+        if (verdict.Defect == QcDefectCategory.Uncertain)
+        {
+            anchor.QcStatus = QcStatus.Passed;
+            anchor.FlaggedForQcReview = true;
+            return QcOutcome.Passed;
+        }
+
+        // Decided here, at the point the score is actually known, rather than deferred to a
+        // separate step (ApplyRulesToCurrentQcTranslated) that only runs as part of
+        // RunBruteForce - a plain RunAsync call must leave QcStatus just as accurate as a
+        // brute-forced one, not dependent on which caller happened to invoke this.
+        //
+        // NOTE: a mechanical override that force-retried/flagged a DEFECT: NONE verdict whenever
+        // the effective text matched a tag-seam regex (HasUnresolvedTagSeam) was tried and
+        // reverted here - it can't distinguish a genuinely dangling fragment (the defect it was
+        // meant to catch) from two complete, correctly-punctuated sentences that just happen to
+        // be glued together with no space (completely normal, not a defect) - that distinction
+        // needs actual grammatical understanding, which a regex can't provide. It also never
+        // produced a real fix even for a genuine miss (the model just repeats DEFECT: NONE on
+        // retry and the column ends up flagged with QcTranslated still empty, same as if nothing
+        // had been done), while forcing false retries/flags on fine translations elsewhere. A
+        // genuine model miss on this defect shape is inherent LLM noise (see
+        // docs/investigations/quality-review-postmortems.md's postmortems) - triage it like any other
+        // low-precision category (WriteTriageReportAsync/hand-review), don't try to force-correct
+        // it in code.
+        if (TryRetryForLowScore(config, anchor, effectiveTranslated, verdict.Score ?? 100, textFile))
+            return QcOutcome.Passed;
+
+        anchor.QcStatus = QcStatus.Passed;
+        anchor.FlaggedForQcReview = verdict.Score is not int passedScore || passedScore < config.QualityReview.MinAcceptableScore;
+        return QcOutcome.Passed;
+    }
+
+    /// <summary>
+    /// <see cref="ReviewColumnAsync"/>'s outcome when a proposed correction failed the validation gate.
+    /// </summary>
+    private static QcOutcome RecordRejectedCorrection(LlmConfig config, TranslationSplit anchor, string effectiveTranslated, string correctedResult, string failureReason)
+    {
+        // Counts toward the retry cap (TranslationSplit.QcRuleCheckFailureCount) - shared with
+        // ApplyRulesToCurrentQcTranslated's own retry tracking for a Corrected column going stale,
+        // since both are "this column's QC output keeps breaking a rule" from the column's point
+        // of view.
+        var gaveUp = RecordRuleCheckFailure(config, anchor, effectiveTranslated);
+        anchor.QcRejectedCorrection = correctedResult;
+        anchor.QcFailureReason = failureReason;
+
+        if (gaveUp)
+        {
+            // Given up: leave QcReviewedText matching (set by the caller) so IsQcReviewFresh reports
+            // this as "already handled" - RunAsync stops re-reviewing it, and it surfaces for a
+            // human via GetFlaggedQcReviews, same terminal shape ApplyRulesToCurrentQcTranslated's
+            // own give-up path uses (see MarkQcGivenUp).
+            MarkQcGivenUp(anchor);
+            return QcOutcome.RejectedByGate;
+        }
+
+        // Still worth another try - deliberately do NOT leave QcReviewedText matching
+        // effectiveTranslated (undoing what the caller's ResetQcState()+assignment just set), so
+        // IsQcReviewFresh reports this column as needing review again and the next RunAsync
+        // pass retries it automatically - no extra plumbing needed in RunBruteForce's loop.
+        // FlaggedForQcReview stays false while still retrying automatically; only surfaced once
+        // given up.
+        anchor.QcStatus = QcStatus.NotReviewed;
+        anchor.QcReviewedText = string.Empty;
+        return QcOutcome.RejectedByGate;
     }
 
     /// <summary>
@@ -829,7 +1151,7 @@ public static class QualityReviewWorkflow
     ///
     /// Deliberately NOT used by the accepted-Corrected path anymore - retrying there discarded an
     /// already-validated correction for nothing but a low self-reported score (see "Postmortems"
-    /// bug #3 in `docs/quality-review-pass-architecture.md`, FanslationStudio.LlmKit). A Passed
+    /// bug #3 in `docs/investigations/quality-review-postmortems.md`, FanslationStudio.LlmKit). A Passed
     /// column has nothing to lose by retrying here - there's no correction to discard, just a
     /// re-review of the same already-accepted <see cref="TranslationSplit.Translated"/>.
     ///
@@ -845,17 +1167,11 @@ public static class QualityReviewWorkflow
     {
         if (score >= config.QualityReview.MinAcceptableScore)
         {
-            anchor.QcRuleCheckFailureCount = 0;
-            anchor.QcRuleCheckFailureBaseline = string.Empty;
+            ClearRuleCheckFailureHistory(anchor);
             return false;
         }
 
-        anchor.QcRuleCheckFailureCount = anchor.QcRuleCheckFailureBaseline == effectiveTranslated
-            ? anchor.QcRuleCheckFailureCount + 1
-            : 1;
-        anchor.QcRuleCheckFailureBaseline = effectiveTranslated;
-
-        if (anchor.QcRuleCheckFailureCount > config.QualityReview.MaxRuleCheckRetries)
+        if (RecordRuleCheckFailure(config, anchor, effectiveTranslated))
         {
             Console.WriteLine($"Quality review: {textFile.Path} gave up chasing a higher score after {anchor.QcRuleCheckFailureCount} attempts (score {score}) - keeping this result.");
             return false;
@@ -866,6 +1182,9 @@ public static class QualityReviewWorkflow
         anchor.QcReviewedText = string.Empty;
         return true;
     }
+
+    /// <summary>The assistant-message prefix sent when <see cref="QualityReviewConfig.DetectionPrefillEnabled"/> is on.</summary>
+    internal const string DetectionReplyPrefill = "DEFECTS:";
 
     /// <summary>
     /// Calls 1 and 2 both use this - a plain, independent multi-defect detection call with no
@@ -891,37 +1210,17 @@ public static class QualityReviewWorkflow
         QcTimingStats? timing,
         bool enableThinking = false)
     {
-        var userPrompt = new StringBuilder();
-        userPrompt.AppendLine($"SOURCE (Chinese): {maskedRaw}");
-        userPrompt.AppendLine($"CURRENT TRANSLATION (English): {maskedTranslated}");
-        if (!string.IsNullOrEmpty(glossaryPrompt))
-        {
-            userPrompt.AppendLine("Relevant glossary terms (must be preserved if they appear in SOURCE):");
-            userPrompt.AppendLine(glossaryPrompt);
-        }
+        var messages = BuildQcMessages(modelConfig, "BaseQualityReviewPrompt", BuildQcUserPrompt(maskedRaw, maskedTranslated, glossaryPrompt));
+        var prefill = config.QualityReview.DetectionPrefillEnabled;
+        if (prefill)
+            messages.Add(LlmHelpers.GenerateAssistantPrompt(DetectionReplyPrefill));
 
-        var messages = new List<object>
-        {
-            LlmHelpers.GenerateSystemPrompt(modelConfig.Prompts["BaseQualityReviewPrompt"]),
-            LlmHelpers.GenerateUserPrompt(userPrompt.ToString()),
-        };
+        var response = await SendQcCallAsync(client, config, WithDetectionTemperature(config, modelConfig), messages, timing, "detection", rawText, enableThinking);
+        if (!response.Success)
+            return new QcDetectionResult(false, [], QcDetectionFailureKind.RequestError, response.Error);
 
-        string llmResponse;
-        string? stopReason;
-        var llmStopwatch = Stopwatch.StartNew();
-        try
-        {
-            (llmResponse, stopReason) = await TranslationService.TranslateMessagesWithStopReasonAsync(client, config, WithDetectionTemperature(config, modelConfig), messages, enableThinking: enableThinking);
-        }
-        catch (Exception e) when (e is HttpRequestException or OperationCanceledException)
-        {
-            RecordLlmCall(timing, llmStopwatch);
-            Console.WriteLine($"Quality review detection request error for '{rawText}': {e.Message}");
-            return new QcDetectionResult(false, [], QcDetectionFailureKind.RequestError, e.Message);
-        }
-        RecordLlmCall(timing, llmStopwatch);
-
-        var detection = QcDetectionResponseParser.Parse(llmResponse);
+        var (llmResponse, stopReason) = (response.Content, response.StopReason);
+        var detection = QcDetectionResponseParser.Parse(llmResponse, assumeDefectsPrefix: prefill);
         if (detection.Success)
             return detection;
 
@@ -946,22 +1245,131 @@ public static class QualityReviewWorkflow
     /// otherwise). A copy - the shared model config is also used by the correction calls, which keep
     /// the model's own temperature.
     /// </summary>
-    internal static ModelExecutionConfig WithDetectionTemperature(LlmConfig config, ModelExecutionConfig modelConfig)
-    {
-        if (config.QualityReview.DetectionTemperature is not { } temperature || modelConfig.ModelParams == null)
-            return modelConfig;
+    internal static ModelExecutionConfig WithDetectionTemperature(LlmConfig config, ModelExecutionConfig modelConfig) =>
+        config.QualityReview.DetectionTemperature is { } temperature && modelConfig.ModelParams != null
+            ? WithModelParam(modelConfig, "temperature", temperature)
+            : modelConfig;
 
-        return new ModelExecutionConfig
+    /// <summary>A copy of <paramref name="modelConfig"/> with one <c>modelParams</c> entry replaced.</summary>
+    private static ModelExecutionConfig WithModelParam(ModelExecutionConfig modelConfig, string name, object value) => new()
+    {
+        ApiKey = modelConfig.ApiKey,
+        ApiKeyRequired = modelConfig.ApiKeyRequired,
+        EnableThinking = modelConfig.EnableThinking,
+        Url = modelConfig.Url,
+        Model = modelConfig.Model,
+        Prompts = modelConfig.Prompts,
+        ModelParams = new Dictionary<string, object>(modelConfig.ModelParams ?? new Dictionary<string, object>()) { [name] = value },
+    };
+
+    /// <summary>How many of a pass's longest detection prompts <see cref="CheckDetectionContextBudgetAsync"/> measures.</summary>
+    private const int ContextBudgetProbeCount = 5;
+
+    /// <summary>Tokens kept free under <c>num_ctx</c> for the detection answer (a DEFECTS line is ~10-30).</summary>
+    internal const int DetectionAnswerReserveTokens = 128;
+
+    /// <summary>
+    /// The <see cref="ContextBudgetProbeCount"/> longest detection user prompts (by UTF-8 bytes, which
+    /// tracks tokens far better than chars for mixed Chinese/English) among <paramref name="workItems"/>,
+    /// built exactly as <see cref="ReviewColumnAsync"/> builds them. Shortlisted on raw + translated
+    /// size first, since the glossary scan is too slow to run over every column of a full pass.
+    /// </summary>
+    private static List<string> LongestDetectionUserPrompts(LlmConfig config, List<QcWorkItem> workItems) =>
+        workItems
+            .Select(item => (Item: item, Translated: item.Column.ComputeEffectiveTranslated()))
+            .OrderByDescending(x => Encoding.UTF8.GetByteCount(x.Item.Column.RawText) + Encoding.UTF8.GetByteCount(x.Translated))
+            .Take(ContextBudgetProbeCount * 10)
+            .Select(x =>
+            {
+                var tokenReplacer = new StringTokenReplacer();
+                var glossaryPrompt = LineContexts.WithColumnContext(config,
+                    GlossaryLine.AppendPromptsFor(x.Item.Column.RawText, config.Runtime.GlossaryLines, x.Item.File.TextFile.Path), x.Item.Column.Anchor);
+                return BuildQcUserPrompt(tokenReplacer.Replace(x.Item.Column.RawText), tokenReplacer.Replace(x.Translated), glossaryPrompt);
+            })
+            .Distinct()
+            .OrderByDescending(Encoding.UTF8.GetByteCount)
+            .Take(ContextBudgetProbeCount)
+            .ToList();
+
+    /// <summary>
+    /// Fail-fast guard before a review pass: gets the exact token count of each of
+    /// <paramref name="userPrompts"/> as a full detection prompt (Ollama's <c>prompt_eval_count</c>,
+    /// generating one token) and throws if any would not fit <c>num_ctx</c> with
+    /// <see cref="DetectionAnswerReserveTokens"/> to spare. Otherwise a prompt edit that outgrows the
+    /// context only shows up mid-run as 400s and truncated answers (Unscored rows). Skipped for a
+    /// non-Ollama endpoint or no configured <c>num_ctx</c>; a probe that can't get an answer only
+    /// warns, since the pass's own calls will surface that. See
+    /// docs/investigations/quality-review-postmortems.md.
+    /// </summary>
+    internal static async Task CheckDetectionContextBudgetAsync(LlmConfig config, ModelExecutionConfig modelConfig, HttpClient client, IReadOnlyList<string> userPrompts)
+    {
+        if (userPrompts.Count == 0
+            || modelConfig.Url?.Contains("/api/chat", StringComparison.OrdinalIgnoreCase) != true
+            || modelConfig.ModelParams?.GetValueOrDefault("num_ctx")?.ToString() is not { } numCtxText
+            || !int.TryParse(numCtxText, out var numCtx))
+            return;
+
+        var probeModel = WithModelParam(WithDetectionTemperature(config, modelConfig), "num_predict", 1);
+        var largest = 0;
+        foreach (var userPrompt in userPrompts)
         {
-            ApiKey = modelConfig.ApiKey,
-            ApiKeyRequired = modelConfig.ApiKeyRequired,
-            EnableThinking = modelConfig.EnableThinking,
-            Url = modelConfig.Url,
-            Model = modelConfig.Model,
-            Prompts = modelConfig.Prompts,
-            ModelParams = new Dictionary<string, object>(modelConfig.ModelParams) { ["temperature"] = temperature },
-        };
+            var requestData = LlmHelpers.GenerateLlmRequestData(probeModel, BuildQcMessages(probeModel, "BaseQualityReviewPrompt", userPrompt));
+            using var request = new HttpRequestMessage(HttpMethod.Post, probeModel.Url)
+            {
+                Content = new StringContent(requestData, Encoding.UTF8, "application/json"),
+            };
+            if (probeModel.ApiKeyRequired ?? false)
+                request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", probeModel.ApiKey);
+
+            string body;
+            bool success;
+            try
+            {
+                using var response = await client.SendAsync(request);
+                success = response.IsSuccessStatusCode;
+                body = await response.Content.ReadAsStringAsync();
+            }
+            catch (Exception e) when (e is HttpRequestException or OperationCanceledException)
+            {
+                Console.WriteLine($"Quality review: context check skipped - probe request failed: {e.Message}");
+                return;
+            }
+
+            if (body.Contains("exceed_context_size", StringComparison.OrdinalIgnoreCase))
+                throw ContextBudgetExceeded(numCtx, $"the server rejected it as over the context size ({body.Trim()})");
+
+            int? promptTokens = null;
+            if (success)
+            {
+                try
+                {
+                    using var json = System.Text.Json.JsonDocument.Parse(body);
+                    if (json.RootElement.TryGetProperty("prompt_eval_count", out var count) && count.TryGetInt32(out var value))
+                        promptTokens = value;
+                }
+                catch (System.Text.Json.JsonException)
+                {
+                }
+            }
+
+            if (promptTokens == null)
+            {
+                Console.WriteLine($"Quality review: context check skipped - no prompt_eval_count in probe response: {body.Trim()}");
+                return;
+            }
+
+            largest = Math.Max(largest, promptTokens.Value);
+        }
+
+        Console.WriteLine($"Quality review: largest detection prompt is {largest} tokens of num_ctx {numCtx} ({numCtx - largest} spare, {DetectionAnswerReserveTokens} reserved for the answer).");
+
+        if (largest + DetectionAnswerReserveTokens > numCtx)
+            throw ContextBudgetExceeded(numCtx, $"it measured {largest} tokens, leaving under {DetectionAnswerReserveTokens} for the answer");
     }
+
+    private static InvalidOperationException ContextBudgetExceeded(int numCtx, string detail) => new(
+        $"Quality review: the longest detection prompt in this pass does not fit num_ctx {numCtx} - {detail}. " +
+        "Shrink BaseQualityReviewPrompt.txt or raise the QC model's num_ctx before running QC.");
 
     /// <summary>
     /// Call 3 - writes ONE correction addressing every category in <paramref name="confirmedDefects"/>
@@ -982,23 +1390,9 @@ public static class QualityReviewWorkflow
         IReadOnlyList<QcDefectCategory> confirmedDefects,
         QcTimingStats? timing)
     {
-        var defectTokens = string.Join(", ", confirmedDefects.Select(QcDefectCategoryTokens.ToToken));
-
-        var userPrompt = new StringBuilder();
-        userPrompt.AppendLine($"SOURCE (Chinese): {maskedRaw}");
-        userPrompt.AppendLine($"CURRENT TRANSLATION (English): {maskedTranslated}");
-        userPrompt.AppendLine($"CONFIRMED DEFECTS: {defectTokens}");
-        if (!string.IsNullOrEmpty(glossaryPrompt))
-        {
-            userPrompt.AppendLine("Relevant glossary terms (must be preserved if they appear in SOURCE):");
-            userPrompt.AppendLine(glossaryPrompt);
-        }
-
-        var messages = new List<object>
-        {
-            LlmHelpers.GenerateSystemPrompt(modelConfig.Prompts["BaseQualityReviewCorrectionPrompt"]),
-            LlmHelpers.GenerateUserPrompt(userPrompt.ToString()),
-        };
+        var userPrompt = BuildQcUserPrompt(maskedRaw, maskedTranslated, glossaryPrompt,
+            ("CONFIRMED DEFECTS", FormatDefectTokens(confirmedDefects)));
+        var messages = BuildQcMessages(modelConfig, "BaseQualityReviewCorrectionPrompt", userPrompt);
 
         // Same inline self-heal budget GetLlmVerdictAsync's call-1 drafting used to have - see
         // QualityReviewConfig.InlineRuleCheckRetries's doc comment.
@@ -1006,39 +1400,19 @@ public static class QualityReviewWorkflow
 
         for (var attempt = 0; ; attempt++)
         {
-            string llmResponse;
-            var llmStopwatch = Stopwatch.StartNew();
-            try
-            {
-                llmResponse = await TranslationService.TranslateMessagesAsync(client, config, modelConfig, messages);
-            }
-            catch (Exception e) when (e is HttpRequestException or OperationCanceledException)
-            {
-                RecordLlmCall(timing, llmStopwatch);
-                Console.WriteLine($"Quality review correction request error for '{rawText}': {e.Message}");
+            var response = await SendQcCallAsync(client, config, modelConfig, messages, timing, "correction", rawText);
+            if (!response.Success)
                 return null;
-            }
-            RecordLlmCall(timing, llmStopwatch);
 
-            var correctedMatch = CorrectedLineRegex.Match(llmResponse);
-            var correctedRaw = correctedMatch.Success ? correctedMatch.Groups[1].Value.Trim() : string.Empty;
-
-            if (ContainsLeakedProtocolText(correctedRaw))
-            {
-                Console.WriteLine($"Quality review: generated correction for '{rawText}' contains leaked QC-protocol text - treating as unparseable. Raw response: {llmResponse}");
-                return null;
-            }
-
-            var hasCorrection = correctedMatch.Success
-                && !string.IsNullOrEmpty(correctedRaw)
-                && !correctedRaw.Equals("NONE", StringComparison.OrdinalIgnoreCase);
-
-            if (!hasCorrection)
+            var llmResponse = response.Content;
+            var correctedRaw = ParseCorrectionResponse(llmResponse,
+                $"Quality review: generated correction for '{rawText}' contains leaked QC-protocol text - treating as unparseable.");
+            if (correctedRaw == null)
                 return null;
 
             var badWordMatches = TranslationWorkflow.FindBadWordMatches(correctedRaw);
             if (badWordMatches.Count == 0 || attempt >= maxInlineRetries)
-                return correctedRaw;
+                return MatchSourceNewlines(correctedRaw, maskedRaw);
 
             Console.WriteLine($"Quality review: correction for '{rawText}' matched the bad-words list ({string.Join(", ", badWordMatches)}) - inline retry {attempt + 1}/{maxInlineRetries}.");
             TranslationService.AddCorrectionMessages(
@@ -1083,7 +1457,8 @@ public static class QualityReviewWorkflow
         string maskedRaw,
         string maskedTranslated,
         string glossaryPrompt,
-        QcTimingStats? timing = null)
+        QcTimingStats? timing = null,
+        Func<string, string?>? candidateValidator = null)
     {
         var call1 = await DetectDefectsAsync(config, modelConfig, client, rawText, maskedRaw, maskedTranslated, glossaryPrompt, timing);
         if (!call1.Success)
@@ -1143,6 +1518,24 @@ public static class QualityReviewWorkflow
 
         for (var repairAttempt = 0; ; repairAttempt++)
         {
+            // QualityReviewConfig.PreVerificationGateEnabled: a candidate the validation gate would
+            // reject is never verified - repair it against the gate's own reason instead. Score 0 on
+            // the exits below is never used: ReviewColumnAsync's final gate rejects the candidate.
+            var gateFailure = candidateValidator?.Invoke(candidate);
+            if (gateFailure != null)
+            {
+                // A blank reason gives the repair nothing to act on.
+                if (repairAttempt >= maxRepairAttempts || string.IsNullOrWhiteSpace(gateFailure))
+                    return new LlmVerdict(true, 0, candidate, Primary(namedDefects), BuildFindings(namedDefects));
+
+                var gateRepaired = await GetCorrectionRepairAsync(config, modelConfig, client, rawText, maskedRaw, maskedTranslated, glossaryPrompt, namedDefects, candidate, timing, gateFailure);
+                if (gateRepaired == null || string.Equals(gateRepaired, candidate, StringComparison.Ordinal))
+                    return new LlmVerdict(true, 0, candidate, Primary(namedDefects), BuildFindings(namedDefects));
+
+                candidate = gateRepaired;
+                continue;
+            }
+
             // Call 4 always verifies against the FULL confirmed set, never a shrinking "still open"
             // list - so a repair attempt that regresses an already-fixed defect is caught, not
             // silently missed.
@@ -1161,8 +1554,16 @@ public static class QualityReviewWorkflow
                 // validation rules) decide whether it's actually usable.
                 return new LlmVerdict(true, verification.Score, candidate, Primary(toFix), BuildFindings(toFix));
 
-            var repaired = await GetCorrectionRepairAsync(config, modelConfig, client, rawText, maskedRaw, maskedTranslated, glossaryPrompt, toFix, candidate, timing);
+            var repaired = await GetCorrectionRepairAsync(config, modelConfig, client, rawText, maskedRaw, maskedTranslated, glossaryPrompt, toFix, candidate, timing,
+                verifierEvidence: FormatVerifierEvidence(verification, toFix));
             if (repaired == null)
+                return new LlmVerdict(true, verification.Score, candidate, Primary(toFix), BuildFindings(toFix));
+
+            // A repair that hands the candidate back unchanged cannot move the verdict: re-verifying
+            // identical text repeats the same rejection and the next repair repeats the same no-op.
+            // Stop here and let the last verification stand, exactly as for a failed repair above.
+            // (Measured 2026-10-03: 13 of 21 repairs on a defect-heavy batch were no-ops.)
+            if (string.Equals(repaired, candidate, StringComparison.Ordinal))
                 return new LlmVerdict(true, verification.Score, candidate, Primary(toFix), BuildFindings(toFix));
 
             candidate = repaired;
@@ -1203,34 +1604,15 @@ public static class QualityReviewWorkflow
         GameHooks? hooks = null)
     {
         var config = ConfigurationExtensions.GetConfiguration(workingDirectory, hooks);
-
-        if (string.IsNullOrEmpty(config.QualityReview.ModelName)
-            || !config.Runtime.Models.TryGetValue(config.QualityReview.ModelName, out var modelConfig))
-        {
-            throw new InvalidOperationException(
-                $"QualityReview.ModelName '{config.QualityReview.ModelName}' does not match any configured model. " +
-                $"Configured model names: {string.Join(", ", config.Runtime.Models.Keys)}");
-        }
+        var modelConfig = ResolveQcModelConfig(config);
 
         using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(300) };
         var results = new List<QcProbeResult>();
 
         foreach (var sample in samples)
         {
-            var reviewPrompt = new StringBuilder();
-            reviewPrompt.AppendLine($"SOURCE (Chinese): {sample.Source}");
-            reviewPrompt.AppendLine($"CURRENT TRANSLATION (English): {sample.Translation}");
-            if (!string.IsNullOrEmpty(sample.GlossaryPrompt))
-            {
-                reviewPrompt.AppendLine("Relevant glossary terms (must be preserved if they appear in SOURCE):");
-                reviewPrompt.AppendLine(sample.GlossaryPrompt);
-            }
-
-            var reviewMessages = new List<object>
-            {
-                LlmHelpers.GenerateSystemPrompt(modelConfig.Prompts["BaseQualityReviewPrompt"]),
-                LlmHelpers.GenerateUserPrompt(reviewPrompt.ToString()),
-            };
+            var reviewMessages = BuildQcMessages(modelConfig, "BaseQualityReviewPrompt",
+                BuildQcUserPrompt(sample.Source, sample.Translation, sample.GlossaryPrompt));
             var reviewRaw = await TranslationService.TranslateMessagesAsync(client, config, modelConfig, reviewMessages, enableThinking: true);
 
             results.Add(new QcProbeResult(sample, reviewRaw));
@@ -1267,44 +1649,25 @@ public static class QualityReviewWorkflow
         string proposedCorrectionMasked,
         QcTimingStats? timing = null)
     {
-        var defectTokens = string.Join(", ", confirmedDefects.Select(QcDefectCategoryTokens.ToToken));
+        var userPrompt = BuildQcUserPrompt(maskedRaw, maskedTranslated, glossaryPrompt,
+            ("CONFIRMED DEFECTS", FormatDefectTokens(confirmedDefects)),
+            ("PROPOSED CORRECTION", proposedCorrectionMasked));
+        var useEvidence = config.QualityReview.VerificationEvidenceEnabled
+            && modelConfig.Prompts.ContainsKey("BaseQualityReviewVerificationEvidencePrompt");
+        var messages = BuildQcMessages(modelConfig,
+            useEvidence ? "BaseQualityReviewVerificationEvidencePrompt" : "BaseQualityReviewVerificationPrompt", userPrompt);
 
-        var userPrompt = new StringBuilder();
-        userPrompt.AppendLine($"SOURCE (Chinese): {maskedRaw}");
-        userPrompt.AppendLine($"CURRENT TRANSLATION (English): {maskedTranslated}");
-        userPrompt.AppendLine($"CONFIRMED DEFECTS: {defectTokens}");
-        userPrompt.AppendLine($"PROPOSED CORRECTION: {proposedCorrectionMasked}");
-        if (!string.IsNullOrEmpty(glossaryPrompt))
-        {
-            userPrompt.AppendLine("Relevant glossary terms (must be preserved if they appear in SOURCE):");
-            userPrompt.AppendLine(glossaryPrompt);
-        }
-
-        var messages = new List<object>
-        {
-            LlmHelpers.GenerateSystemPrompt(modelConfig.Prompts["BaseQualityReviewVerificationPrompt"]),
-            LlmHelpers.GenerateUserPrompt(userPrompt.ToString()),
-        };
-
-        string llmResponse;
-        var llmStopwatch = Stopwatch.StartNew();
-        try
-        {
-            llmResponse = await TranslationService.TranslateMessagesAsync(client, config, modelConfig, messages, enableThinking: config.QualityReview.VerificationThinkingEnabled);
-        }
-        catch (Exception e) when (e is HttpRequestException or OperationCanceledException)
-        {
-            RecordLlmCall(timing, llmStopwatch);
-            Console.WriteLine($"Quality review verification request error for '{rawText}': {e.Message}");
+        var response = await SendQcCallAsync(client, config, modelConfig, messages, timing, "verification", rawText, config.QualityReview.VerificationThinkingEnabled);
+        if (!response.Success)
             return new QcVerificationResult(false, [], [], 0);
-        }
-        RecordLlmCall(timing, llmStopwatch);
+
+        var llmResponse = response.Content;
 
         var result = QcVerificationResponseParser.Parse(llmResponse, confirmedDefects);
         if (!result.Success)
             Console.WriteLine($"Quality review: could not parse verification response for '{rawText}' - treating as unscored. Raw response: {llmResponse}");
 
-        return result;
+        return useEvidence ? QcVerificationResponseParser.FilterByEvidence(result, maskedRaw, proposedCorrectionMasked) : result;
     }
 
     /// <summary>
@@ -1315,7 +1678,11 @@ public static class QualityReviewWorkflow
     /// all of them together - never re-derives the confirmed set, never scores, single job. The loop
     /// always sends its result back through <see cref="GetVerificationVerdictAsync"/>, verified
     /// against the FULL original confirmed set again, before trusting it (this call never grades its
-    /// own rewrite).
+    /// own rewrite). <paramref name="ruleCheckFailure"/>, when given, is the validation gate's reason
+    /// for rejecting <paramref name="previousAttemptMasked"/> (see
+    /// <see cref="QualityReviewConfig.PreVerificationGateEnabled"/>), sent as a RULE CHECK FAILURE line;
+    /// <paramref name="verifierEvidence"/> is the verifier's quotes for the target defects (see
+    /// <see cref="QualityReviewConfig.VerificationEvidenceEnabled"/>), sent as a VERIFIER EVIDENCE line.
     ///
     /// Returns null - not a distinguishable "keep trying" signal - on a request error, an unparseable
     /// response, leaked protocol text, or an explicit <c>CORRECTED: NONE</c> (call 5 couldn't improve
@@ -1332,54 +1699,29 @@ public static class QualityReviewWorkflow
         string glossaryPrompt,
         IReadOnlyList<QcDefectCategory> targetDefects,
         string previousAttemptMasked,
-        QcTimingStats? timing = null)
+        QcTimingStats? timing = null,
+        string? ruleCheckFailure = null,
+        string? verifierEvidence = null)
     {
-        var defectTokens = string.Join(", ", targetDefects.Select(QcDefectCategoryTokens.ToToken));
-
-        var userPrompt = new StringBuilder();
-        userPrompt.AppendLine($"SOURCE (Chinese): {maskedRaw}");
-        userPrompt.AppendLine($"CURRENT TRANSLATION (English): {maskedTranslated}");
-        userPrompt.AppendLine($"TARGET DEFECTS: {defectTokens}");
-        userPrompt.AppendLine($"PREVIOUS ATTEMPT: {previousAttemptMasked}");
-        if (!string.IsNullOrEmpty(glossaryPrompt))
+        var fields = new List<(string, string)>
         {
-            userPrompt.AppendLine("Relevant glossary terms (must be preserved if they appear in SOURCE):");
-            userPrompt.AppendLine(glossaryPrompt);
-        }
-
-        var messages = new List<object>
-        {
-            LlmHelpers.GenerateSystemPrompt(modelConfig.Prompts["BaseQualityReviewCorrectionRepairPrompt"]),
-            LlmHelpers.GenerateUserPrompt(userPrompt.ToString()),
+            ("TARGET DEFECTS", FormatDefectTokens(targetDefects)),
+            ("PREVIOUS ATTEMPT", previousAttemptMasked),
         };
+        if (ruleCheckFailure != null)
+            fields.Add(("RULE CHECK FAILURE", ruleCheckFailure));
+        if (verifierEvidence != null)
+            fields.Add(("VERIFIER EVIDENCE", verifierEvidence));
+        var userPrompt = BuildQcUserPrompt(maskedRaw, maskedTranslated, glossaryPrompt, [.. fields]);
+        var messages = BuildQcMessages(modelConfig, "BaseQualityReviewCorrectionRepairPrompt", userPrompt);
 
-        string llmResponse;
-        var llmStopwatch = Stopwatch.StartNew();
-        try
-        {
-            llmResponse = await TranslationService.TranslateMessagesAsync(client, config, modelConfig, messages);
-        }
-        catch (Exception e) when (e is HttpRequestException or OperationCanceledException)
-        {
-            RecordLlmCall(timing, llmStopwatch);
-            Console.WriteLine($"Quality review repair request error for '{rawText}': {e.Message}");
+        var response = await SendQcCallAsync(client, config, modelConfig, messages, timing, "repair", rawText);
+        if (!response.Success)
             return null;
-        }
-        RecordLlmCall(timing, llmStopwatch);
 
-        var correctedMatch = CorrectedLineRegex.Match(llmResponse);
-        var correctedRaw = correctedMatch.Success ? correctedMatch.Groups[1].Value.Trim() : string.Empty;
-        if (ContainsLeakedProtocolText(correctedRaw))
-        {
-            Console.WriteLine($"Quality review: repair correction for '{rawText}' contains leaked QC-protocol text - keeping previous attempt. Raw response: {llmResponse}");
-            return null;
-        }
-
-        var hasCorrection = correctedMatch.Success
-            && !string.IsNullOrEmpty(correctedRaw)
-            && !correctedRaw.Equals("NONE", StringComparison.OrdinalIgnoreCase);
-
-        return hasCorrection ? correctedRaw : null;
+        var repaired = ParseCorrectionResponse(response.Content,
+            $"Quality review: repair correction for '{rawText}' contains leaked QC-protocol text - keeping previous attempt.");
+        return repaired == null ? null : MatchSourceNewlines(repaired, maskedRaw);
     }
 
     /// <summary>
@@ -1436,6 +1778,14 @@ public static class QualityReviewWorkflow
     /// </summary>
     public static async Task RunBruteForce(string workingDirectory, TextFileToSplit[] textFiles, int? sampleSize = null, int maxIterations = 5, GameHooks? hooks = null)
     {
+        // Config and the corpus are loaded once for the whole loop - every iteration's review pass
+        // and rule check work on the same in-memory file states, and each only writes back the
+        // files it actually changed.
+        var config = ConfigurationExtensions.GetConfiguration(workingDirectory, hooks);
+        var qcModelConfig = TryGetQcModelConfig(config, out var resolvedQcModel) ? resolvedQcModel : null;
+        var fileStates = await LoadFileStatesAsync(workingDirectory, textFiles);
+        ModelExecutionConfig? reviewModelConfig = null;
+
         var iterations = 0;
         int flagged;
         int reviewed;
@@ -1444,12 +1794,21 @@ public static class QualityReviewWorkflow
         // word change made since) before spending an LLM call reviewing it - RunAsync's own
         // freshness check would eventually catch this too, but only after this reset makes it
         // non-fresh.
-        await ApplyRulesToCurrentQcTranslated(workingDirectory, textFiles, hooks);
+        ApplyRulesToFileStates(config, qcModelConfig, fileStates);
 
         do
         {
-            reviewed = await RunAsync(workingDirectory, textFiles, sampleSize, hooks);
-            flagged = await ApplyRulesToCurrentQcTranslated(workingDirectory, textFiles, hooks);
+            if (IsReviewEnabled(config))
+            {
+                reviewModelConfig ??= ResolveReviewModelConfig(config);
+                reviewed = await ReviewFileStatesAsync(config, reviewModelConfig, fileStates, sampleSize);
+            }
+            else
+            {
+                reviewed = 0;
+            }
+
+            flagged = ApplyRulesToFileStates(config, qcModelConfig, fileStates);
             iterations++;
         }
         while ((flagged > 0 || reviewed > 0) && iterations < maxIterations);
@@ -1502,6 +1861,7 @@ public static class QualityReviewWorkflow
     public static async Task<int> ApplyRulesToCurrentQcTranslated(string workingDirectory, TextFileToSplit[] textFiles, GameHooks? hooks = null)
     {
         var config = ConfigurationExtensions.GetConfiguration(workingDirectory, hooks);
+        var qcModelConfig = TryGetQcModelConfig(config, out var resolvedQcModel) ? resolvedQcModel : null;
         var serializer = YamlHelper.CreateSerializer();
         var totalFlagged = 0;
         var totalGivenUp = 0;
@@ -1511,57 +1871,7 @@ public static class QualityReviewWorkflow
             if (!textFile.EnableQualityReview)
                 return;
 
-            var fileModified = false;
-            var fileFlagged = 0;
-            var fileGivenUp = 0;
-
-            foreach (var line in fileLines)
-            {
-                foreach (var columnGroup in line.Splits.GroupBy(ColumnKey))
-                {
-                    var fragments = columnGroup.OrderBy(s => s.SubIndex).ToList();
-                    var anchor = fragments.FirstOrDefault(f => f.SubIndex == 0) ?? fragments[0];
-
-                    // A column left NotReviewed mid-retry (QcRuleCheckFailureCount > 0) has nothing
-                    // for ApplyRulesToQcColumn to repair/validate - it's waiting on RunAsync, not on
-                    // this rule-check. But it still represents unfinished work, and RunAsync's own
-                    // reviewedCount won't reflect that if the LLM call for it errored or returned an
-                    // unparseable response this pass (ReviewColumnAsync deliberately leaves such a
-                    // column's state untouched rather than guessing - see its QcOutcome.Skipped
-                    // branch). Without counting it here too, RunBruteForce's loop could see
-                    // "0 reviewed, 0 to reset" and stop even though this column never actually got
-                    // its next real attempt.
-                    if (anchor.QcStatus == QcStatus.NotReviewed)
-                    {
-                        if (anchor.QcRuleCheckFailureCount > 0)
-                            fileFlagged++;
-                        continue;
-                    }
-
-                    // Corrected columns get the full rule re-check below; Passed columns skip
-                    // straight to the low-score retry check inside ApplyRulesToQcColumn (there's no
-                    // QcTranslated of their own to repair/validate). FailedValidation is out of scope
-                    // here - it's a terminal state (see ResetQcRetryLimits to un-stick one manually).
-                    if (anchor.QcStatus != QcStatus.Corrected && anchor.QcStatus != QcStatus.Passed)
-                        continue;
-                    if (anchor.QcStatus == QcStatus.Corrected && string.IsNullOrEmpty(anchor.QcTranslated))
-                        continue;
-
-                    var template = line.Templates.FirstOrDefault(t => ColumnKey(t) == columnGroup.Key);
-                    var rawText = template != null
-                        ? CompoundFieldSplitter.Reconstruct(template.Template, fragments.Select(f => f.Text).ToList())
-                        : anchor.Text;
-                    var priorTranslated = QualityReviewHelpers.ComputeEffectiveTranslatedText(anchor, template, fragments);
-
-                    var (changed, needsRetry, gaveUp) = ApplyRulesToQcColumn(config, anchor, textFile, rawText, priorTranslated);
-                    if (changed)
-                        fileModified = true;
-                    if (needsRetry)
-                        fileFlagged++;
-                    if (gaveUp)
-                        fileGivenUp++;
-                }
-            }
+            var (fileModified, fileFlagged, fileGivenUp) = ApplyRulesToFileLines(config, qcModelConfig, textFile, fileLines);
 
             if (fileModified)
                 await FileHelper.WriteAllTextWithRetryAsync(outputFile, serializer.Serialize(fileLines));
@@ -1570,10 +1880,96 @@ public static class QualityReviewWorkflow
             Interlocked.Add(ref totalGivenUp, fileGivenUp);
         });
 
+        LogRuleCheckTotals(totalFlagged, totalGivenUp);
+        return totalFlagged;
+    }
+
+    /// <summary>
+    /// <see cref="ApplyRulesToCurrentQcTranslated"/> over <see cref="RunBruteForce"/>'s already-loaded
+    /// file states - a changed file is written back immediately, an unchanged one never is.
+    /// </summary>
+    private static int ApplyRulesToFileStates(LlmConfig config, ModelExecutionConfig? qcModelConfig, List<QcFileState> fileStates)
+    {
+        var totalFlagged = 0;
+        var totalGivenUp = 0;
+
+        Parallel.ForEach(fileStates, new ParallelOptions { MaxDegreeOfParallelism = FileIteration.MaxParallelFiles }, file =>
+        {
+            var (fileModified, fileFlagged, fileGivenUp) = ApplyRulesToFileLines(config, qcModelConfig, file.TextFile, file.FileLines);
+
+            if (fileModified)
+            {
+                file.Writer.RecordChange();
+                file.Writer.Flush();
+            }
+
+            Interlocked.Add(ref totalFlagged, fileFlagged);
+            Interlocked.Add(ref totalGivenUp, fileGivenUp);
+        });
+
+        LogRuleCheckTotals(totalFlagged, totalGivenUp);
+        return totalFlagged;
+    }
+
+    private static void LogRuleCheckTotals(int totalFlagged, int totalGivenUp)
+    {
         if (totalFlagged > 0 || totalGivenUp > 0)
             Console.WriteLine($"Quality review rule check: {totalFlagged} column(s) reset for re-review (rule violation or low score), {totalGivenUp} gave up after exhausting retries and were left for human review.");
+    }
 
-        return totalFlagged;
+    /// <summary>One file's worth of <see cref="ApplyRulesToCurrentQcTranslated"/>.</summary>
+    private static (bool modified, int flagged, int givenUp) ApplyRulesToFileLines(
+        LlmConfig config,
+        ModelExecutionConfig? qcModelConfig,
+        TextFileToSplit textFile,
+        List<TranslationLine> fileLines)
+    {
+        var fileModified = false;
+        var fileFlagged = 0;
+        var fileGivenUp = 0;
+
+        foreach (var line in fileLines)
+        {
+            foreach (var column in EnumerateColumns(line))
+            {
+                var anchor = column.Anchor;
+
+                // A column left NotReviewed mid-retry (QcRuleCheckFailureCount > 0) has nothing
+                // for ApplyRulesToQcColumn to repair/validate - it's waiting on RunAsync, not on
+                // this rule-check. But it still represents unfinished work, and RunAsync's own
+                // reviewedCount won't reflect that if the LLM call for it errored or returned an
+                // unparseable response this pass (ReviewColumnAsync deliberately leaves such a
+                // column's state untouched rather than guessing - see its QcOutcome.Skipped
+                // branch). Without counting it here too, RunBruteForce's loop could see
+                // "0 reviewed, 0 to reset" and stop even though this column never actually got
+                // its next real attempt.
+                if (anchor.QcStatus == QcStatus.NotReviewed)
+                {
+                    if (anchor.QcRuleCheckFailureCount > 0)
+                        fileFlagged++;
+                    continue;
+                }
+
+                // Corrected columns get the full rule re-check below; Passed columns skip
+                // straight to the low-score retry check inside ApplyRulesToQcColumn (there's no
+                // QcTranslated of their own to repair/validate). FailedValidation is out of scope
+                // here - it's a terminal state (see ResetQcRetryLimits to un-stick one manually).
+                if (anchor.QcStatus != QcStatus.Corrected && anchor.QcStatus != QcStatus.Passed)
+                    continue;
+                if (anchor.QcStatus == QcStatus.Corrected && string.IsNullOrEmpty(anchor.QcTranslated))
+                    continue;
+
+                var (changed, needsRetry, gaveUp) = ApplyRulesToQcColumn(config, qcModelConfig, anchor, textFile, column.RawText, column.ComputeEffectiveTranslated());
+                if (changed)
+                    fileModified = true;
+                if (needsRetry)
+                    fileFlagged++;
+                if (gaveUp)
+                    fileGivenUp++;
+            }
+        }
+
+        return (fileModified, fileFlagged, fileGivenUp);
     }
 
     /// <summary>
@@ -1583,9 +1979,12 @@ public static class QualityReviewWorkflow
     /// by <see cref="CheckCapitalizationRegression"/> (exactly as <see cref="ReviewColumnAsync"/>
     /// uses it) and as the retry-counter baseline for a <see cref="QcStatus.Passed"/> column, which
     /// has no <see cref="TranslationSplit.QcTranslated"/> of its own to key off.
+    /// <paramref name="qcModelConfig"/> is the QC model the correction was validated against (see
+    /// <see cref="RuleCheckModelConfig"/>).
     /// </summary>
-    private static (bool changed, bool needsRetry, bool gaveUp) ApplyRulesToQcColumn(
+    internal static (bool changed, bool needsRetry, bool gaveUp) ApplyRulesToQcColumn(
         LlmConfig config,
+        ModelExecutionConfig? qcModelConfig,
         TranslationSplit anchor,
         TextFileToSplit textFile,
         string rawText,
@@ -1607,60 +2006,34 @@ public static class QualityReviewWorkflow
         if (changed)
             anchor.QcTranslated = current = cleaned;
 
-        // Tier 2: the exact same shared rule list ReviewColumnAsync's validation gate runs against a
-        // freshly proposed correction (see TranslationWorkflow.EvaluateRules) - anything that fails
-        // here can't be fixed deterministically, so the column is reset for a fresh LLM review
-        // instead. preparedRaw is rawText's CJK-punctuation-normalized form (null tokenReplacer - no
-        // masking needed here, nothing downstream needs to Restore it) - see ReviewColumnAsync's
-        // matching comment for why this matters (e.g. the ellipsis check).
-        var modelConfig = LlmHelpers.CalculateModelConfig(config, rawText);
-        var preparedRaw = LineValidation.PrepareRaw(rawText, null);
-        var ruleResult = TranslationWorkflow.EvaluateRules(config, modelConfig, preparedRaw, rawText, current, textFile, anchor.Split);
-        var capsFailureReason = CheckCapitalizationRegression(priorTranslated, current);
-
-        var failureReason = capsFailureReason ?? ruleResult.AllReasons.FirstOrDefault();
+        // Tier 2: the exact same validation gate ReviewColumnAsync runs against a freshly proposed
+        // correction (see EvaluateQcCandidate) - anything that fails here can't be fixed
+        // deterministically, so the column is reset for a fresh LLM review instead.
+        var failureReason = EvaluateQcCandidate(config, RuleCheckModelConfig(config, qcModelConfig, rawText), rawText, current, priorTranslated, textFile, anchor.Split);
 
         if (failureReason == null)
         {
             // Structurally clean - mirrors ReviewColumnAsync's fix: a low QcQualityScore is not
             // grounds to wake an already-validated Corrected column back up (see "Postmortems"
-            // bug #3, docs/quality-review-pass-architecture.md). Just tidy up the retry counters.
-            var hadFailureHistory = anchor.QcRuleCheckFailureCount != 0 || anchor.QcRuleCheckFailureBaseline != string.Empty;
-            anchor.QcRuleCheckFailureCount = 0;
-            anchor.QcRuleCheckFailureBaseline = string.Empty;
+            // bug #3, docs/investigations/quality-review-postmortems.md). Just tidy up the retry counters.
+            var hadFailureHistory = ClearRuleCheckFailureHistory(anchor);
             return (changed || hadFailureHistory, needsRetry: false, gaveUp: false);
         }
 
-        // Same underlying Translated as last time this column failed? Keep counting toward the
-        // retry cap. Anything else (first failure ever, or Translated changed since - a
-        // retranslation, manual fix, or repair) starts the count over: that's a different piece of
-        // text with no accumulated history of its own, so it deserves a full retry budget.
-        anchor.QcRuleCheckFailureCount = anchor.QcRuleCheckFailureBaseline == priorTranslated
-            ? anchor.QcRuleCheckFailureCount + 1
-            : 1;
-        anchor.QcRuleCheckFailureBaseline = priorTranslated;
-
-        if (anchor.QcRuleCheckFailureCount > config.QualityReview.MaxRuleCheckRetries)
+        if (RecordRuleCheckFailure(config, anchor, priorTranslated))
         {
             // Given up: discard the correction (same safe fallback to Translated as every other
-            // reset), but land on FailedValidation instead of NotReviewed so RunAsync stops
-            // re-reviewing it and it surfaces for a human via GetFlaggedQcReviews, exactly like a
-            // freshly-rejected correction already does. QcReviewedText = priorTranslated marks it
-            // "fresh" so packaging/RunAsync don't treat it as needing another look. QcQualityScore
-            // must be cleared too - packaging's low-score gate (TranslationPackaging.cs) checks
-            // "qcFresh && QcQualityScore < minAcceptableScore" BEFORE it ever reaches the
-            // QcTranslated-empty fallback to Translated, so leaving behind whatever score this
-            // column had from its original (now-discarded) Corrected acceptance would make the
-            // whole line fail outright (raw source shipped) instead of the intended clean fallback.
+            // reset), but land on FailedValidation (MarkQcGivenUp - the same terminal shape a
+            // freshly-rejected correction gets) instead of NotReviewed so RunAsync stops
+            // re-reviewing it and it surfaces for a human via GetFlaggedQcReviews.
+            // QcReviewedText = priorTranslated marks it "fresh" so packaging/RunAsync don't treat
+            // it as needing another look.
             Console.WriteLine($"Quality review rule check: {textFile.Path} gave up after {anchor.QcRuleCheckFailureCount} retries ({failureReason}) \n{current}");
             anchor.QcTranslated = string.Empty;
-            anchor.QcStatus = QcStatus.FailedValidation;
             anchor.QcReviewedText = priorTranslated;
             anchor.QcRejectedCorrection = current;
             anchor.QcFailureReason = $"Gave up after {anchor.QcRuleCheckFailureCount} rule-check retries: {failureReason}";
-            anchor.QcQualityScore = null;
-            anchor.QcDefectCategory = QcDefectCategory.Unknown;
-            anchor.FlaggedForQcReview = true;
+            MarkQcGivenUp(anchor);
             // Not counted as "needsRetry" - a given-up column lands on FailedValidation, which
             // RunAsync won't touch again, so another RunBruteForce iteration would find no further
             // work for it. Only "still-retriable" resets should drive that loop's continuation.
@@ -1671,12 +2044,11 @@ public static class QualityReviewWorkflow
         anchor.ResetQcState(); // Leaves QcRuleCheckFailureCount/Baseline alone - see their doc comments.
         return (true, needsRetry: true, gaveUp: false);
     }
-
     /// <summary>
     /// Only called for a <see cref="QcStatus.Passed"/> column now (see <see cref="ApplyRulesToQcColumn"/>'s
     /// early return and its own Corrected-column branch) - a Corrected column's already-validated
     /// QcTranslated is no longer woken up purely for a low score (see "Postmortems" bug #3,
-    /// docs/quality-review-pass-architecture.md). A Passed column has nothing of its own to lose by
+    /// docs/investigations/quality-review-postmortems.md). A Passed column has nothing of its own to lose by
     /// retrying, though: if <paramref name="anchor"/>'s current
     /// <see cref="TranslationSplit.QcQualityScore"/> is still below
     /// <see cref="Configuration.QualityReviewConfig.MinAcceptableScore"/>, wakes it up
@@ -1701,9 +2073,7 @@ public static class QualityReviewWorkflow
 
         if (scoreOk)
         {
-            var hadFailureHistory = anchor.QcRuleCheckFailureCount != 0 || anchor.QcRuleCheckFailureBaseline != string.Empty;
-            anchor.QcRuleCheckFailureCount = 0;
-            anchor.QcRuleCheckFailureBaseline = string.Empty;
+            var hadFailureHistory = ClearRuleCheckFailureHistory(anchor);
             return (alreadyChanged || hadFailureHistory, needsRetry: false, gaveUp: false);
         }
 
@@ -1734,27 +2104,69 @@ public static class QualityReviewWorkflow
     /// </summary>
     public static async Task ResetQcRetryLimits(string workingDirectory, TextFileToSplit[] textFiles)
     {
+        await ResetColumnsAsync(workingDirectory, textFiles, (column, _) =>
+        {
+            var anchor = column.Anchor;
+            var changed = ClearRuleCheckFailureHistory(anchor);
+
+            if (anchor.QcStatus == QcStatus.FailedValidation)
+            {
+                anchor.ResetQcState();
+                changed = true;
+            }
+
+            return changed;
+        });
+    }
+
+    /// <summary>
+    /// The shared sweep behind every Reset* method: visits every column (see <see cref="EnumerateColumns"/>)
+    /// of every Converted file in <paramref name="textFiles"/>, lets <paramref name="resetColumn"/> mutate
+    /// it and report whether it changed anything, and writes back only the files that changed.
+    /// Returns how many columns changed across the corpus.
+    /// </summary>
+    private static async Task<int> ResetColumnsAsync(string workingDirectory, TextFileToSplit[] textFiles, Func<QcColumn, TextFileToSplit, bool> resetColumn)
+    {
         var serializer = YamlHelper.CreateSerializer();
+        var totalReset = 0;
 
         await FileIteration.IterateTranslatedFilesInParallelAsync(workingDirectory, textFiles, async (outputFile, textFile, fileLines) =>
         {
+            var resetCount = 0;
+
             foreach (var line in fileLines)
             {
-                foreach (var columnGroup in line.Splits.GroupBy(ColumnKey))
+                foreach (var column in EnumerateColumns(line))
                 {
-                    var anchor = columnGroup.OrderBy(s => s.SubIndex).FirstOrDefault(f => f.SubIndex == 0) ?? columnGroup.First();
-
-                    anchor.QcRuleCheckFailureCount = 0;
-                    anchor.QcRuleCheckFailureBaseline = string.Empty;
-
-                    if (anchor.QcStatus == QcStatus.FailedValidation)
-                        anchor.ResetQcState();
+                    if (resetColumn(column, textFile))
+                        resetCount++;
                 }
             }
 
-            await FileHelper.WriteAllTextWithRetryAsync(outputFile, serializer.Serialize(fileLines));
+            if (resetCount > 0)
+            {
+                Interlocked.Add(ref totalReset, resetCount);
+                await FileHelper.WriteAllTextWithRetryAsync(outputFile, serializer.Serialize(fileLines));
+            }
         });
+
+        return totalReset;
     }
+
+    /// <summary>True when <paramref name="split"/> carries no QC state at all (what
+    /// <see cref="TranslationSplit.ResetQcState"/> plus a cleared retry counter leave behind).</summary>
+    private static bool HasNoQcState(TranslationSplit split) =>
+        split.QcStatus == QcStatus.NotReviewed
+        && string.IsNullOrEmpty(split.QcTranslated)
+        && string.IsNullOrEmpty(split.QcReviewedText)
+        && !split.FlaggedForQcReview
+        && string.IsNullOrEmpty(split.QcRejectedCorrection)
+        && string.IsNullOrEmpty(split.QcFailureReason)
+        && split.QcQualityScore == null
+        && split.QcDefectCategory == QcDefectCategory.Unknown
+        && (split.QcDefectCategories == null || split.QcDefectCategories.Count == 0)
+        && split.QcRuleCheckFailureCount == 0
+        && string.IsNullOrEmpty(split.QcRuleCheckFailureBaseline);
 
     /// <summary>
     /// Full do-over: wipes EVERY column's Qc* state back to <see cref="QcStatus.NotReviewed"/>
@@ -1773,28 +2185,30 @@ public static class QualityReviewWorkflow
     /// <see cref="TranslationSplit.Translated"/> changed, never whether the model/prompt that
     /// produced an existing <see cref="QcStatus.Passed"/>/<see cref="QcStatus.Corrected"/> verdict
     /// did, so a prompt/model change alone would otherwise never trigger a re-review of anything
-    /// already reviewed. See docs/quality-review-pass-architecture.md's "Postmortems" section for
+    /// already reviewed. See docs/investigations/quality-review-postmortems.md's "Postmortems" section for
     /// the case that prompted adding this: a fix to the omitted-subject QC rule and to a low-score-
     /// discard retry bug both mean a PRIOR verdict may be less trustworthy than its stored status
     /// suggests, with nothing about the column's own text having changed to signal that.
     /// </summary>
     public static async Task ResetAllQcState(string workingDirectory, TextFileToSplit[] textFiles)
     {
-        var serializer = YamlHelper.CreateSerializer();
-
-        await FileIteration.IterateTranslatedFilesInParallelAsync(workingDirectory, textFiles, async (outputFile, textFile, fileLines) =>
+        // Every split, not just each column's anchor - a fragment can still carry stray Qc* state.
+        await ResetColumnsAsync(workingDirectory, textFiles, (column, _) =>
         {
-            foreach (var line in fileLines)
+            var changed = false;
+
+            foreach (var split in column.Fragments)
             {
-                foreach (var split in line.Splits)
-                {
-                    split.ResetQcState();
-                    split.QcRuleCheckFailureCount = 0;
-                    split.QcRuleCheckFailureBaseline = string.Empty;
-                }
+                if (HasNoQcState(split))
+                    continue;
+
+                split.ResetQcState();
+                split.QcRuleCheckFailureCount = 0;
+                split.QcRuleCheckFailureBaseline = string.Empty;
+                changed = true;
             }
 
-            await FileHelper.WriteAllTextWithRetryAsync(outputFile, serializer.Serialize(fileLines));
+            return changed;
         });
     }
 
@@ -1813,30 +2227,25 @@ public static class QualityReviewWorkflow
     /// </summary>
     public static async Task ResetLeakedQcCorrections(string workingDirectory, TextFileToSplit[] textFiles)
     {
-        var serializer = YamlHelper.CreateSerializer();
-
-        await FileIteration.IterateTranslatedFilesInParallelAsync(workingDirectory, textFiles, async (outputFile, textFile, fileLines) =>
+        // Every split, not just each column's anchor - see this method's doc comment.
+        await ResetColumnsAsync(workingDirectory, textFiles, (column, textFile) =>
         {
-            var resetCount = 0;
+            var changed = false;
 
-            foreach (var line in fileLines)
+            foreach (var split in column.Fragments)
             {
-                foreach (var split in line.Splits)
-                {
-                    var leaked = ContainsLeakedProtocolText(split.QcTranslated)
-                        || ContainsLeakedProtocolText(split.QcRejectedCorrection);
+                var leaked = ContainsLeakedProtocolText(split.QcTranslated)
+                    || ContainsLeakedProtocolText(split.QcRejectedCorrection);
 
-                    if (!leaked)
-                        continue;
+                if (!leaked)
+                    continue;
 
-                    Console.WriteLine($"Quality review cleanup: '{textFile.Path}' split {split.Split} had leaked QC-protocol text in QcTranslated ('{split.QcTranslated}') - resetting for re-review.");
-                    split.ResetQcState();
-                    resetCount++;
-                }
+                Console.WriteLine($"Quality review cleanup: '{textFile.Path}' split {split.Split} had leaked QC-protocol text in QcTranslated ('{split.QcTranslated}') - resetting for re-review.");
+                split.ResetQcState();
+                changed = true;
             }
 
-            if (resetCount > 0)
-                await FileHelper.WriteAllTextWithRetryAsync(outputFile, serializer.Serialize(fileLines));
+            return changed;
         });
     }
 
@@ -1870,39 +2279,19 @@ public static class QualityReviewWorkflow
         if (!config.QualityReview.Enabled)
             return 0;
 
-        var serializer = YamlHelper.CreateSerializer();
-        var totalReset = 0;
-
-        await FileIteration.IterateTranslatedFilesInParallelAsync(workingDirectory, textFiles, async (outputFile, textFile, fileLines) =>
+        var totalReset = await ResetColumnsAsync(workingDirectory, textFiles, (column, textFile) =>
         {
-            var resetCount = 0;
+            var anchor = column.Anchor;
 
-            foreach (var line in fileLines)
-            {
-                foreach (var columnGroup in line.Splits.GroupBy(ColumnKey))
-                {
-                    var fragments = columnGroup.OrderBy(s => s.SubIndex).ToList();
-                    var anchor = fragments.FirstOrDefault(f => f.SubIndex == 0) ?? fragments[0];
+            if (anchor.QcStatus == QcStatus.NotReviewed)
+                return false;
 
-                    if (anchor.QcStatus == QcStatus.NotReviewed)
-                        continue;
+            if (QualityReviewHelpers.IsQcReviewFresh(anchor, column.Template, column.Fragments, config.QualityReview))
+                return false;
 
-                    var template = line.Templates.FirstOrDefault(t => ColumnKey(t) == columnGroup.Key);
-
-                    if (QualityReviewHelpers.IsQcReviewFresh(anchor, template, fragments, config.QualityReview))
-                        continue;
-
-                    Console.WriteLine($"Quality review cleanup: '{textFile.Path}' split {anchor.Split} had a stale QC verdict (QcReviewedText no longer matches Translated) - resetting for re-review.");
-                    anchor.ResetQcState();
-                    resetCount++;
-                }
-            }
-
-            if (resetCount > 0)
-            {
-                Interlocked.Add(ref totalReset, resetCount);
-                await FileHelper.WriteAllTextWithRetryAsync(outputFile, serializer.Serialize(fileLines));
-            }
+            Console.WriteLine($"Quality review cleanup: '{textFile.Path}' split {anchor.Split} had a stale QC verdict (QcReviewedText no longer matches Translated) - resetting for re-review.");
+            anchor.ResetQcState();
+            return true;
         });
 
         if (totalReset > 0)
@@ -1942,29 +2331,17 @@ public static class QualityReviewWorkflow
     {
         var config = ConfigurationExtensions.GetConfiguration(workingDirectory, hooks);
         var threshold = scoreThreshold ?? config.QualityReview.MinAcceptableScore;
-        var serializer = YamlHelper.CreateSerializer();
 
-        await FileIteration.IterateTranslatedFilesInParallelAsync(workingDirectory, textFiles, async (outputFile, textFile, fileLines) =>
+        await ResetColumnsAsync(workingDirectory, textFiles, (column, textFile) =>
         {
-            var resetCount = 0;
+            var anchor = column.Anchor;
 
-            foreach (var line in fileLines)
-            {
-                foreach (var columnGroup in line.Splits.GroupBy(ColumnKey))
-                {
-                    var anchor = columnGroup.OrderBy(s => s.SubIndex).FirstOrDefault(f => f.SubIndex == 0) ?? columnGroup.First();
+            if (anchor.QcQualityScore is not int score || score >= threshold)
+                return false;
 
-                    if (anchor.QcQualityScore is not int score || score >= threshold)
-                        continue;
-
-                    Console.WriteLine($"Quality review cleanup: '{textFile.Path}' split {anchor.Split} scored {score} (below {threshold}) under the old scoring - resetting for re-review.");
-                    anchor.ResetQcState();
-                    resetCount++;
-                }
-            }
-
-            if (resetCount > 0)
-                await FileHelper.WriteAllTextWithRetryAsync(outputFile, serializer.Serialize(fileLines));
+            Console.WriteLine($"Quality review cleanup: '{textFile.Path}' split {anchor.Split} scored {score} (below {threshold}) under the old scoring - resetting for re-review.");
+            anchor.ResetQcState();
+            return true;
         });
     }
 
@@ -1985,29 +2362,16 @@ public static class QualityReviewWorkflow
     /// </summary>
     public static async Task ResetCorrectedQcState(string workingDirectory, TextFileToSplit[] textFiles)
     {
-        var serializer = YamlHelper.CreateSerializer();
-
-        await FileIteration.IterateTranslatedFilesInParallelAsync(workingDirectory, textFiles, async (outputFile, textFile, fileLines) =>
+        await ResetColumnsAsync(workingDirectory, textFiles, (column, textFile) =>
         {
-            var resetCount = 0;
+            var anchor = column.Anchor;
 
-            foreach (var line in fileLines)
-            {
-                foreach (var columnGroup in line.Splits.GroupBy(ColumnKey))
-                {
-                    var anchor = columnGroup.OrderBy(s => s.SubIndex).FirstOrDefault(f => f.SubIndex == 0) ?? columnGroup.First();
+            if (anchor.QcStatus != QcStatus.Corrected)
+                return false;
 
-                    if (anchor.QcStatus != QcStatus.Corrected)
-                        continue;
-
-                    Console.WriteLine($"Quality review cleanup: '{textFile.Path}' split {anchor.Split} was Corrected under the old scoring - resetting for re-review.");
-                    anchor.ResetQcState();
-                    resetCount++;
-                }
-            }
-
-            if (resetCount > 0)
-                await FileHelper.WriteAllTextWithRetryAsync(outputFile, serializer.Serialize(fileLines));
+            Console.WriteLine($"Quality review cleanup: '{textFile.Path}' split {anchor.Split} was Corrected under the old scoring - resetting for re-review.");
+            anchor.ResetQcState();
+            return true;
         });
     }
 
@@ -2033,29 +2397,17 @@ public static class QualityReviewWorkflow
     {
         var config = ConfigurationExtensions.GetConfiguration(workingDirectory, hooks);
         var autoAccepted = config.QualityReview.AutoAcceptDefectCategories;
-        var serializer = YamlHelper.CreateSerializer();
 
-        await FileIteration.IterateTranslatedFilesInParallelAsync(workingDirectory, textFiles, async (outputFile, textFile, fileLines) =>
+        await ResetColumnsAsync(workingDirectory, textFiles, (column, textFile) =>
         {
-            var resetCount = 0;
+            var anchor = column.Anchor;
 
-            foreach (var line in fileLines)
-            {
-                foreach (var columnGroup in line.Splits.GroupBy(ColumnKey))
-                {
-                    var anchor = columnGroup.OrderBy(s => s.SubIndex).FirstOrDefault(f => f.SubIndex == 0) ?? columnGroup.First();
+            if (!anchor.FlaggedForQcReview || autoAccepted.Contains(anchor.QcDefectCategory))
+                return false;
 
-                    if (!anchor.FlaggedForQcReview || autoAccepted.Contains(anchor.QcDefectCategory))
-                        continue;
-
-                    Console.WriteLine($"Quality review cleanup: '{textFile.Path}' split {anchor.Split} defect {anchor.QcDefectCategory} not auto-accepted - resetting for re-review.");
-                    anchor.ResetQcState();
-                    resetCount++;
-                }
-            }
-
-            if (resetCount > 0)
-                await FileHelper.WriteAllTextWithRetryAsync(outputFile, serializer.Serialize(fileLines));
+            Console.WriteLine($"Quality review cleanup: '{textFile.Path}' split {anchor.Split} defect {anchor.QcDefectCategory} not auto-accepted - resetting for re-review.");
+            anchor.ResetQcState();
+            return true;
         });
     }
 
@@ -2113,39 +2465,21 @@ public static class QualityReviewWorkflow
     /// </summary>
     public static async Task ResetTagSeamAffectedQcState(string workingDirectory, TextFileToSplit[] textFiles)
     {
-        var serializer = YamlHelper.CreateSerializer();
-
-        await FileIteration.IterateTranslatedFilesInParallelAsync(workingDirectory, textFiles, async (outputFile, textFile, fileLines) =>
+        await ResetColumnsAsync(workingDirectory, textFiles, (column, textFile) =>
         {
-            var resetCount = 0;
+            var anchor = column.Anchor;
 
-            foreach (var line in fileLines)
-            {
-                foreach (var columnGroup in line.Splits.GroupBy(ColumnKey))
-                {
-                    var fragments = columnGroup.OrderBy(s => s.SubIndex).ToList();
-                    var anchor = fragments.FirstOrDefault(f => f.SubIndex == 0) ?? fragments[0];
+            // Corrected/FailedValidation columns already went through a considered verdict - see
+            // this method's doc comment for why only Passed (a silent miss) is worth resetting here.
+            if (anchor.QcStatus != QcStatus.Passed)
+                return false;
 
-                    // Corrected/FailedValidation columns already went through a considered
-                    // verdict - see this method's doc comment for why only Passed (a silent miss)
-                    // is worth resetting here.
-                    if (anchor.QcStatus != QcStatus.Passed)
-                        continue;
+            if (!HasUnresolvedTagSeam(column.ComputeEffectiveTranslated()))
+                return false;
 
-                    var template = line.Templates.FirstOrDefault(t => ColumnKey(t) == columnGroup.Key);
-                    var effectiveTranslated = QualityReviewHelpers.ComputeEffectiveTranslatedText(anchor, template, fragments);
-
-                    if (!HasUnresolvedTagSeam(effectiveTranslated))
-                        continue;
-
-                    Console.WriteLine($"Quality review cleanup: '{textFile.Path}' split {anchor.Split} effective text contains a tag seam - resetting for re-review.");
-                    anchor.ResetQcState();
-                    resetCount++;
-                }
-            }
-
-            if (resetCount > 0)
-                await FileHelper.WriteAllTextWithRetryAsync(outputFile, serializer.Serialize(fileLines));
+            Console.WriteLine($"Quality review cleanup: '{textFile.Path}' split {anchor.Split} effective text contains a tag seam - resetting for re-review.");
+            anchor.ResetQcState();
+            return true;
         });
     }
 
@@ -2174,32 +2508,19 @@ public static class QualityReviewWorkflow
     /// </summary>
     public static async Task ResetStutterAffectedQcState(string workingDirectory, TextFileToSplit[] textFiles)
     {
-        var serializer = YamlHelper.CreateSerializer();
-
-        await FileIteration.IterateTranslatedFilesInParallelAsync(workingDirectory, textFiles, async (outputFile, textFile, fileLines) =>
+        await ResetColumnsAsync(workingDirectory, textFiles, (column, textFile) =>
         {
-            var resetCount = 0;
+            if (!column.Fragments.Any(f => StutterPatternRegex.IsMatch(f.Text)))
+                return false;
 
-            foreach (var line in fileLines)
-            {
-                foreach (var columnGroup in line.Splits.GroupBy(ColumnKey))
-                {
-                    if (!columnGroup.Any(f => StutterPatternRegex.IsMatch(f.Text)))
-                        continue;
+            var anchor = column.Anchor;
 
-                    var anchor = columnGroup.OrderBy(s => s.SubIndex).FirstOrDefault(f => f.SubIndex == 0) ?? columnGroup.First();
+            if (anchor.QcStatus == QcStatus.NotReviewed)
+                return false;
 
-                    if (anchor.QcStatus == QcStatus.NotReviewed)
-                        continue;
-
-                    Console.WriteLine($"Quality review cleanup: '{textFile.Path}' split {anchor.Split} SOURCE contains a stutter pattern - resetting for re-review.");
-                    anchor.ResetQcState();
-                    resetCount++;
-                }
-            }
-
-            if (resetCount > 0)
-                await FileHelper.WriteAllTextWithRetryAsync(outputFile, serializer.Serialize(fileLines));
+            Console.WriteLine($"Quality review cleanup: '{textFile.Path}' split {anchor.Split} SOURCE contains a stutter pattern - resetting for re-review.");
+            anchor.ResetQcState();
+            return true;
         });
     }
 
@@ -2220,39 +2541,21 @@ public static class QualityReviewWorkflow
     /// </summary>
     public static async Task ResetNegativeSignAffectedQcState(string workingDirectory, TextFileToSplit[] textFiles)
     {
-        var serializer = YamlHelper.CreateSerializer();
-
-        await FileIteration.IterateTranslatedFilesInParallelAsync(workingDirectory, textFiles, async (outputFile, textFile, fileLines) =>
+        await ResetColumnsAsync(workingDirectory, textFiles, (column, textFile) =>
         {
-            var resetCount = 0;
+            var anchor = column.Anchor;
 
-            foreach (var line in fileLines)
-            {
-                foreach (var columnGroup in line.Splits.GroupBy(ColumnKey))
-                {
-                    var fragments = columnGroup.OrderBy(s => s.SubIndex).ToList();
-                    var anchor = fragments.FirstOrDefault(f => f.SubIndex == 0) ?? fragments[0];
+            if (anchor.QcStatus != QcStatus.Corrected || string.IsNullOrEmpty(anchor.QcTranslated))
+                return false;
 
-                    if (anchor.QcStatus != QcStatus.Corrected || string.IsNullOrEmpty(anchor.QcTranslated))
-                        continue;
+            var preparedRaw = LineValidation.PrepareRaw(column.RawText, null);
 
-                    var template = line.Templates.FirstOrDefault(t => ColumnKey(t) == columnGroup.Key);
-                    var rawText = template != null
-                        ? CompoundFieldSplitter.Reconstruct(template.Template, fragments.Select(f => f.Text).ToList())
-                        : anchor.Text;
-                    var preparedRaw = LineValidation.PrepareRaw(rawText, null);
+            if (!TranslationWorkflow.IsMissingRequiredNegativeSign(preparedRaw, anchor.QcTranslated))
+                return false;
 
-                    if (!TranslationWorkflow.IsMissingRequiredNegativeSign(preparedRaw, anchor.QcTranslated))
-                        continue;
-
-                    Console.WriteLine($"Quality review cleanup: '{textFile.Path}' split {anchor.Split} QcTranslated dropped a required negative sign - resetting for re-review.");
-                    anchor.ResetQcState();
-                    resetCount++;
-                }
-            }
-
-            if (resetCount > 0)
-                await FileHelper.WriteAllTextWithRetryAsync(outputFile, serializer.Serialize(fileLines));
+            Console.WriteLine($"Quality review cleanup: '{textFile.Path}' split {anchor.Split} QcTranslated dropped a required negative sign - resetting for re-review.");
+            anchor.ResetQcState();
+            return true;
         });
     }
 
@@ -2279,26 +2582,20 @@ public static class QualityReviewWorkflow
 
             foreach (var line in fileLines)
             {
-                // Group by column (same shape as RunAsync's work items) rather than iterating
-                // raw Splits directly - a templated column's Qc state lives only on its
-                // SubIndex == 0 fragment, but that fragment's OWN Text/Translated is just its own
-                // piece of the cell, not the whole reconstructed raw text QC actually reviewed.
-                foreach (var columnGroup in line.Splits.GroupBy(ColumnKey))
+                // Column-level (same shape as RunAsync's work items) rather than iterating raw Splits
+                // directly - a templated column's Qc state lives only on its SubIndex == 0 fragment,
+                // but that fragment's OWN Text/Translated is just its own piece of the cell, not the
+                // whole reconstructed raw text QC actually reviewed.
+                foreach (var column in EnumerateColumns(line))
                 {
-                    var fragments = columnGroup.OrderBy(s => s.SubIndex).ToList();
-                    var anchor = fragments.FirstOrDefault(f => f.SubIndex == 0) ?? fragments[0];
+                    var anchor = column.Anchor;
 
                     if (!anchor.FlaggedForQcReview)
                         continue;
 
-                    var template = line.Templates.FirstOrDefault(t => ColumnKey(t) == columnGroup.Key);
-                    var rawText = template != null
-                        ? CompoundFieldSplitter.Reconstruct(template.Template, fragments.Select(f => f.Text).ToList())
-                        : anchor.Text;
-
                     flagged.Add(new FlaggedQcReview(
                         textFile.Path,
-                        rawText,
+                        column.RawText,
                         anchor.QcReviewedText,
                         anchor.QcTranslated,
                         string.IsNullOrEmpty(anchor.QcRejectedCorrection) ? null : anchor.QcRejectedCorrection,
@@ -2449,7 +2746,7 @@ public static class QualityReviewWorkflow
     /// project, DragonHierOverLlm repo, for the "stratify by DEFECT category" triage plan this
     /// feeds). Intended to be wired into a consuming repo's own workflow test file as a one-line
     /// wrapper run right after that repo's own "find flagged" step - see
-    /// docs/quality-review-pass-architecture.md's "Wiring this into a new project" section.
+    /// docs/features/translation-pipeline/quality-review-pass.md's "Wiring this into a new project" section.
     /// </summary>
     public static async Task WriteTriageReportAsync(string workingDirectory, TextFileToSplit[] textFiles, GameHooks? hooks = null)
     {
@@ -2485,7 +2782,7 @@ public static class QualityReviewWorkflow
     /// calling an LLM itself - the actual fixes (QC prompt wording, a glossary rule,
     /// <c>qualityReview.minAcceptableScore</c>) are small and judgment-heavy enough that a human
     /// should read the examples and apply the change themselves rather than have an LLM edit prompt
-    /// files unsupervised. See docs/quality-review-pass-architecture.md's "Wiring this into a new
+    /// files unsupervised. See docs/features/translation-pipeline/quality-review-pass.md's "Wiring this into a new
     /// project" section for how to call this from a consuming repo.
     /// </summary>
     public static async Task WriteFixPromptsAsync(string workingDirectory, TextFileToSplit[] textFiles, GameHooks? hooks = null, int examplesPerCluster = 8)

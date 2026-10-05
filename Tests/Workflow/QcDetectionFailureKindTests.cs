@@ -10,7 +10,7 @@ namespace Tests.Workflow;
 /// <see cref="QualityReviewWorkflow.DetectDefectsAsync"/> must report WHY a detection failed, not
 /// just <c>Success = false</c> - a context-size 400 and a "length"-truncated answer were once
 /// indistinguishable from a genuine protocol violation in the QC evaluator's Results.yaml (see
-/// docs/features/quality-review/quality-review-pass-architecture.md's "Context headroom regression").
+/// docs/features/translation-pipeline/quality-review-pass.md's "Context headroom regression").
 /// </summary>
 public sealed class QcDetectionFailureKindTests
 {
