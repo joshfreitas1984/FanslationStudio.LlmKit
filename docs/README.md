@@ -88,6 +88,7 @@ and [`.github/copilot-instructions.md`](../.github/copilot-instructions.md).
 | Downstream BepInEx plugin project layout | [`architecture/downstream-project-structure/downstream-plugin-project-layout.md`](architecture/downstream-project-structure/downstream-plugin-project-layout.md) |
 | Downstream repository docs taxonomy | [`architecture/downstream-project-structure/downstream-repository-docs-taxonomy.md`](architecture/downstream-project-structure/downstream-repository-docs-taxonomy.md) |
 | Architectural decisions | [`architecture/decisions/`](architecture/decisions/) |
+| Plan: move the QC gold set and regression into LlmKit (naming, assessment host, cross-game scans, glossary scope, preset audit) | [`plans/qc-goldset-regression-migration.md`](plans/qc-goldset-regression-migration.md) |
 
 See [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) for the issue and postmortem index. It is intentionally
 separate from this navigation table and contains one-line pointers only.
