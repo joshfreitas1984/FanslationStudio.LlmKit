@@ -111,6 +111,50 @@ public class LineValidationSilentFailureTests
     public void NarratesAsFirstPerson_Cases(string raw, string result, bool expected) =>
         Assert.Equal(expected, LineValidation.NarratesAsFirstPerson(raw, result));
 
+    [Theory(DisplayName = "LosesSelfReference flags a title+我 or 我+name placeholder whose speaker became a third party")]
+    // title + 我 translated with no first person at all: the speaker turned into someone else
+    [InlineData("万万不能松散懈怠，堕了师傅我的威名！", "You must not be lax or negligent; let down the reputation of your Master!", true)]
+    [InlineData("若惹得师父他老人家生气，可别怪师姐我没提醒你。", "If you anger Master, don't blame Senior Sister for not warning you.", true)]
+    // a first-person word anywhere in the translation leaves it alone (deliberately narrow)
+    [InlineData("若你能在切磋之中胜过师傅我，那为师方能准许你出师！", "If you can defeat your Master in this exchange of skills, then I will allow you to leave!", false)]
+    // ... unless the title is rendered as the speaker's relation or stuck onto "I"
+    [InlineData("当年师伯我，确实是仙霞派掌门的继任人选。", "Back then, my senior uncle was indeed the successor to the Xianxia Sect Leader.", true)]
+    [InlineData("当年师伯我，确实是仙霞派掌门的继任人选。", "Back then, my Martial Uncle was indeed the successor.", true)]
+    [InlineData("云裳，别哭了别哭了，好像师姐我要死了一样。", "Yunshang, stop crying, as if Senior Sister I am about to die.", true)]
+    [InlineData("假以时日，定也能达到师兄我这般实力。", "Given enough time, you'd surely reach my senior brother's level of power.", true)]
+    // "my <title>" counts only for the title that follows 我: "my Master" in a 师兄我 line is a different person
+    [InlineData("回想当年，#PlayerName#被师傅责骂，向师兄我求教修炼之法，", "Recalling when #PlayerName# was scolded by my Master and asked me, Senior Brother, for advice,", false)]
+    // plural second-person words (各位, 诸位, 二位) are a source for "your"
+    [InlineData("感谢各位同道看在我#$SourceInteractName#三分薄面上赏光莅临，", "Thank you all for gracing me with your presence, #$SourceInteractName#.", false)]
+    [InlineData("我#$PlayerName#绝不会忘记各位之恩义。", "I will never forget your kindness to me, #$PlayerName#.", false)]
+    // another person placeholder in the source is the addressed person, so "your" has a source
+    [InlineData("#PlayerName#临危救难，恩深情重，我#$TargetInteractName#定当报答。", "#PlayerName# rescued me in danger. I, #$TargetInteractName#, will repay your kindness.", false)]
+    [InlineData("万万不能松散懈怠，堕了师傅我的威名！", "You must not be lax, or you will tarnish my name as your Master!", false)]
+    [InlineData("若敢藏私，师姐我定饶不了你！", "If you dare to hold back, I, your Senior Sister, won't forgive you!", false)]
+    [InlineData("莫要逞强，师姐我定能保你安全。", "Don't force yourself, I, your Senior Sister, will ensure your safety.", false)]
+    // 我 + person placeholder, no 你 in the source: "your" is a person shift
+    [InlineData("这这这……该死小贼竟如此下作，可别落到我#$PlayerName#手里！", "Y-y-you... don't let him fall into your hands, #$PlayerName#!", true)]
+    [InlineData("这这这……该死小贼竟如此下作，可别落到我#$PlayerName#手里！", "Y-y-you... don't let that thief fall into my hands, #$PlayerName#!", false)]
+    [InlineData("我#$PlayerName#愿与你共抗阎罗殿！", "I, #$PlayerName#, will stand with your sect against Yama Hall!", false)]
+    // correct renderings are not flagged
+    [InlineData("不过，掌门我还准备了一份特殊礼物。", "However, I, the Sect Leader, have prepared a special gift.", false)]
+    [InlineData("本场考核就由掌门我亲自主持好了。", "Let me, the Sect Leader, personally conduct this assessment.", false)]
+    [InlineData("若惹得师父他老人家生气，可别怪师姐我没提醒你。", "If you anger Master, don't blame me, your Senior Sister, for not warning you.", false)]
+    // a title with no 我 touching it, and 师姐我们 (we), are not self-references
+    [InlineData("师傅，请你指点我一二。", "Master, please guide me a bit.", false)]
+    [InlineData("师傅请你指点一二。", "Master, please guide them.", false)]
+    [InlineData("师姐我们一起去吧。", "Let's go together, all of us.", false)]
+    // 我 + name placeholder: "I #Placeholder#" with no comma treats the placeholder as another person
+    [InlineData("我#$PlayerName#初入江湖，似乎并不识得老人家您这般人物。", "I #$PlayerName# is new to the Jianghu and doesn't seem to recognize someone like you.", true)]
+    [InlineData("今日我#$PlayerName#就要替天行道，将你捉拿归案！", "Today, I #$PlayerName# will take justice into my own hands and arrest you!", true)]
+    [InlineData("今日我#$PlayerName#就要替天行道，将你捉拿归案！", "Today, I, #$PlayerName#, will uphold justice and arrest you!", false)]
+    [InlineData("哼，敢坏我#$PlayerName#的好事？", "Hmph, dare you ruin #$PlayerName#'s plans?", false)]
+    [InlineData("你好，#PlayerName#。", "Hello, #PlayerName#.", false)]
+    // a force/sect placeholder is a group, not a person: "I #PlayerForceName#" is not the person-name defect
+    [InlineData("何况我#PlayerForceName#与逐鹿盟，本就有不少恩怨在先。", "Moreover, I #PlayerForceName# had many grudges with the Zhulu Alliance.", false)]
+    public void LosesSelfReference_Cases(string raw, string result, bool expected) =>
+        Assert.Equal(expected, LineValidation.LosesSelfReference(raw, result));
+
     [Theory(DisplayName = "ContradictsGender flags only the opposite pronoun for a known gender, and never when the source states a gender")]
     [InlineData("（揉了揉被震麻的手腕）", "(Rubbing her numbed wrist)", "male", true)]
     [InlineData("（揉了揉被震麻的手腕）", "(Rubbing his numbed wrist)", "male", false)]

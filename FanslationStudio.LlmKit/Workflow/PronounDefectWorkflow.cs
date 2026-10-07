@@ -49,6 +49,7 @@ public static class PronounDefectWorkflow
         {
             var category = LineValidation.InventsGender(split.Text, split.Translated, skipWhenNamesSomeone, tokens) ? "InventedGender"
                 : LineValidation.NarratesAsFirstPerson(split.Text, split.Translated) ? "NarratedAsFirstPerson"
+                : LineValidation.LosesSelfReference(split.Text, split.Translated) ? "SelfReferenceLost"
                 : null;
             return new PronounClassification(category, false, false);
         }
@@ -59,6 +60,7 @@ public static class PronounDefectWorkflow
         var knownCategory = !pointsBack && LineValidation.ContradictsGender(split.Text, split.Translated, known.Gender) ? "WrongGender"
             : !pointsBack && LineValidation.ContradictsGenderDespiteKinshipTerm(split.Text, split.Translated, known.Gender) ? "WrongGenderKinshipTerm"
             : LineValidation.NarratesAsFirstPerson(split.Text, split.Translated) ? "NarratedAsFirstPerson"
+            : LineValidation.LosesSelfReference(split.Text, split.Translated) ? "SelfReferenceLost"
             : null;
 
         var correct = knownCategory == null && LineValidation.InventsGender(split.Text, split.Translated, skipWhenNamesSomeone, tokens);

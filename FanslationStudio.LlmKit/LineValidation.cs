@@ -663,6 +663,46 @@ public static partial class LineValidation
         raw.Length <= 80 && NarrationOpenerRegex().IsMatch(raw) && !SelfReferenceRegex().IsMatch(raw) && !raw.Contains('你') && !raw.Contains('您') && FirstPersonPronounRegex().IsMatch(result);
 
     /// <summary>
+    /// True when the speaker's own first person was lost in a self-reference. A title directly followed by 我
+    /// (师傅我, 师姐我, 掌门我: "I, your Master") is the speaker saying "I", so a translation with no I/me/my at all
+    /// has turned the speaker into a third party ("defeat your Master", "blame Senior Sister"). 我 directly before
+    /// a name placeholder (我#PlayerName#) is the speaker naming themself, so "I #PlayerName# will..." - "I" and the
+    /// placeholder with no comma - is the placeholder wrongly treated as a separate person. 师姐我们 (我们, "we") is
+    /// not a self-reference. A first-person word alone is not enough: the title may still be rendered as the
+    /// speaker's relation ("my Martial Uncle was the successor" for 师伯我) or stuck onto "I" ("Senior Sister I am
+    /// about to die"). For 我 + a person placeholder, "your" with no 你/您 anywhere in the source is a person shift
+    /// ("fall into your hands" for 落到我#PlayerName#手里). Deliberately narrow beyond that.
+    /// </summary>
+    public static bool LosesSelfReference(string raw, string result) =>
+        (TitleThenIRegex().IsMatch(raw)
+            && (!FirstPersonPronounRegex().IsMatch(result) || RendersSelfReferenceTitleAsMyRelation(raw, result) || TitleThenFirstPersonRegex().IsMatch(result)))
+        || (INameRegex().IsMatch(raw)
+            && (IThenPlaceholderRegex().IsMatch(result) || (!SecondPersonSourceRegex().IsMatch(raw) && YourRegex().IsMatch(result))));
+
+    // The English words each self-reference title can be rendered as. Tying "my <title>" to the title that actually
+    // follows 我 stops "scolded by my Master" in a 师兄我 line from counting as a defect.
+    private static readonly Dictionary<string, string> SelfReferenceTitleWords = new()
+    {
+        ["师傅"] = "master|teacher", ["师父"] = "master|teacher", ["师姐"] = "sister|sis", ["师兄"] = "brother",
+        ["师伯"] = "uncle", ["师叔"] = "uncle", ["师祖"] = "grandmaster|grandfather|patriarch", ["师公"] = "grandmaster|grandfather",
+        ["师娘"] = "aunt|mistress|master", ["师母"] = "aunt|mistress|master",
+        ["掌门"] = "leader|master|head", ["帮主"] = "leader|master|chief", ["庄主"] = "master|lord|leader", ["阁主"] = "master|leader",
+        ["堂主"] = "leader|master", ["长老"] = "elder", ["殿主"] = "master|lord|leader", ["谷主"] = "master|lord|leader",
+        ["宗主"] = "leader|master|patriarch", ["门主"] = "leader|master",
+    };
+
+    /// <summary>True when <paramref name="result"/> renders the title that follows 我 in <paramref name="raw"/> as "my [adjectives] title" ("my Martial Uncle").</summary>
+    private static bool RendersSelfReferenceTitleAsMyRelation(string raw, string result)
+    {
+        foreach (Match match in TitleThenIRegex().Matches(raw))
+            if (SelfReferenceTitleWords.TryGetValue(match.Groups["title"].Value, out var words)
+                && Regex.IsMatch(result, $@"\bmy\s+(?:\w+\s+){{0,2}}(?:{words})\b", RegexOptions.IgnoreCase))
+                return true;
+
+        return false;
+    }
+
+    /// <summary>
     /// True when <paramref name="result"/> gives someone a he/she/his/her/him that the short, ungendered
     /// <paramref name="raw"/> never established: a parenthesised stage direction or an unnamed-role line
     /// (此人, 对方, 乞丐...) with no 他/她 or gendered kinship/title character. Deliberately narrow - a
@@ -1019,6 +1059,31 @@ public static partial class LineValidation
 
     [GeneratedRegex(@"\b(?:I|[Mm]y|[Mm]e|myself)\b")]
     private static partial Regex FirstPersonPronounRegex();
+
+    // A title directly followed by 我 - the speaker referring to themself ("I, your Master"). 我们 is "we", not this.
+    [GeneratedRegex("(?<title>师傅|师父|师姐|师兄|师伯|师叔|师祖|师公|师娘|师母|掌门|帮主|庄主|阁主|堂主|长老|殿主|谷主|宗主|门主)我(?!们)")]
+    private static partial Regex TitleThenIRegex();
+
+    // 我 directly before a person-name placeholder (我#PlayerName#, 我#$PlayerName#) - the speaker naming themself.
+    // Force/sect placeholders (#PlayerForceName#...) are groups, not people, so they are excluded.
+    [GeneratedRegex(@"我#\$?(?!\w*Force)[A-Za-z0-9_]+#")]
+    private static partial Regex INameRegex();
+
+    // "I" immediately followed by a placeholder with no comma ("I #$PlayerName# is new"), the placeholder treated as another person.
+    [GeneratedRegex(@"\bI\s+#\$?(?!\w*Force)[A-Za-z0-9_]+#")]
+    private static partial Regex IThenPlaceholderRegex();
+
+    // A title word stuck directly onto "I"/"me" with no comma: "Senior Sister I am about to die".
+    [GeneratedRegex(@"\b(?:Master|Uncle|Aunt|Sister|Sis|Brother|Leader|Elder|Patriarch|Grandfather)\s+(?:I|me)\b")]
+    private static partial Regex TitleThenFirstPersonRegex();
+
+    // Any second-person word or honorific in the source (so a "your" in the translation has a source).
+    // ... including another person placeholder that is not the 我+name itself (the addressed person: "#PlayerName#临危救难，…").
+    [GeneratedRegex(@"你|您|汝|君|卿|阁下|足下|尊|贵|各位|诸位|二位|两位|三位|列位|诸君|大家|诸|(?<!我)#\$?(?!\w*Force)\w*Name#")]
+    private static partial Regex SecondPersonSourceRegex();
+
+    [GeneratedRegex(@"\b[Yy]our(?:s|self)?\b")]
+    private static partial Regex YourRegex();
 
     [GeneratedRegex(@"<[^>]+>")]
     private static partial Regex HtmlTagRegex();

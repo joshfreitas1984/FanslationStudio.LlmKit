@@ -69,6 +69,27 @@ TRANSLATION RULES:
     hyphen, e.g. "思、思阁主" → "Pa-Pavilion Master" and "你、你、你敢……" → "Y-y-you dare...". Never
     drop the repetition (translating straight through as if unstammered) and never expand it into a
     full separately-spoken word instead of a hyphenated partial repeat.
+12. A speaker often refers to themself by their own title or role directly followed by 我 (师傅我, 师姐我,
+    掌门我, 师伯我). This is the speaker saying "I", not a third person: render it as "I"/"me"/"my" and keep
+    the title as an apposition to the speaker - "your Master", "your Senior Sister", "your Sect Leader".
+    "胜过师傅我" becomes "defeat me, your Master"; "可别怪师姐我没提醒你" becomes "don't blame me, your
+    Senior Sister, for not warning you"; "莫要让掌门我失望" becomes "don't disappoint me, your Sect Leader";
+    "堕了师傅我的威名" becomes "tarnish my name as your Master"; "当年师伯我" becomes "Back then, I, your Martial
+    Uncle,". Never turn it into a third person ("Master's reputation", "don't let the Sect Leader down"),
+    never drop the 我, and never change the title's gender (师姐 is a woman: "Senior Sister", not "Brother").
+    A title with no 我 touching it is just that person being addressed or mentioned ("师傅，请你指点我" is
+    "Master, please guide me"), and 师姐我们 is 我们 ("we"), not a self-reference.
+    Likewise 我 directly before a name placeholder (我#PlayerName#, 我#$PlayerName#) is the speaker naming
+    themself: write "I, #PlayerName#," with the placeholder unchanged and set off by commas - "我#PlayerName#
+    就要替天行道" becomes "I, #PlayerName#, will uphold justice", never "I #PlayerName# will..." or a
+    sentence that treats the placeholder as someone else. When 我#PlayerName# is possessive or the object
+    of a place ("…的…", "落到我#PlayerName#手里", "坏我#PlayerName#的好事"), use the placeholder as the
+    possessor: "fall into #PlayerName#'s hands", "ruin #PlayerName#'s plans" - never "my, #PlayerName#,'s".
+    A force/sect placeholder (#PlayerForceName#, #SourceForceName#, #TargetForceName#) is a group, not a
+    person: 我#SourceForceName# is "my #SourceForceName#" (or "I of #SourceForceName#"), never "I,
+    #SourceForceName#,". "何况我#PlayerForceName#与逐鹿盟，本就有不少恩怨" becomes "Moreover, my
+    #PlayerForceName# and the Zhulu Alliance already had many grudges". Always translate the 我 - never leave it
+    as a Chinese character.
 
 SPECIAL RULES:
 - Text inside single quotes '...' must remain unchanged.
