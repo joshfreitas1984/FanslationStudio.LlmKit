@@ -544,7 +544,54 @@ public static class QualityReviewWorkflow
         var ruleResult = TranslationWorkflow.EvaluateRules(config, modelConfig, preparedRaw, rawText, candidate, textFile, split);
         var capsFailureReason = CheckCapitalizationRegression(baselineTranslated, candidate);
 
-        return capsFailureReason ?? ruleResult.AllReasons.FirstOrDefault();
+        return capsFailureReason ?? CheckInventedStutter(rawText, baselineTranslated, candidate) ?? CheckInvalidPinyin(baselineTranslated, candidate) ?? CheckSelfReferenceRegression(rawText, baselineTranslated, candidate) ?? ruleResult.AllReasons.FirstOrDefault();
+    }
+
+    /// <summary>
+    /// Rejects a correction that turns a speaker's self-reference (师姐我的#PlayerName# - "I, your Senior
+    /// Sister") into a third party ("my Senior Sister's #PlayerName#"), when the baseline translation did not
+    /// already have that defect. The translator-side rule 12 and PronounDefectWorkflow check the same thing
+    /// (<see cref="LineValidation.LosesSelfReference"/>); a QC correction used to bypass it.
+    /// </summary>
+    internal static string? CheckSelfReferenceRegression(string rawText, string baselineTranslated, string candidate) =>
+        LineValidation.LosesSelfReference(rawText, candidate) && !LineValidation.LosesSelfReference(rawText, baselineTranslated)
+            ? "The speaker's self-reference (title + 我) was turned into a third party."
+            : null;
+
+    // j/q/x/y never take a bare "u" for the ü sound in Hanyu Pinyin, so "v" (or ü) right after one
+    // is a romanisation slip (拳毛驹 -> "Quanmaojv", should be "Ju"), not an English word.
+    private static readonly Regex MalformedPinyinRegex = new(@"\b\p{L}*[jqxy][vü]\p{L}*\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// Rejects a correction that introduces a word with malformed Pinyin (see
+    /// <see cref="MalformedPinyinRegex"/>) that the baseline translation did not already contain.
+    /// Deliberately narrow: a plausible-looking but wrong syllable split ("La'er" for 老二) cannot be
+    /// told from valid Pinyin without the source reading, so that stays with the QC prompt.
+    /// </summary>
+    internal static string? CheckInvalidPinyin(string baselineTranslated, string candidate)
+    {
+        var existing = MalformedPinyinRegex.Matches(baselineTranslated).Select(m => m.Value.ToLowerInvariant()).ToHashSet();
+        var invented = MalformedPinyinRegex.Matches(candidate).Select(m => m.Value).FirstOrDefault(word => !existing.Contains(word.ToLowerInvariant()));
+
+        return invented == null ? null : $"'{invented}' is not valid Pinyin (j/q/x/y are followed by 'u', never 'v').";
+    }
+
+    private static readonly Regex EnglishStutterRegex = new(@"\b(\p{L})[-‑]\1", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex SourceRepeatRegex = new(@"(?<c>[一-鿿])[、，,…\.！!？?]*\k<c>", RegexOptions.Compiled);
+
+    /// <summary>
+    /// Rejects a correction that adds an English stutter ("c-c-calm", "a-anything") to a line whose
+    /// source repeats no character. A DROPPED_STUTTER claim on a name like 思阁主 made the corrector
+    /// invent stutters, and that category is auto-accepted, so they shipped.
+    /// </summary>
+    internal static string? CheckInventedStutter(string rawText, string baselineTranslated, string candidate)
+    {
+        if (SourceRepeatRegex.IsMatch(rawText))
+            return null;
+
+        return EnglishStutterRegex.Matches(candidate).Count > EnglishStutterRegex.Matches(baselineTranslated).Count
+            ? "A stutter was added, but the source text contains no stutter."
+            : null;
     }
 
     /// <summary>

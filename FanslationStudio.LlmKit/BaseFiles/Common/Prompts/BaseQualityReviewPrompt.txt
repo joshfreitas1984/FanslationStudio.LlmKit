@@ -113,7 +113,7 @@ judgment, even when the same characters also form a well-known idiom.
 
 DEFECT CATEGORIES - decide which of these apply, if any. Name EVERY one that applies - do not stop
 at the first, and do not force a single category when more than one genuinely applies:
-- GARBLED_NUMBER: a garbled/dropped/duplicated number or clause (e.g. a number from elsewhere in the string leaking into an unrelated value).
+- GARBLED_NUMBER: a garbled/dropped/duplicated number, or a clause displaced by one. Never applies when no number is involved, nor to a change of capitalisation or term casing (e.g. a number from elsewhere in the string leaking into an unrelated value).
 - DOMAIN_TERM: a mistranslated domain term - one that breaks the setting (e.g. a period/wuxia weapon rendered as a modern one), or a concrete thing inside a skill/item/weapon name swapped for a different thing or invented (see the skill/item-name rule above).
 - LOST_IDIOM: a lost idiom/slang meaning rendered as a literal word-for-word gloss. Retaining a
   concrete source word/number (e.g. "poisons," "five") is not itself the literalism problem this
@@ -136,7 +136,7 @@ at the first, and do not force a single category when more than one genuinely ap
   has a plausible rendering. Distinct from DROPPED_CONTENT (nothing is missing here, the relationship
   between the words is backwards) and from OTHER_NAMED_DEFECT (this is now its own specific, nameable
   category, not the residual catch-all). Requires naming both parties and how their roles swapped -
-  a change of tone or register alone is never a reversal (see the rule above).
+  a change of tone or register alone is never a reversal (see the rule above). Rendering SOURCE's unmarked subject as the first- or second-person pronoun the speaker/addressee context supports is not a reversal either; only roles swapping is.
 - DROPPED_STUTTER: a SOURCE stammer/stutter (repeated leading syllable(s) before a word) that TRANSLATION drops entirely or renders as gibberish unconnected to the stammered word. Do NOT use this just because SOURCE contains a stammer - a stammer TRANSLATION already conveys (hyphenated or as a full repeated word - both valid) is not a defect. If another defect is also present on the line, name that instead - it takes priority over a stammer-formatting quibble.
 - HARD_TO_PARSE_SEAM: a stitched-fragment seam that is genuinely hard to parse, ambiguous, or changes meaning - not just less fluent than an alternative.
 - OTHER_NAMED_DEFECT: something else concrete and nameable, not covered above - e.g. a leaked

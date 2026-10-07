@@ -255,6 +255,37 @@ public static partial class LineValidation
         return result;
     }
 
+    /// <summary>
+    /// Source compounds that name two opposites at once (买卖 buy and sell), so "Buy/Sell" in the result is
+    /// the translation of one term, not the model offering alternatives.
+    /// </summary>
+    private static readonly string[] OppositePairSources = ["买卖", "进出", "出入", "收支", "攻防", "存取", "进退", "升降", "增减", "得失", "胜负", "生死"];
+
+    /// <summary>
+    /// The first fixed run of text (20+ chars, between <c>{n}</c> slots) from a configured
+    /// "Correct*Prompt" feedback message that <paramref name="result"/> contains and
+    /// <paramref name="raw"/> does not, or null.
+    /// </summary>
+    internal static string? FindEchoedFeedback(ModelExecutionConfig config, string raw, string result)
+    {
+        foreach (var (key, prompt) in config.Prompts)
+        {
+            if (!key.StartsWith("Correct", StringComparison.Ordinal))
+                continue;
+
+            foreach (var segment in Regex.Split(prompt, @"\{\d+\}"))
+            {
+                var fixedText = segment.Trim(' ', '`', '\'', '"', '.');
+                if (fixedText.Length >= 20
+                    && result.Contains(fixedText, StringComparison.OrdinalIgnoreCase)
+                    && !raw.Contains(fixedText, StringComparison.OrdinalIgnoreCase))
+                    return fixedText;
+            }
+        }
+
+        return null;
+    }
+
     public static ValidationResult CheckTransalationSuccessful(ModelExecutionConfig config, string raw, string result, TextFileToSplit textFile, GameHooks? hooks = null, int? column = null)
     {
         var response = true;
@@ -288,6 +319,16 @@ public static partial class LineValidation
         {
             response = false;
             silentFailures.Add($"Contains the invalid phrase '{invalidPhrase}'.");
+        }
+
+        // The model echoing a retry-feedback message into its translation ("Restore `#X#` to the
+        // translation, as it was incorrectly removed."). Worse than noise: the echo carries the
+        // very token the feedback asked for, so it also satisfies the placeholder-count check.
+        var echoedFeedback = FindEchoedFeedback(config, raw, result);
+        if (echoedFeedback != null)
+        {
+            response = false;
+            silentFailures.Add($"Contains the retry feedback text '{echoedFeedback}'.");
         }
 
         // 99% chance its gone crazy with hallucinations
@@ -506,7 +547,7 @@ public static partial class LineValidation
         }
 
         ////Alternatives
-        if (result.Contains('/') && !raw.Contains('/'))
+        if (result.Contains('/') && !raw.Contains('/') && !OppositePairSources.Any(raw.Contains))
         {
             response = false;
             correctionPrompts.AddPromptWithValues(config, "CorrectAlternativesPrompt", "/");

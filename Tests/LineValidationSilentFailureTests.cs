@@ -53,6 +53,32 @@ public class LineValidationSilentFailureTests
         Assert.Contains(validation.SilentFailures, reason => reason.Contains(@"'\U'"));
     }
 
+    [Fact(DisplayName = "A retry-feedback message echoed into the translation fails, even though it carries the placeholder")]
+    public void EchoedFeedback_FailsWithReason()
+    {
+        var config = BuildConfig();
+        config.Prompts["CorrectRemovalPrompt"] = "Restore `{0}` to the translation, as it was incorrectly removed.";
+
+        var validation = LineValidation.CheckTransalationSuccessful(
+            config,
+            "我#$TargetInteractName#也算是闻名一方的绿林豪杰！识相的快快束手就擒，免得场血光之灾！",
+            "If you know what's good for you, surrender quickly! Restore '#$TargetInteractName#' to the translation, as it was incorrectly removed.",
+            new TextFileToSplit { Path = "Test.txt", TextFileType = TextFileType.RawCsv });
+
+        Assert.False(validation.Valid);
+        Assert.Contains(validation.SilentFailures, reason => reason.Contains("retry feedback"));
+    }
+
+    [Fact(DisplayName = "A slash for an opposite pair in the source (买卖 Buy/Sell) is not an alternative")]
+    public void OppositePairSlash_NotAlternatives()
+    {
+        var config = BuildConfig();
+        var file = new TextFileToSplit { Path = "Test.txt", TextFileType = TextFileType.RawCsv };
+
+        Assert.True(LineValidation.CheckTransalationSuccessful(config, "买卖价格", "Buy/Sell Price", file).Valid);
+        Assert.False(LineValidation.CheckTransalationSuccessful(config, "价格", "Price/Cost", file).Valid);
+    }
+
     [Fact(DisplayName = "Translator commentary about a more natural English equivalent fails with a reason")]
     public void TranslatorCommentary_FailsWithReason()
     {
