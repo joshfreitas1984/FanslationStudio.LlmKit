@@ -20,7 +20,11 @@ How to fix each confirmed defect category:
   never turn a name ending in 月 into "...Month" while the rest stays transliterated).
 - DROPPED_CONTENT: restore the omitted subject/object/clause, or the dropped title/honorific next
   to a name (literal or placeholder), from what SOURCE/context actually supports - never invent
-  unsupported content.
+  unsupported content. A title directly followed by 我 (师傅我, 师姐我, 掌门我) is the speaker referring to
+  themself: write "me, your Master" / "I, your Senior Sister," - first person with the title as an
+  apposition, never a third person ("your Master", "Senior Sister") and never a changed gender. 我 directly
+  before a name placeholder is "I, #PlayerName#," with the placeholder unchanged. Never change who is
+  speaking, and never turn "you" into "I".
 - MEANING_REVERSAL: restore the correct direction/agency - who is granting/asking/threatening/
   blaming what to/of whom - per SOURCE. Never just rephrase while keeping the same backwards
   relationship; the fix must flip the relationship back, not merely reword it.
@@ -42,7 +46,11 @@ Rule for every fix:
 DO NOT change:
 - An already-translated proper noun/title back to raw Pinyin transliteration - a translated name is
   not a defect just because a Pinyin rendering also exists, and undoing an existing translation is a
-  regression, not a fix, no matter which CONFIRMED DEFECTS entry seems to apply.
+  regression, not a fix, no matter which CONFIRMED DEFECTS entry seems to apply. Exception: when
+  CONFIRMED DEFECTS names a person's name, acupoint, or fixed item/weapon/horse/technique name that
+  this corpus keeps in Pinyin but was rendered as an English gloss, replace the gloss with standard
+  Hanyu Pinyin (e.g. "Jiang Shier", "Pudao") - never an ad-hoc romanisation such as "Pukdao" or
+  "Lao'er".
 - Curly-brace placeholders, e.g. {0}, {1} - restored automatically, keep them exactly as given, in
   the same relative position.
 

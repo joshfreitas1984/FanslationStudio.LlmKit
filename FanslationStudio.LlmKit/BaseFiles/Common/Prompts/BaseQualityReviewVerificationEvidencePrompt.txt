@@ -21,6 +21,17 @@ never assuming it's correct just because it was drafted to be:
       SOURCE, not just that all the words are present. A flipped direction (e.g. a threat/bargain
       offered from strength rendered as a captive's plea) is always a NEW defect, even if it was not
       named in CONFIRMED DEFECTS - name it MEANING_REVERSAL.
+      Only report it when you can name the two parties and say exactly how their roles swapped
+      (threat became plea, giver became receiver, asker became asked). A line that keeps the same
+      speaker, target and intent is never a reversal - including first/second-person wording that
+      matches SOURCE's own 我/你 (e.g. "you throw a punch, I throw a kick" for 你一拳我一脚, or "I also
+      contributed" for 我也...出力) and a change of tone or register alone.
+   d. Confirm PROPOSED CORRECTION keeps who is speaking. If SOURCE has a title directly followed by 我
+      (师傅我, 师姐我, 掌门我) or 我 directly before a name placeholder (我#PlayerName#), the speaker must
+      stay first person ("me, your Master", "I, #PlayerName#,") - rewriting the speaker as a third person,
+      or as "you", is always a NEW defect. Equally, never change SOURCE's 你/second-person narration to
+      "I" or the reverse. A title with no 我 touching it is a person being addressed, not a
+      self-reference, so a correction that turns it into one is also a NEW defect.
 3. Grade your confidence that PROPOSED CORRECTION, taken as a whole, is a good replacement for
    TRANSLATION.
 
@@ -28,7 +39,7 @@ DEFECT CATEGORIES (for reference - CONFIRMED DEFECTS names one or more of these)
 - GARBLED_NUMBER: a garbled/dropped/duplicated number or clause.
 - DOMAIN_TERM: a mistranslated domain term that breaks the setting.
 - LOST_IDIOM: a lost idiom/slang meaning rendered as a literal word-for-word gloss. Never applies to a skill/technique/move/title name that is a plain descriptive compound rather than an actual fixed idiom or proverb. When grading a LOST_IDIOM fix, also check whether it traded a concrete source image/number for a vaguer generic paraphrase - that is a register regression, not a fix, no matter how fluently it reads.
-- UNTRANSLATED_PINYIN: a term left untranslated/transliterated as Pinyin when it has a clear translatable meaning. Never applies to any syllable/character inside a personal, place, or faction name that is otherwise kept transliterated.
+- UNTRANSLATED_PINYIN: a term left untranslated/transliterated as Pinyin when it has a clear translatable meaning. Never applies to any syllable/character inside a personal, place, or faction name that is otherwise kept transliterated. Never applies to a PROPOSED CORRECTION that renders a personal name, an acupoint, or a fixed item/weapon/horse/technique name in valid standard Hanyu Pinyin - Pinyin is this corpus's convention for those, not Pinyin left in place of a translation.
 - DROPPED_CONTENT: an omitted subject/object/clause, or a dropped title/honorific next to a name (literal or placeholder).
 - MEANING_REVERSAL: SOURCE's clause-level agency/direction is flipped - who is granting/asking/
   threatening/blaming what to/of whom runs backwards - even though nothing is omitted and every word
@@ -39,14 +50,21 @@ DEFECT CATEGORIES (for reference - CONFIRMED DEFECTS names one or more of these)
 - OTHER_NAMED_DEFECT: something else concrete and nameable, including a dropped/altered placeholder
   token or a fabricated name/character not present in SOURCE (see checks 2a/2b above). Never covers
   replacing an already-translated proper noun/title with a Pinyin transliteration - that's a
-  regression, not a fix.
+  regression, not a fix - EXCEPT for a name or term this corpus keeps in Pinyin (a person's name, an
+  acupoint, a fixed item/weapon/horse/technique name): moving one of those from an English gloss to
+  valid standard Hanyu Pinyin (e.g. 江十二 "River Twelve" -> "Jiang Shier", 朴刀 "Cutlass" -> "Pudao")
+  is the correct fix, never a new defect. Only an invalid or invented romanisation is a new defect
+  (OTHER_NAMED_DEFECT): check each Pinyin syllable against its SOURCE character one-for-one - 老 is
+  "lao", so "La'er" is wrong; 朴 is "pu", so "Pukdao" is wrong. A syllable that is not that
+  character's Hanyu Pinyin, or syllables with no matching character, is always a new defect.
 
 For each category in CONFIRMED DEFECTS, judge PROPOSED CORRECTION against SOURCE and TRANSLATION
 yourself - do not assume it actually fixes what it claims to. A category counts as resolved only
 when PROPOSED CORRECTION genuinely addresses it per the rules above (e.g. for DROPPED_STUTTER,
 TRANSLATION already conveying the stammer in some valid form means there was nothing to resolve in
 the first place, so treat it as resolved). Also check whether PROPOSED CORRECTION reverts an
-already-translated proper noun/title to raw Pinyin, or traded a concrete LOST_IDIOM source image for
+already-translated proper noun/title to raw Pinyin (other than a name or term this corpus keeps in
+Pinyin - see OTHER_NAMED_DEFECT above), or traded a concrete LOST_IDIOM source image for
 a vaguer generic paraphrase - either counts as a NEW defect (OTHER_NAMED_DEFECT), even though it
 happened while addressing a confirmed one.
 

@@ -57,6 +57,14 @@ Given Chinese SOURCE and CURRENT English TRANSLATION, judge accuracy and natural
   taunt shouted at one's own men stays an order/taunt even if its tone, register, or word choice
   ("knaves" vs. "lads", "beat" vs. "hit") differs from SOURCE.
 - Omitted subject/object translated by mechanically carrying forward the subject of a preceding sentence, or defaulted to "I"/"me"/"we"/"you" solely because it's dialogue, when SOURCE/context (who's addressed, observed, examined, described, or acted upon) establish a different speaker/subject/object - can span multiple consecutive dialogue lines. E.g. "莫慌，让为师看看……\n还好还好，只是精疲力竭昏厥过去了。" - second line means roughly "Thank goodness, thank goodness. She only passed out from exhaustion.", not "No need to worry, I just fainted from exhaustion." (wrongly inherits the speaker as subject).
+- Self-reference by title or name rendered as someone else. SOURCE with a title directly followed by 我
+  (师傅我, 师姐我, 掌门我, 师伯我) is the speaker saying "I, your <title>" ("胜过师傅我" is "defeat me, your
+  Master"), and SOURCE with 我 directly before a name placeholder (我#PlayerName#) is the speaker naming
+  themself ("I, #PlayerName#,"). Flag when TRANSLATION turns that into a different person ("defeat your
+  Master", "don't blame Senior Sister", "I #PlayerName# is new"), drops the speaker's 我, or changes the
+  title's gender (师姐 rendered "Brother") - the speaker's own first person is lost (DROPPED_CONTENT). Do NOT
+  flag a title with no 我 touching it (师傅，请你指点我 - the Master is being addressed), 师姐我们 (我们 is
+  "we"), or a TRANSLATION that already reads "me, your Master" / "I, the Sect Leader" / "I, #PlayerName#,".
 - Internal formatting inconsistency within TRANSLATION itself, independent of SOURCE - check this
   even when SOURCE gives no explicit signal, by comparing TRANSLATION only against its own other
   parts:
