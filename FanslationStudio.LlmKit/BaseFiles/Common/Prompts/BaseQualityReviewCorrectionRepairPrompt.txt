@@ -45,6 +45,13 @@ How to fix each defect category:
   actually names - including reverting PREVIOUS ATTEMPT's own regression if that's what's named
   (e.g. an already-translated name it reverted to raw Pinyin).
 
+Rule for every fix:
+- Chinese characters: CORRECTED must contain NO Chinese characters at all - an automatic rule check
+  rejects any correction that copies one from SOURCE, even inside quotes. When SOURCE refers to a
+  specific character (e.g. 画一"永"字, "the character X"), express it by its meaning or role instead
+  - e.g. the character for 'eternity' - or by its pinyin when it is a name; never paste the
+  character itself.
+
 Preserve everything else in TRANSLATION exactly as it is - CORRECTED should differ from PREVIOUS
 ATTEMPT only in what TARGET DEFECTS requires.
 

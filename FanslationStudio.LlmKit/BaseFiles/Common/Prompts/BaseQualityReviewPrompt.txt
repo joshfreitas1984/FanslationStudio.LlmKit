@@ -36,6 +36,9 @@ Given Chinese SOURCE and CURRENT English TRANSLATION, judge accuracy and natural
   (e.g. "None", "null", "N/A", an empty string) where SOURCE has real content - a leaked
   non-translation, not a stylistic issue, even though the placeholder itself reads as a normal
   English word.
+  Not a defect: TRANSLATION giving the meaning of a Chinese character SOURCE quotes (e.g. "the character
+  for 'eternity'" for "永"字) instead of copying the character - the output must stay free of Chinese
+  characters, so a meaning-based rendering is correct.
 - Leaked translator output that is not part of the game text: instructions, meta-commentary, or
   notes about the translation itself (e.g. "Here is the translated text:", "(Note: the name is kept
   in Pinyin)", "Output only English."), whether it replaces the translation or is appended to it.
