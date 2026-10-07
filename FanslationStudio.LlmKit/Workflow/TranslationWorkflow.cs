@@ -632,8 +632,20 @@ public static class TranslationWorkflow
     /// <see cref="ApplyTranslationRules"/> and <see cref="Workflow.QualityReviewWorkflow"/>'s QC
     /// validation gate, same as <see cref="IsMissingRequiredEllipsis"/>.
     /// </summary>
-    internal static bool IsMissingRequiredNegativeSign(string preparedRaw, string translated) =>
-        NegativeNumberRegex.Matches(preparedRaw).Count > NegativeNumberRegex.Matches(translated).Count;
+    internal static bool IsMissingRequiredNegativeSign(string preparedRaw, string translated)
+    {
+        var missing = NegativeNumberRegex.Matches(preparedRaw).Count - NegativeNumberRegex.Matches(translated).Count;
+        if (missing <= 0)
+            return false;
+
+        // A sign can be carried by wording instead ("qi -10" -> "qi decreases by 10"); each such
+        // word covers one dropped sign, so a genuinely stripped sign still fails.
+        return missing > NegativeWordRegex.Matches(translated).Count;
+    }
+
+    private static readonly Regex NegativeWordRegex = new(
+        @"\b(decreas\w*|reduc\w*|lower\w*|lose[sd]?|loss|minus|drop\w*|less|cut|penalt\w+|subtract\w*|declin\w*|deplet\w*)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     /// <summary>
     /// Returns the first configured <see cref="LlmConfig.ExtraStringTokenReplacers"/> token present

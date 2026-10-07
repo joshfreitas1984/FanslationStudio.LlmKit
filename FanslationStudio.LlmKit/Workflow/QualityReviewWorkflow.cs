@@ -525,11 +525,33 @@ public static class QualityReviewWorkflow
         return maskedCandidate =>
         {
             var restored = LineValidation.PrepareResult(rawText, tokenReplacer.Restore(maskedCandidate), config.Hooks, textFile, split);
-            return restored == effectiveTranslated
+            return IsEquivalentText(restored, effectiveTranslated)
                 ? null
                 : EvaluateQcCandidate(config, modelConfig, rawText, restored, effectiveTranslated, textFile, split)?.Trim();
         };
     }
+
+    /// <summary>
+    /// True when two translations differ only by non-breaking hyphens (U+2011, which the save-time
+    /// cleanup normalises ordinary hyphens to) or whitespace - i.e. a "correction" that is the
+    /// baseline in disguise and would be byte-identical after saving.
+    /// </summary>
+    internal static bool IsEquivalentText(string a, string b) =>
+        NormalizeForComparison(a) == NormalizeForComparison(b);
+
+    private static string NormalizeForComparison(string text) =>
+        Regex.Replace(text.Replace('‑', '-'), @"\s+", "");
+
+    private static readonly Regex RunawayRepeatRegex = new(@"(\p{L})\1{9,}", RegexOptions.Compiled);
+
+    /// <summary>
+    /// Rejects a correction that contains a run of 10+ identical letters ("youuuuuuu...") that the
+    /// baseline translation does not - a model degeneration seen on long vowel/shout sources.
+    /// </summary>
+    internal static string? CheckRunawayRepetition(string baselineTranslated, string candidate) =>
+        RunawayRepeatRegex.IsMatch(candidate) && !RunawayRepeatRegex.IsMatch(baselineTranslated)
+            ? "The correction contains a runaway repeated character."
+            : null;
 
     private static string? EvaluateQcCandidate(
         LlmConfig config,
@@ -544,7 +566,7 @@ public static class QualityReviewWorkflow
         var ruleResult = TranslationWorkflow.EvaluateRules(config, modelConfig, preparedRaw, rawText, candidate, textFile, split);
         var capsFailureReason = CheckCapitalizationRegression(baselineTranslated, candidate);
 
-        return capsFailureReason ?? CheckInventedStutter(rawText, baselineTranslated, candidate) ?? CheckInvalidPinyin(baselineTranslated, candidate) ?? CheckSelfReferenceRegression(rawText, baselineTranslated, candidate) ?? ruleResult.AllReasons.FirstOrDefault();
+        return capsFailureReason ?? CheckRunawayRepetition(baselineTranslated, candidate) ?? CheckInventedStutter(rawText, baselineTranslated, candidate) ?? CheckInvalidPinyin(baselineTranslated, candidate) ?? CheckSelfReferenceRegression(rawText, baselineTranslated, candidate) ?? ruleResult.AllReasons.FirstOrDefault();
     }
 
     /// <summary>
@@ -1079,7 +1101,7 @@ public static class QualityReviewWorkflow
         // == null, above) rather than as a low-confidence match that still needs human review - the
         // CONSISTENCY convention (DEFECT: NONE requires SCORE 80+) is restored here explicitly since
         // the model's own SCORE/DEFECT lines were computed against a claim that didn't actually pan out.
-        if (correctedResult == effectiveTranslated)
+        if (IsEquivalentText(correctedResult, effectiveTranslated))
         {
             anchor.QcDefectCategory = QcDefectCategory.None;
             anchor.QcDefectCategories = DefectCategoriesFor(QcDefectCategory.None);

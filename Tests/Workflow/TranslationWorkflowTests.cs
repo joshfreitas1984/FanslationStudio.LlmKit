@@ -25,6 +25,8 @@ public class TranslationWorkflowTests
     [InlineData("-0.5%全属性\\n-0.5%内力上限", "‑0.5% All Attributes\\n‑0.5% Max Inner Power", false)] // both preserved (non-breaking hyphen)
     [InlineData("-0.5%全属性", "-0.5% All Attributes", false)] // preserved as plain ASCII hyphen too
     [InlineData("全属性", "All Attributes", false)] // no negative number in source at all
+    [InlineData("气-10，嘴力提升100%", "Qi decreases by 10, verbal prowess improves by 100%", false)] // sign carried by wording
+    [InlineData("防御-50%，攻击-20%", "Defense decreases by 50%, attack 20%", true)] // one sign still unaccounted for
     public void IsMissingRequiredNegativeSignDetectsDroppedSign(string preparedRaw, string translated, bool expected)
     {
         var method = typeof(TranslationWorkflow).GetMethod(
