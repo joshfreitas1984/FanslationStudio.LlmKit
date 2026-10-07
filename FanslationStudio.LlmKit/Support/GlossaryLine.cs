@@ -46,20 +46,14 @@ public class GlossaryLine
     public static string AppendPromptsFor(string raw, List<GlossaryLine> glossaryLines, string outputFile)
     {
         StringBuilder? prompt = null;
+        var shadowed = FindShadowedByLongerMatch(raw, glossaryLines, outputFile);
 
         foreach (var line in glossaryLines)
         {
-            if (!line.AppliesToFile(outputFile))
+            if (!line.AppliesToFile(outputFile) || shadowed.Contains(line))
                 continue;
 
-            string? matched = null;
-            if (raw.Contains(line.Raw))
-                matched = line.Raw;
-            else if (line.RawSimplified != string.Empty && raw.Contains(line.RawSimplified))
-                matched = line.RawSimplified;
-            else if (line.RawTraditional != string.Empty && raw.Contains(line.RawTraditional))
-                matched = line.RawTraditional;
-
+            var matched = line.MatchIn(raw);
             if (matched == null)
                 continue;
 
@@ -68,6 +62,64 @@ public class GlossaryLine
         }
 
         return prompt == null ? string.Empty : prompt.AppendLine("```").ToString();
+    }
+
+    /// <summary>
+    /// The raw variant (<see cref="Raw"/>, then <see cref="RawSimplified"/>, then
+    /// <see cref="RawTraditional"/>) that appears in <paramref name="raw"/>, or null when none does.
+    /// </summary>
+    public string? MatchIn(string raw)
+    {
+        if (!string.IsNullOrEmpty(Raw) && raw.Contains(Raw))
+            return Raw;
+        if (RawSimplified != string.Empty && raw.Contains(RawSimplified))
+            return RawSimplified;
+        if (RawTraditional != string.Empty && raw.Contains(RawTraditional))
+            return RawTraditional;
+        return null;
+    }
+
+    /// <summary>
+    /// Glossary lines whose every occurrence in <paramref name="raw"/> sits inside an occurrence of a
+    /// strictly longer glossary term that also matched - e.g. 三七 (the herb, "Sanqi") inside the idiom
+    /// 三七开 ("70/30 split"). Matching is otherwise plain substring, so without this the short term
+    /// would be injected into the prompt and demanded in the translation although the text is using
+    /// the longer term. The one definition shared by the prompt block (<see cref="AppendPromptsFor"/>)
+    /// and the rule check that demands a glossary term appear in the translation. A short term that
+    /// also occurs on its own elsewhere in <paramref name="raw"/> is not shadowed. Terms only count as
+    /// shadowing when they apply to <paramref name="outputFile"/>.
+    /// </summary>
+    public static HashSet<GlossaryLine> FindShadowedByLongerMatch(string raw, IEnumerable<GlossaryLine> glossaryLines, string outputFile)
+    {
+        var matches = new List<(GlossaryLine Line, string Matched)>();
+        foreach (var line in glossaryLines)
+        {
+            if (!line.AppliesToFile(outputFile))
+                continue;
+            var matched = line.MatchIn(raw);
+            if (matched != null)
+                matches.Add((line, matched));
+        }
+
+        var shadowed = new HashSet<GlossaryLine>();
+        foreach (var (line, matched) in matches)
+        {
+            var longer = matches.Where(m => m.Matched.Length > matched.Length && m.Matched.Contains(matched)).ToList();
+            if (longer.Count == 0)
+                continue;
+
+            var longerSpans = longer.SelectMany(m => OccurrencesOf(raw, m.Matched)).ToList();
+            if (OccurrencesOf(raw, matched).All(span => longerSpans.Any(outer => outer.Start <= span.Start && span.End <= outer.End)))
+                shadowed.Add(line);
+        }
+
+        return shadowed;
+    }
+
+    private static IEnumerable<(int Start, int End)> OccurrencesOf(string raw, string term)
+    {
+        for (var index = raw.IndexOf(term, StringComparison.Ordinal); index >= 0; index = raw.IndexOf(term, index + 1, StringComparison.Ordinal))
+            yield return (index, index + term.Length);
     }
 
     /// <summary>Applies the "only"/"exclude" output-file scoping for this entry.</summary>

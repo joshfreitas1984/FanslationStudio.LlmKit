@@ -779,6 +779,9 @@ public static class TranslationWorkflow
         if (!textFile.EnableGlossary)
             yield break;
 
+        // A term used only as part of a longer matched term (三七 inside 三七开) is not demanded on its own.
+        var shadowed = GlossaryLine.FindShadowedByLongerMatch(rawText, config.Runtime.GlossaryLines, textFile.Path);
+
         foreach (var item in config.Runtime.GlossaryLines)
         {
             if (!item.CheckForBadTranslation)
@@ -794,7 +797,7 @@ public static class TranslationWorkflow
                 || (!string.IsNullOrEmpty(item.RawSimplified) && rawText.Contains(item.RawSimplified))
                 || (!string.IsNullOrEmpty(item.RawTraditional) && rawText.Contains(item.RawTraditional));
 
-            if (!matchedRaw || candidate.Contains(item.Result, StringComparison.OrdinalIgnoreCase))
+            if (!matchedRaw || shadowed.Contains(item) || candidate.Contains(item.Result, StringComparison.OrdinalIgnoreCase))
                 continue;
 
             if (item.AllowedAlternatives.Any(alternative => candidate.Contains(alternative, StringComparison.OrdinalIgnoreCase)))

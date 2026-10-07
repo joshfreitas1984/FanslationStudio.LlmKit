@@ -106,6 +106,32 @@ public class SharedHelperTests
         Assert.Contains(similar, s => s.Contains("raw1: \"Hello\""));
     }
 
+    [Fact(DisplayName = "Glossary analysis reports a multi-character badtrans-off entry contained in a longer entry")]
+    public void AnalyseGlossaryForIssues_ReportsPromptOnlyContainment()
+    {
+        var conflicts = GlossaryWorkflow.AnalyseGlossaryForIssues(
+        [
+            new GlossaryLine { Raw = "三七", Result = "Sanqi", CheckForBadTranslation = false },
+            new GlossaryLine { Raw = "三七开", Result = "70/30", CheckForBadTranslation = false },
+        ]).ConflictingEntries;
+
+        var conflict = Assert.Single(conflicts);
+        Assert.Contains("has '三七' in '三七开'", conflict);
+        Assert.Contains("badtrans = false", conflict);
+    }
+
+    [Fact(DisplayName = "Glossary analysis ignores a single-character badtrans-off entry contained in a longer entry")]
+    public void AnalyseGlossaryForIssues_IgnoresSingleCharacterPromptOnlyContainment()
+    {
+        var conflicts = GlossaryWorkflow.AnalyseGlossaryForIssues(
+        [
+            new GlossaryLine { Raw = "刚", Result = "Hard", CheckForBadTranslation = false },
+            new GlossaryLine { Raw = "熊刚", Result = "Xiong Gang", CheckForBadTranslation = false },
+        ]).ConflictingEntries;
+
+        Assert.Empty(conflicts);
+    }
+
     [Fact(DisplayName = "GetFailedTranslations reports untranslated CJK splits and dedupes short glossary candidates in order")]
     public async Task GetFailedTranslations_ReportsAndDedupes()
     {

@@ -86,14 +86,22 @@ public static class GlossaryWorkflow
         return similar;
     }
 
+    /// <summary>Shortest raw a badtrans-off entry needs to be reported as the contained side of a containment conflict.</summary>
+    private const int MinPromptOnlyContainedLength = 2;
+
     private static HashSet<string> FindConflictingEntries(GlossaryLine[] allEntries)
     {
         var conflicts = new HashSet<string>();
 
-        // Only bad-translation entries can be the contained side, so resolve their variants once.
+        // A bad-translation entry can always be the contained side. An entry with badtrans off is not
+        // enforced by the rule check but is still injected into the translation/QC prompts as a "must
+        // use" term, so it conflicts just the same (preset 三七 "Sanqi", badtrans off, inside the idiom
+        // 三七开). Those are limited to multi-character raws: single characters are name syllables
+        // (刚, 阴) and report thousands of overlaps that GlossaryLine.FindShadowedByLongerMatch already
+        // neutralises at runtime. Resolve the variants once.
         var checkingEntries = allEntries
             .Select((entry, index) => (Entry: entry, Index: index))
-            .Where(x => x.Entry.CheckForBadTranslation)
+            .Where(x => x.Entry.CheckForBadTranslation || x.Entry.Raw.Length >= MinPromptOnlyContainedLength)
             .Select(x => (x.Entry, x.Index, Variants: GetVariants(x.Entry).ToArray()))
             .ToArray();
 
@@ -141,7 +149,9 @@ public static class GlossaryWorkflow
         var sb = new StringBuilder();
         sb.AppendLine("Containment conflict found:");
         AppendEntry(sb, $"  Containing Entry (has '{matchedVariant}' in '{baseEntry.Raw}'):", baseEntry);
-        AppendEntry(sb, "  Contained Entry (badtrans = true):", checkingEntry);
+        AppendEntry(sb, checkingEntry.CheckForBadTranslation
+            ? "  Contained Entry (badtrans = true):"
+            : "  Contained Entry (badtrans = false - not rule-checked, but still injected into prompts):", checkingEntry);
         return sb.ToString();
     }
 
