@@ -79,6 +79,14 @@ qualityControl:
 | `autoAcceptDefectCategories` | Yes as a field, but **must start empty/placeholder in a new repo** | DragonHeir's populated list (`HardToParseSeam, OtherNamedDefect, DroppedContent, DroppedStutter`) is the product of real hand-triage over that game's corpus (see `downstream-test-organization.md`'s QC triage facts, `"5. Triage Flagged Quality Control Items"` / `"6. Generate Quality Control Fix Prompts"`). A new repo must not copy DragonHeir's list — it should start empty/commented and be populated per-project from that repo's own triage output. |
 | `twoStageVerificationEnabled` | Yes | |
 
+## No assessment config in a game
+
+Model and QC assessments run from LlmKit's `FanslationStudio.LlmKit.Assessments` host, against a self-contained gold
+set. A game's `Config.yaml` carries no `translationAssessment`, `qualityControlAssessment` or pinned sample sources, and
+the game has no `Goldset/` folder or assessment test (retired from DragonHierOverLlm on 2026-10-09; see
+[`plans/qc-goldset-regression-migration.md`](../../plans/qc-goldset-regression-migration.md)). The keys still exist on
+`LlmConfig` for the host's own config.
+
 ## Required vs. game-specific, summarized
 
 - **Required shape (structure must exist in every repo):** `models` list shape,

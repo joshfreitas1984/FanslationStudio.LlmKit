@@ -84,6 +84,11 @@ a QC test file should check for exactly these two things:
 2. Does it have a `"0."`-numbered fact that brute-forces **both** translation and QC state and
    re-packages, not just a QC-only brute-force?
 
+## Assessments are not a game test
+
+A game's `Tests/` has no `AssessmentWorkflowTests`: translation-model and QC-model assessments, and the gold set they
+use, live in LlmKit's `FanslationStudio.LlmKit.Assessments` (manual facts gated by `LLMKIT_ASSESSMENTS=1`).
+
 ## Project boundary
 
 The required downstream layout keeps reusable workflow/configuration code in `Translate/` and
