@@ -520,6 +520,8 @@
   rawSimplified: 侠客
   rawTraditional: 俠客
   result: Hero
+  allowalt:
+  - Wanderer
   badtrans: false
 - raw: 江湖侠客
   rawSimplified: 江湖侠客

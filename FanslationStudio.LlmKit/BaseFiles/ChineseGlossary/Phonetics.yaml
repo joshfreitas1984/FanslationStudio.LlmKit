@@ -84,7 +84,7 @@
   result: Gege
   allowalt:
   - laugh
-- badtrans: false
+  badtrans: false
 - raw: 咯...
   result: Ge...
   badtrans: false

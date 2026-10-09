@@ -48,7 +48,6 @@
   rawTraditional: 外傷
   result: External Injury
   allowalt:
-  - Extra Damage
   - Damage
   - External Injuries
   badtrans: false
@@ -62,7 +61,6 @@
   result: Confusion
   allowalt:
   - Confuse
-  - mesmerizing
   badtrans: false
 - raw: 冰封
   result: Frozen
@@ -100,8 +98,6 @@
   literal: Zhenqi
   context: True Qi / True Energy
   badtrans: false
-  allowalt:
-   - grand 
 - raw: 根骨
   result: Potential
   context: refers to a person's natural physical foundation or constitution, often indicating their inherent strength, potential, or aptitude, especially in martial arts or cultivation contexts. It can also imply the sturdiness or resilience of one's physical body. Synonymous to Bone Structure
@@ -111,11 +107,6 @@
   direct: Strength path
   literal: Lidao
   badtrans: false
-- raw: 筋骨
-  result: Muscle & Bone
-  literal: Jingu
-  context: refers to the tendons and bones, representing the physical strength, flexibility, and overall robustness of the body. In traditional Chinese contexts, it is often used to describe a person's physical condition or potential for martial prowess.
-  badtrans: false
 - raw: 体魄
   rawSimplified: 体魄
   rawTraditional: 體魄
@@ -123,11 +114,6 @@
   allowalt:
     - Body
   context: refers to the physical body or physique, often implying strength, health, or robustness in terms of physical constitution.
-- raw: 命中
-  result: Hit Rate
-  direct: Ming Zhong
-  literal: Ming Zhong
-  badtrans: false
 - raw: 太阴
   rawSimplified: 太阴
   rawTraditional: 太陰
@@ -136,34 +122,11 @@
 - raw: 太阳
   rawSimplified: 太阳
   rawTraditional: 太陽
-  result: Great Yang
+  result: Sun
+  allowalt:
+  - Great Yang
+  - Taiyang
   context: Conflicts with temples
-  badtrans: false
-- raw: 阴
-  rawSimplified: 阴
-  rawTraditional: 陰
-  result: Yin
-  context: Commonly used in other translations
-  badtrans: false
-- raw: 阳
-  rawSimplified: 阳
-  rawTraditional: 陽
-  result: Yang
-  context: Commonly used in other translations
-  badtrans: false
-- raw: 刚
-  rawSimplified: 刚
-  rawTraditional: 剛
-  result: Hard
-  context: Commonly used in other translations
-  badtrans: false
-- raw: 柔
-  result: Soft
-  context: Commonly used in other translations
-  badtrans: false
-- raw: 毒
-  result: Poison
-  context: 
   badtrans: false
 - raw: 生命
   result: Health
@@ -245,8 +208,6 @@
   rawSimplified: 专注
   rawTraditional: 專注
   result: Focus
-  allowalt:
-  - Concentratio
   context: refers to a high level of concentration or mental focus. Reaching a level of 50 indicates a significant mastery of maintaining intense focus, which is crucial for improving technique, anticipating movements, and staying calm during combat.
   badtrans: false
 - raw: 要害

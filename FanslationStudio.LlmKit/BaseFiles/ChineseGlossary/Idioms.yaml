@@ -106,3 +106,10 @@
   direct: Wash hands in a golden basin.
   literal: Jīn pén xǐ shǒu.
   badtrans: false
+- raw: 三七二十一
+  result: regardless of the consequences
+  allowalt:
+  - whatever the consequences
+  - come what may
+  - no matter what
+  badtrans: false

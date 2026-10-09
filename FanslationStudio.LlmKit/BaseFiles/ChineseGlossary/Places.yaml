@@ -29,10 +29,6 @@
   rawSimplified: 酒馆
   rawTraditional: 酒館
   result: Tavern
-- raw: 酒坊
-  result: Winery
-  allowalt:
-  - Wineries
 - raw: 青楼
   rawSimplified: 青楼
   rawTraditional: 青樓
@@ -60,10 +56,6 @@
   rawSimplified: 石料厂
   rawTraditional: 石料廠
   result: Stone Quarry
-- raw: 盐场
-  rawSimplified: 盐场
-  rawTraditional: 鹽場
-  result: Salt Farm
 - raw: 香料场
   rawSimplified: 香料场
   rawTraditional: 香料場

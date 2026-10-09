@@ -87,14 +87,6 @@
   direct: Xiu Luo Dao
   literal: Asura path / path of demonic warriors
 # Ancient Factions
-- raw: 西夏
-  result: Western Xia
-  direct: Western Xia
-  literal: Xixia
-- raw: 吐蕃
-  result: Tubo
-  direct: Tubo
-  literal: Tufan (Tibetan)
 - raw: 唐門
   rawSimplified: 唐门
   rawTraditional: 唐門
@@ -108,10 +100,6 @@
   literal: Tangmen Zhangmen
   allowalt:
   - Tang Clan Sect Master
-- raw: 飛石幫
-  rawSimplified: 飞石帮
-  rawTraditional: 飛石幫
-  result: Flying Stone Gang
 - raw: 青城
   result: Qingcheng
   direct: Green City
@@ -139,21 +127,10 @@
   allowalt:
     - Beggars' Sect
     - Beggars Sect
-- raw: 恶人谷
-  rawSimplified: 恶人谷
-  rawTraditional: 惡人谷
-  result: Villains Valley
-  badtrans: true
-  direct: Evil person valley
-  literal: e ren gu
 - raw: 天山
   result: Tianshan
   direct: Heaven Mountain
   literal: Tianshan
-- raw: 雪山派
-  result: Snow Mountain Sect
-  direct: Snow Mountain Faction
-  literal: Xueshan pai
 - raw: 鳳凰山
   rawSimplified: 凤凰山
   rawTraditional: 鳳凰山
@@ -187,28 +164,12 @@
   - Yue Family
   direct: Mountain Family
   literal: Yue jia
-- raw: 段家
-  result: Duan Clan
-  allowalt:
-  - Duan Family
-  direct: Segment Family
-  literal: Duan jia
 - raw: 胡家
   result: Hu Clan
   allowalt:
   - Hu Family
   direct: Hu Family
   literal: Hu jia
-- raw: 全真
-  result: Quanzhen
-  direct: Complete Truth
-  literal: Quanzhen
-- raw: 錦香
-  rawSimplified: 锦香
-  rawTraditional: 錦香
-  result: Jinxiang
-  direct: Brocade Fragrance
-  literal: Jin Xiang
 - raw: 點蒼
   rawSimplified: 点苍
   rawTraditional: 點蒼
@@ -221,10 +182,6 @@
   result: Iron Fist
   direct: Iron Fist
   literal: Tiequan
-- raw: 泥教
-  result: Mud Cult
-  direct: Mud Teaching
-  literal: Ni jiao
 - raw: 奪魄
   rawSimplified: 夺魄
   rawTraditional: 奪魄
