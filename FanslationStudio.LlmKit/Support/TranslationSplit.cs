@@ -40,13 +40,13 @@ public class TranslationSplit
     [YamlMember(ScalarStyle = ScalarStyle.DoubleQuoted)]
     public string FlaggedHallucination { get; set; } = string.Empty;
 
-    // --- Quality review pass fields (see docs/plans/quality-review-pass.md in DragonHierOverLlm) ---
+    // --- Quality control pass fields (see docs/plans/quality-control-pass.md in DragonHierOverLlm) ---
     // Additive/optional, per the golden rule - all default to values that preserve old behavior
     // for any TranslationSplit that predates this feature (old serialized YAML deserializes with
     // QcStatus.NotReviewed and every Qc* string/nullable empty/null, i.e. "never reviewed").
 
     /// <summary>
-    /// The exact "effective cell text" (see QualityReviewWorkflow - <see cref="Translated"/> for a
+    /// The exact "effective cell text" (see QualityControlWorkflow - <see cref="Translated"/> for a
     /// plain column, or the reconstructed cell for a templated column) that was reviewed to
     /// produce the current <see cref="QcStatus"/>. A subsequent QC run skips this split/column (no
     /// LLM call) while its current effective text still equals this value; if the underlying
@@ -64,13 +64,13 @@ public class TranslationSplit
     /// cell text. For a templated/compound column, only the column's <c>SubIndex == 0</c> fragment
     /// ever carries a meaningful value here - it represents the whole reconstructed cell's QC
     /// correction (there is one QC verdict per column, not per fragment, since the QC pass reviews
-    /// the fully reconstructed cell - see QualityReviewWorkflow). Other fragments in the same
+    /// the fully reconstructed cell - see QualityControlWorkflow). Other fragments in the same
     /// column (SubIndex >= 1) leave this empty.
     /// </summary>
     [YamlMember(ScalarStyle = ScalarStyle.DoubleQuoted)]
     public string QcTranslated { get; set; } = string.Empty;
 
-    /// <summary>Outcome of the last quality review pass. See <see cref="Support.QcStatus"/>.</summary>
+    /// <summary>Outcome of the last quality control pass. See <see cref="Support.QcStatus"/>.</summary>
     public QcStatus QcStatus { get; set; } = QcStatus.NotReviewed;
 
     /// <summary>
@@ -99,7 +99,7 @@ public class TranslationSplit
     /// <see cref="Translated"/>/<see cref="QcTranslated"/> value is an accurate, well-constructed
     /// translation of <see cref="Text"/>. Null means "not yet reviewed" (distinct from a real 0).
     /// Treat as a relative sort key for triage, not a calibrated absolute metric - see
-    /// docs/plans/quality-review-pass.md's score-calibration caveat.
+    /// docs/plans/quality-control-pass.md's score-calibration caveat.
     /// </summary>
     public int? QcQualityScore { get; set; }
 
@@ -111,30 +111,30 @@ public class TranslationSplit
     /// </summary>
     public QcDefectCategory QcDefectCategory { get; set; } = QcDefectCategory.Unknown;
 
-    /// <summary>All defect categories found during the latest quality review, in detector order.
+    /// <summary>All defect categories found during the latest quality control, in detector order.
     /// The scalar <see cref="QcDefectCategory"/> remains the primary category for existing
     /// consumers; this collection preserves co-occurring findings for newer triage and reporting.
     /// </summary>
     public List<QcDefectCategory> QcDefectCategories { get; set; } = [];
 
     /// <summary>
-    /// How many consecutive times <see cref="Workflow.QualityReviewWorkflow.ApplyRulesToCurrentQcTranslated"/>
+    /// How many consecutive times <see cref="Workflow.QualityControlWorkflow.ApplyRulesToCurrentQcTranslated"/>
     /// has reset this column's <see cref="QcTranslated"/> for breaking a rule, against the SAME
     /// underlying <see cref="Translated"/> baseline (see <see cref="QcRuleCheckFailureBaseline"/>).
-    /// Once this reaches <see cref="Configuration.QualityReviewConfig.MaxRuleCheckRetries"/>, the
+    /// Once this reaches <see cref="Configuration.QualityControlConfig.MaxRuleCheckRetries"/>, the
     /// column stops being retried automatically - its correction is still discarded like every
     /// other reset (packaging never trusts a rule-breaking QcTranslated), but <see cref="QcStatus"/>
     /// is left at <see cref="Support.QcStatus.FailedValidation"/> instead of
-    /// <see cref="Support.QcStatus.NotReviewed"/>, so <see cref="Workflow.QualityReviewWorkflow.RunAsync"/>
+    /// <see cref="Support.QcStatus.NotReviewed"/>, so <see cref="Workflow.QualityControlWorkflow.RunAsync"/>
     /// stops re-reviewing it and it's surfaced for a human instead
-    /// (<see cref="Workflow.QualityReviewWorkflow.GetFlaggedQcReviews"/>), exactly like a
+    /// (<see cref="Workflow.QualityControlWorkflow.GetFlaggedQcReviews"/>), exactly like a
     /// freshly-rejected correction already is. Deliberately NOT cleared by
     /// <see cref="ResetQcState"/> - unlike every other Qc* field, this needs to survive the very
     /// reset it's counting, or it could never accumulate past 1. Never persists across an upstream
     /// change though: <see cref="QcRuleCheckFailureBaseline"/> not matching the column's current
     /// effective translated text means the count restarts from 0 - a retranslation, manual fix, or
     /// repair deserves a fresh retry budget, not one already exhausted by different text. A human
-    /// can also explicitly clear this (see <see cref="Workflow.QualityReviewWorkflow.ResetQcRetryLimits"/>)
+    /// can also explicitly clear this (see <see cref="Workflow.QualityControlWorkflow.ResetQcRetryLimits"/>)
     /// if they've fixed the underlying cause (e.g. removed a false-positive bad word) and want
     /// previously given-up columns retried anyway.
     /// </summary>
@@ -173,8 +173,8 @@ public class TranslationSplit
     }
 
     /// <summary>
-    /// Clears every quality-review-pass field back to "never reviewed" - called by
-    /// <see cref="Workflow.QualityReviewWorkflow"/> immediately before recording a fresh review
+    /// Clears every quality-control-pass field back to "never reviewed" - called by
+    /// <see cref="Workflow.QualityControlWorkflow"/> immediately before recording a fresh review
     /// outcome, so a stale <see cref="QcTranslated"/>/<see cref="FlaggedForQcReview"/> from an
     /// earlier review of different text (e.g. before a retranslation changed <see cref="Translated"/>)
     /// never lingers alongside this review's result.

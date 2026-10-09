@@ -18,7 +18,7 @@ public class JsonGameDataWorkflowTests
         Directory.CreateDirectory($"{dir}/Raw/Dumped");
 
         // Minimal Config.yaml - just enough for ConfigurationExtensions.GetConfiguration to succeed
-        // (PackageAsync reads QualityReview.MinAcceptableScore from it, defaulted to 70).
+        // (PackageAsync reads QualityControl.MinAcceptableScore from it, defaulted to 70).
         File.WriteAllText($"{dir}/Config.yaml", "models:\n  - name: Standard\n    model: test-model\n    url: \"http://localhost/test\"\n");
 
         return dir;

@@ -6,7 +6,7 @@ namespace FanslationStudio.LlmKit.Workflow;
 
 /// <summary>
 /// Asks a preset's own model to rewrite its own prompt files (BaseSystemPrompt, Corrections,
-/// Dynamics, BaseQualityReviewPrompt, etc. - every *.txt under BaseFiles/&lt;preset&gt;/) for
+/// Dynamics, BaseQualityControlPrompt, etc. - every *.txt under BaseFiles/&lt;preset&gt;/) for
 /// lower token cost/context usage without changing behaviour, and overwrites each source file in
 /// place with the suggestion. This edits git-tracked source files directly - review the result
 /// with `git diff` in the LlmKit repo and commit or discard per file, the same as any other
@@ -18,8 +18,8 @@ namespace FanslationStudio.LlmKit.Workflow;
 public static class PromptOptimisationWorkflow
 {
     // Deliberately conservative after an earlier run (asking only for "fewer tokens/less context")
-    // gutted BaseSystemPrompt.txt (1543 -> 121 chars) and BaseQualityReviewPrompt.txt (2296 -> 418
-    // chars), dropping whole rules and the literal SCORE:/CORRECTED: labels QualityReviewWorkflow's
+    // gutted BaseSystemPrompt.txt (1543 -> 121 chars) and BaseQualityControlPrompt.txt (2296 -> 418
+    // chars), dropping whole rules and the literal SCORE:/CORRECTED: labels QualityControlWorkflow's
     // regexes depend on - "optimise for brevity" alone reads as license to summarize away content
     // and break callers that parse specific literal tokens out of the response. This wording asks
     // for tighter phrasing per rule, never fewer rules, and is paired with the placeholder-token
@@ -60,7 +60,7 @@ public static class PromptOptimisationWorkflow
     /// was rejected, the same "assistant reply + corrective user message" shape
     /// <see cref="TranslationService.AddCorrectionMessages"/> uses for translation retries) before
     /// giving up and leaving the file untouched. Without this, the files that most need a good
-    /// rewrite - the long, multi-rule ones like BaseSystemPrompt/BaseQualityReviewPrompt - are
+    /// rewrite - the long, multi-rule ones like BaseSystemPrompt/BaseQualityControlPrompt - are
     /// exactly the ones a single-shot attempt is most likely to fail the guards on and skip
     /// entirely.
     /// </summary>

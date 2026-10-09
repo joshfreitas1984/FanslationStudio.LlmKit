@@ -79,8 +79,8 @@ and [`.github/copilot-instructions.md`](../.github/copilot-instructions.md).
 | `CompoundFieldSplitter` feature behavior | [`features/compound-field-splitting/compound-field-splitting.md`](features/compound-field-splitting/compound-field-splitting.md) |
 | `TranslationService` retry/escalation mechanics and postmortems | [`investigations/translation-retry-escalation-and-fixes.md`](investigations/translation-retry-escalation-and-fixes.md) |
 | Text handling: CSV/JSON, PrefabText, dynamic strings, and LocalTextString | [`features/text-handling/csv-json-workflows.md`](features/text-handling/csv-json-workflows.md), [`features/text-handling/`](features/text-handling/) |
-| Translation pipeline: glossary, workflows, GameHooks, and quality review | [`features/translation-pipeline/`](features/translation-pipeline/) |
-| Post-translation quality review pass — current behavior and local postmortems | [`features/translation-pipeline/quality-review-pass.md`](features/translation-pipeline/quality-review-pass.md), [`investigations/quality-review-postmortems.md`](investigations/quality-review-postmortems.md) |
+| Translation pipeline: glossary, workflows, GameHooks, and quality control | [`features/translation-pipeline/`](features/translation-pipeline/) |
+| Post-translation quality control pass — current behavior and local postmortems | [`features/translation-pipeline/quality-control-pass.md`](features/translation-pipeline/quality-control-pass.md), [`investigations/quality-control-postmortems.md`](investigations/quality-control-postmortems.md) |
 | Packaging workflows and file types | [`features/packaging/packaging-workflows.md`](features/packaging/packaging-workflows.md) |
 | Downstream translation-project structure and sub-project layout | [`architecture/downstream-project-structure/downstream-project-structure.md`](architecture/downstream-project-structure/downstream-project-structure.md) |
 | Downstream translation-project test organization | [`architecture/downstream-project-structure/downstream-test-organization.md`](architecture/downstream-project-structure/downstream-test-organization.md) |
@@ -99,9 +99,10 @@ separate from this navigation table and contains one-line pointers only.
 | --- | --- |
 | Understand the core `Line`/`Split`/`Template` data model or config loading | [`.github/copilot-instructions.md`](../.github/copilot-instructions.md), [`architecture/ARCHITECTURE.md`](architecture/ARCHITECTURE.md) |
 | Debug/extend `CompoundFieldSplitter.Decompose`/`Reconstruct` | [`.github/copilot-instructions.md`](../.github/copilot-instructions.md) (current-state rules), [`features/compound-field-splitting/compound-field-splitting.md`](features/compound-field-splitting/compound-field-splitting.md) |
+| Preset glossary audit findings and open review items | [`investigations/preset-glossary-audit-2026-10.md`](investigations/preset-glossary-audit-2026-10.md) |
 | Investigate a translation retry/validation/escalation issue | [`investigations/translation-retry-escalation-and-fixes.md`](investigations/translation-retry-escalation-and-fixes.md) |
 | Add or integrate prefab, dynamic, or local-text strings | [`features/text-handling/`](features/text-handling/), [`features/text-handling/dynamic-strings.md`](features/text-handling/dynamic-strings.md), [`features/text-handling/local-text-string.md`](features/text-handling/local-text-string.md) |
-| Configure terminology, workflows, hooks, or quality review | [`features/translation-pipeline/`](features/translation-pipeline/) |
+| Configure terminology, workflows, hooks, or quality control | [`features/translation-pipeline/`](features/translation-pipeline/) |
 | Create a new translation project or run the translation workflow | [`features/translation-project-setup/translation-project-setup.md`](features/translation-project-setup/translation-project-setup.md) |
 | Investigate a packaging issue | [`features/packaging/packaging-workflows.md`](features/packaging/packaging-workflows.md) |
 | See how a downstream game project consumes this library | Check the consuming repository's own `AGENTS.md` and `docs/README.md`; this repo documents the shared library contract. |

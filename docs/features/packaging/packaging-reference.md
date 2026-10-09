@@ -3,7 +3,7 @@
 > Current-state feature reference for how translated `Line → Splits → (Templates)` data gets reassembled
 > back into the shape a downstream game actually consumes — describes **what the code does
 > today**, not the design process. For the QC pass that packaging shares a score-gate/freshness
-> mechanism with, see [`quality-review-pass.md`](../translation-pipeline/quality-review-pass.md)
+> mechanism with, see [`quality-control-pass.md`](../translation-pipeline/quality-control-pass.md)
 > (this file links to it rather than re-explaining QC internals). For the real incident that
 > shaped the current raw-fallback rules, see
 > the [packaging/QC raw-fallback investigation](../../investigations/packaging-qc-raw-fallback.md).
@@ -53,12 +53,12 @@ reconstruction is never written.
 ## Packaging (score-gating + freshness)
 
 Every packaging path applies the same two checks per column, both gated on
-`Utility.QualityReviewHelpers.IsQcReviewFresh` — see
-[`../translation-pipeline/quality-review-pass.md`](../translation-pipeline/quality-review-pass.md#packaging-score-gating--freshness)
+`Utility.QualityControlHelpers.IsQcReviewFresh` — see
+[`../translation-pipeline/quality-control-pass.md`](../translation-pipeline/quality-control-pass.md#packaging-score-gating--freshness)
 for the full mechanism (this section only covers what packaging itself does with the result):
 
-1. If fresh and `QualityReviewHelpers.PassesQcScoreGate(QcQualityScore, QcDefectCategory,
-   qualityReview)` returns `false` → the proposed `QcTranslated` correction is discarded, but
+1. If fresh and `QualityControlHelpers.PassesQcScoreGate(QcQualityScore, QcDefectCategory,
+   qualityControl)` returns `false` → the proposed `QcTranslated` correction is discarded, but
    that's **all** that's discarded — the column still packages normally on its ordinary pre-QC
    `Translated` text, exactly as if QC had never touched it. This is reported as
    `PackagingFailureReason.QcRejected`, a distinct bucket from `RawFallback`, precisely so a
@@ -67,10 +67,10 @@ for the full mechanism (this section only covers what packaging itself does with
 2. Else if fresh and `QcTranslated` is non-empty → use it in place of `Translated` (for a
    templated column, this bypasses `CompoundFieldSplitter.Reconstruct()` for that column entirely,
    using the anchor's `QcTranslated` as the literal cell/line value).
-3. Otherwise (never reviewed, reviewed-but-stale, or `qualityReview.enabled: false`) → falls
+3. Otherwise (never reviewed, reviewed-but-stale, or `qualityControl.enabled: false`) → falls
    through to ordinary `Translated`-based packaging, unaffected by anything QC-related.
 
-`qualityReview.enabled: false` gates packaging too, not just the QC pass — flipping it off and
+`qualityControl.enabled: false` gates packaging too, not just the QC pass — flipping it off and
 re-running packaging (no LLM calls) makes every column package as if QC had never touched it, with
 `minAcceptableScore`/`autoAcceptDefectCategories` never consulted even for columns that already
 have a stored `QcTranslated`/`QcQualityScore`. This is the standard way to isolate "did QC's
@@ -182,7 +182,7 @@ JSON-field entry with no column context.
 
 After the standard fixups, `Apply` invokes `config.Hooks.CustomPackagingFixup` (`Func<TextFileToSplit?,
 int?, string, string, string>?`, on `GameHooks` — see
-[`../translation-pipeline/quality-review-pass.md`](../translation-pipeline/quality-review-pass.md) for the sibling
+[`../translation-pipeline/quality-control-pass.md`](../translation-pipeline/quality-control-pass.md) for the sibling
 QC-side hooks on the same `GameHooks` instance) if the consuming project has registered one, passing
 its return value through as the final result. This is the extension point for a game-specific
 packaging-time repair — register it once on `LlmConfig.Hooks` and it runs everywhere packaging
@@ -239,7 +239,7 @@ public static async Task PackageFinalTranslationAsync(string workingDirectory, T
 
 Packaging is safe to rerun at any time straight from `Files/Converted` — it never mutates
 `Converted`, only overwrites `Files/Mod`. This makes it the cheapest way to test the effect of a
-config change (`qualityReview.enabled`, `qualityReview.minAcceptableScore`,
+config change (`qualityControl.enabled`, `qualityControl.minAcceptableScore`,
 `autoAcceptDefectCategories`, a new `SkipColumns` entry) without any LLM calls: change the config,
 rerun packaging, diff `Files/Mod`.
 

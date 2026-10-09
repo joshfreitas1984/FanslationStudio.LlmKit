@@ -199,7 +199,7 @@ public static class GameFileHandlingBase
     }
 
     /// <summary>
-    /// Carries a matched split's quality-review-pass state (see docs/plans/quality-review-pass.md)
+    /// Carries a matched split's quality-control-pass state (see docs/plans/quality-control-pass.md)
     /// forward alongside its <see cref="TranslationSplit.Translated"/> value during a re-export
     /// merge. Both match paths in <see cref="MergeFilesIntoTranslatedAsync"/> require the split's
     /// <see cref="TranslationSplit.Text"/> to be identical between old and new before a match is
@@ -210,7 +210,7 @@ public static class GameFileHandlingBase
     /// time a game update is re-exported - defeating the entire point of
     /// <see cref="TranslationSplit.QcReviewedText"/>'s skip-if-unchanged check. This is purely a
     /// performance/cost concern, not a correctness one - packaging never trusts stale Qc* data
-    /// regardless (see <see cref="Utility.QualityReviewHelpers.IsQcReviewFresh"/>), so even if this
+    /// regardless (see <see cref="Utility.QualityControlHelpers.IsQcReviewFresh"/>), so even if this
     /// copy were skipped the worst outcome is an unnecessary re-review, never wrong output.
     /// </summary>
     private static void CopyQcState(TranslationSplit from, TranslationSplit to)

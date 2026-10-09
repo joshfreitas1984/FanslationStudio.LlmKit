@@ -5,7 +5,7 @@ namespace FanslationStudio.LlmKit.Support;
 
 /// <summary>
 /// Builds <see cref="RuntimeValues.LineContexts"/> from <see cref="GameHooks.LineContextProvider"/> and carries a
-/// column's context into the quality review prompts. Shared by the translation and quality review passes so both
+/// column's context into the quality control prompts. Shared by the translation and quality control passes so both
 /// see the same speaker context for a line.
 /// </summary>
 internal static class LineContexts

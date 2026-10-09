@@ -7,7 +7,7 @@ using System.Text.Json;
 namespace Tests.Workflow;
 
 /// <summary>
-/// <see cref="QualityReviewWorkflow.CheckDetectionContextBudgetAsync"/> must fail a review pass up
+/// <see cref="QualityControlWorkflow.CheckDetectionContextBudgetAsync"/> must fail a review pass up
 /// front when a detection prompt would not fit num_ctx, and otherwise stay out of the way.
 /// </summary>
 public sealed class QcContextBudgetTests
@@ -31,10 +31,10 @@ public sealed class QcContextBudgetTests
         ApiKeyRequired = false,
         Model = "test-model",
         ModelParams = new Dictionary<string, object> { ["temperature"] = 0.15, ["num_ctx"] = numCtx ?? 6144, ["num_predict"] = 4096 },
-        Prompts = new Dictionary<string, string> { ["BaseQualityReviewPrompt"] = "detection system prompt" },
+        Prompts = new Dictionary<string, string> { ["BaseQualityControlPrompt"] = "detection system prompt" },
     };
 
-    private static LlmConfig BuildConfig() => new() { QualityReview = new QualityReviewConfig { Enabled = true } };
+    private static LlmConfig BuildConfig() => new() { QualityControl = new QualityControlConfig { Enabled = true } };
 
     private static PromptCountHandler Counting(int promptEvalCount) =>
         new(_ => (HttpStatusCode.OK, $$"""{"message":{"content":"D"},"done_reason":"length","prompt_eval_count":{{promptEvalCount}}}"""));
@@ -42,10 +42,10 @@ public sealed class QcContextBudgetTests
     [Fact(DisplayName = "Context check passes when every probed prompt fits with the answer reserve")]
     public async Task FittingPrompt_Passes()
     {
-        var handler = Counting(6144 - QualityReviewWorkflow.DetectionAnswerReserveTokens);
+        var handler = Counting(6144 - QualityControlWorkflow.DetectionAnswerReserveTokens);
         using var client = new HttpClient(handler);
 
-        await QualityReviewWorkflow.CheckDetectionContextBudgetAsync(BuildConfig(), BuildModel(), client, ["SOURCE (Chinese): a", "SOURCE (Chinese): b"]);
+        await QualityControlWorkflow.CheckDetectionContextBudgetAsync(BuildConfig(), BuildModel(), client, ["SOURCE (Chinese): a", "SOURCE (Chinese): b"]);
 
         Assert.Equal(2, handler.Bodies.Count);
     }
@@ -53,10 +53,10 @@ public sealed class QcContextBudgetTests
     [Fact(DisplayName = "Context check throws when a prompt leaves less than the answer reserve")]
     public async Task OversizedPrompt_Throws()
     {
-        using var client = new HttpClient(Counting(6144 - QualityReviewWorkflow.DetectionAnswerReserveTokens + 1));
+        using var client = new HttpClient(Counting(6144 - QualityControlWorkflow.DetectionAnswerReserveTokens + 1));
 
         var e = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            QualityReviewWorkflow.CheckDetectionContextBudgetAsync(BuildConfig(), BuildModel(), client, ["SOURCE (Chinese): a"]));
+            QualityControlWorkflow.CheckDetectionContextBudgetAsync(BuildConfig(), BuildModel(), client, ["SOURCE (Chinese): a"]));
 
         Assert.Contains("num_ctx 6144", e.Message);
     }
@@ -68,7 +68,7 @@ public sealed class QcContextBudgetTests
             (HttpStatusCode.BadRequest, """{"error":{"type":"exceed_context_size_error","message":"request exceeds the available context size"}}""")));
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            QualityReviewWorkflow.CheckDetectionContextBudgetAsync(BuildConfig(), BuildModel(), client, ["SOURCE (Chinese): a"]));
+            QualityControlWorkflow.CheckDetectionContextBudgetAsync(BuildConfig(), BuildModel(), client, ["SOURCE (Chinese): a"]));
     }
 
     [Fact(DisplayName = "Context check only warns when the probe gets no token count")]
@@ -76,7 +76,7 @@ public sealed class QcContextBudgetTests
     {
         using var client = new HttpClient(new PromptCountHandler(_ => (HttpStatusCode.InternalServerError, """{"error":"model runner has unexpectedly stopped"}""")));
 
-        await QualityReviewWorkflow.CheckDetectionContextBudgetAsync(BuildConfig(), BuildModel(), client, ["SOURCE (Chinese): a"]);
+        await QualityControlWorkflow.CheckDetectionContextBudgetAsync(BuildConfig(), BuildModel(), client, ["SOURCE (Chinese): a"]);
     }
 
     [Fact(DisplayName = "Context check is skipped for non-Ollama endpoints")]
@@ -85,7 +85,7 @@ public sealed class QcContextBudgetTests
         var handler = Counting(999_999);
         using var client = new HttpClient(handler);
 
-        await QualityReviewWorkflow.CheckDetectionContextBudgetAsync(BuildConfig(), BuildModel(url: "http://test.local/v1/chat/completions"), client, ["SOURCE (Chinese): a"]);
+        await QualityControlWorkflow.CheckDetectionContextBudgetAsync(BuildConfig(), BuildModel(url: "http://test.local/v1/chat/completions"), client, ["SOURCE (Chinese): a"]);
 
         Assert.Empty(handler.Bodies);
     }
@@ -97,7 +97,7 @@ public sealed class QcContextBudgetTests
         using var client = new HttpClient(handler);
         var model = BuildModel(numCtx: "6144");
 
-        await QualityReviewWorkflow.CheckDetectionContextBudgetAsync(BuildConfig(), model, client, ["SOURCE (Chinese): a"]);
+        await QualityControlWorkflow.CheckDetectionContextBudgetAsync(BuildConfig(), model, client, ["SOURCE (Chinese): a"]);
 
         var request = JsonDocument.Parse(handler.Bodies.Single()).RootElement;
         Assert.Equal(1m, request.GetProperty("options").GetProperty("num_predict").GetDecimal());

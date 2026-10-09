@@ -1,7 +1,7 @@
 namespace FanslationStudio.LlmKit.Support;
 
 /// <summary>
-/// The QC prompt's <c>DEFECT:</c> category (see <c>BaseQualityReviewPrompt.txt</c>, all model
+/// The QC prompt's <c>DEFECT:</c> category (see <c>BaseQualityControlPrompt.txt</c>, all model
 /// families) - the model must name one of these before scoring, so a flagged
 /// <see cref="TranslationSplit.QcQualityScore"/> comes with a reason instead of just a number. See
 /// docs/qc-qualityscore-noise-investigation.md (Tests project, DragonHierOverLlm repo) for why this
@@ -56,7 +56,7 @@ public enum QcDefectCategory
     /// a rendering, the relationship between them is backwards) and from <see
     /// cref="OtherNamedDefect"/> (this is a specific, nameable failure shape, not a residual
     /// catch-all). Deliberately left off <see
-    /// cref="Configuration.QualityReviewConfig.AutoAcceptDefectCategories"/> by default - unlike
+    /// cref="Configuration.QualityControlConfig.AutoAcceptDefectCategories"/> by default - unlike
     /// <see cref="DroppedContent"/>/<see cref="OtherNamedDefect"/>, this shape has no
     /// hand-validated low-severity track record yet, and ships a translation whose surface reads
     /// fluently while contradicting SOURCE, the highest-consequence kind of miss. See
@@ -66,11 +66,11 @@ public enum QcDefectCategory
 
     /// <summary>Model believes something about the translation may be off but isn't confident
     /// enough to name a specific category or draft a fix it trusts - see
-    /// docs/investigations/quality-review-postmortems.md postmortem #9. Unlike every other non-<see
+    /// docs/investigations/quality-control-postmortems.md postmortem #9. Unlike every other non-<see
     /// cref="None"/> category, this one is never paired with a real <c>CORRECTED</c> fix (call 1's
-    /// drafted text, if any, is discarded - see <c>QualityReviewWorkflow.GetLlmVerdictAsync</c>),
+    /// drafted text, if any, is discarded - see <c>QualityControlWorkflow.GetLlmVerdictAsync</c>),
     /// never runs two-stage verification (there is nothing to grade), is never eligible for
-    /// <see cref="Configuration.QualityReviewConfig.AutoAcceptDefectCategories"/> (there is no
+    /// <see cref="Configuration.QualityControlConfig.AutoAcceptDefectCategories"/> (there is no
     /// <see cref="TranslationSplit.QcTranslated"/> to accept), and always leaves the column flagged
     /// with no score - a genuine "ask a human" signal instead of forcing a low-confidence hunch to
     /// round up to a fully-committed named defect and fix.</summary>
@@ -84,7 +84,7 @@ public enum QcDefectCategory
     /// flag" rule) and from <see cref="HardToParseSeam"/> (a fragment-stitching boundary issue, not
     /// a whole-phrase construction issue) - only flag when the phrasing is different enough from
     /// natural English that a player would visibly notice it's machine-translated. Deliberately left
-    /// off <see cref="Configuration.QualityReviewConfig.AutoAcceptDefectCategories"/> by default -
+    /// off <see cref="Configuration.QualityControlConfig.AutoAcceptDefectCategories"/> by default -
     /// more subjective than the mostly factual/structural categories above, with no hand-validated
     /// precision sample yet.</summary>
     UnnaturalPhrasing,

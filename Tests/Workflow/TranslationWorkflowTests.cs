@@ -11,9 +11,9 @@ namespace Tests.Workflow;
 
 public class TranslationWorkflowTests
 {
-    // FindQcAnchor moved to QualityReviewHelpers (see Tests/Utility/QualityReviewHelpersTests.cs)
+    // FindQcAnchor moved to QualityControlHelpers (see Tests/Utility/QualityControlHelpersTests.cs)
     // so TranslationService's own retranslation paths could reuse it too - its resolution-order
-    // regression tests now live there alongside the rest of QualityReviewHelpers' coverage.
+    // regression tests now live there alongside the rest of QualityControlHelpers' coverage.
 
     // Regression test: a QC correction was observed dropping the leading "-" off a stat/buff
     // tooltip's negative percentage ("-0.5%全属性" -> "0.5% All Attributes" instead of "‑0.5% All

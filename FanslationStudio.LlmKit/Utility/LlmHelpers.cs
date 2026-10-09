@@ -39,8 +39,8 @@ public static class LlmHelpers
     /// <paramref name="enableThinking"/> defaults to false - production translation/QC calls never
     /// want reasoning tokens (cost, and both QC prompts explicitly forbid a reasoning preamble in
     /// their output format). Pass true only for a diagnostic probe call that wants to see the
-    /// model's actual reasoning trace (e.g. to compare against BaseQualityReviewPrompt.txt/
-    /// BaseQualityReviewVerificationPrompt.txt wording) - see
+    /// model's actual reasoning trace (e.g. to compare against BaseQualityControlPrompt.txt/
+    /// BaseQualityControlVerificationPrompt.txt wording) - see
     /// <see cref="TranslationService.TranslateMessagesAsync"/>, which also skips stripping
     /// &lt;think&gt; tags from the response when this is true.
     /// </summary>

@@ -56,7 +56,7 @@ public class TextFileToSplit
     public bool EnableGlossary { get; set; } = true;
 
     /// <summary>
-    /// When false, <see cref="Workflow.QualityReviewWorkflow"/> never reviews any column in this
+    /// When false, <see cref="Workflow.QualityControlWorkflow"/> never reviews any column in this
     /// file - no LLM calls, no Qc* fields ever get set, and packaging always serves plain
     /// <see cref="TranslationSplit.Translated"/> for it. For content where the QC model's
     /// glossary/naturalness-oriented review doesn't apply or would do more harm than good - e.g. a
@@ -64,7 +64,7 @@ public class TextFileToSplit
     /// (heroNameParts.txt/forceNameParts.txt-style files), or free-verse/quote text where a "more
     /// natural" QC rewrite is actually less faithful to the source.
     /// </summary>
-    public bool EnableQualityReview { get; set; } = true;
+    public bool EnableQualityControl { get; set; } = true;
 
     public string AdditionalPromptName { get; set; } = string.Empty;
 

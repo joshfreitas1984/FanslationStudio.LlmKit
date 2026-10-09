@@ -1,7 +1,20 @@
-# Quality review pass — feature reference
+# Quality control pass — feature reference
 
-> Current-state reference for the post-translation quality review (QC) feature: behavior,
+> Current-state reference for the post-translation quality control (QC) feature: behavior,
 > configuration, integration, and operational guidance.
+
+## Terminology
+
+One name per concept; `Tests/Utility/QcVocabularyLintTests.cs` bans the old spellings ("Quality Review",
+`QualityReview*`, "Quality Check", `QualityEvaluator*`).
+
+- **Quality Control (QC)**: this whole feature. Long form in prose and type names (`QualityControl*`), `Qc` in
+  persisted data and short identifiers (`QcStatus`, `qcTranslated`, `flaggedForQcReview`).
+- **Anchor**: the line a column-wide QC verdict and score are stored on.
+- **Flagged**: a split QC judged defective and left unresolved (`flaggedForQcReview`); packaging falls back to raw.
+- **Score gate**: the `qualityControl.minAcceptableScore` threshold below which packaging falls back to raw.
+
+The legacy `qualityReview:` config key is still read for one release (with a warning) and maps onto `qualityControl:`.
 
 ## What it is
 
@@ -13,7 +26,7 @@ same structural validation gate a normal translation attempt does, plus a glossa
 Nothing about the core `Line → Splits → (Templates)` contract changes — this is purely additive
 fields, one new workflow class, and packaging-time behavior gated on those new fields.
 
-Entirely opt-in: a project that never sets `qualityReview.enabled: true` in `Config.yaml` sees zero
+Entirely opt-in: a project that never sets `qualityControl.enabled: true` in `Config.yaml` sees zero
 behavior change anywhere in the pipeline. `enabled` also gates packaging, not just whether the QC
 pass itself runs — see "Packaging" below.
 
@@ -34,7 +47,7 @@ already-serialized YAML:
   recomputed on every review, not an append-only marker. Lets a human reviewer see exactly what QC
   tried and why, directly in `Files/Converted/*.yaml`, without a separate log file — mirrors
   `GameFileHandlingBase.GetFailedTranslations`'s reporting shape (see
-  `Workflow.QualityReviewWorkflow.GetFlaggedQcReviews`).
+  `Workflow.QualityControlWorkflow.GetFlaggedQcReviews`).
 - `QcQualityScore` (`int?`, 0-100) — self-rated confidence from the QC model, set on every reviewed
   column regardless of whether a correction was proposed. Treat as a relative sort key for triage,
   not a calibrated absolute metric — a small/local model's self-rating is inherently noisy.
@@ -47,7 +60,7 @@ already-serialized YAML:
   `QcQualityScore` being `null`. Exists specifically so a large flagged set can be triaged/policed
   *by category* instead of only by score — see "DEFECT categories and per-category policy" below.
 - `ResetQcState()` — clears all of the above back to `NotReviewed`. It is called by
-  `QualityReviewWorkflow.ReviewColumnAsync` right before recording a fresh outcome, and by the
+  `QualityControlWorkflow.ReviewColumnAsync` right before recording a fresh outcome, and by the
   translation-rule pass when `UpdateSplit` actually changes `Translated`.
   **`TranslationSplit.ResetFlags()` deliberately does NOT call this** — Qc state tracks an
   independent review axis from `FlaggedForRetranslation`/`FlaggedMistranslation`/`FlaggedHallucination`,
@@ -63,17 +76,17 @@ ambiguous-reverse-mapping problem the fragment model exists to avoid elsewhere).
 whole-cell QC verdict for a templated column lives entirely on that column's `SubIndex == 0`
 fragment** — one QC verdict per column, not per fragment. Other fragments in the same column
 (`SubIndex >= 1`) never carry their own independent Qc state. Every piece of code that reads Qc
-fields for a templated column (`QualityReviewWorkflow`, packaging, `QualityReviewHelpers`)
+fields for a templated column (`QualityControlWorkflow`, packaging, `QualityControlHelpers`)
 consistently looks them up on the `SubIndex == 0` fragment only — never assume `SubIndex == 0`
 means "the only fragment" elsewhere in this codebase, but for Qc state specifically, it's the sole
 authority for the whole column.
 
-## `Workflow/QualityReviewWorkflow.cs`
+## `Workflow/QualityControlWorkflow.cs`
 
 `RunAsync(workingDirectory, textFiles, sampleSize: null)`:
 
-1. Validates config: `qualityReview.enabled`, `qualityReview.modelName` resolves to a configured
-   model, and that model has a `BaseQualityReviewPrompt` prompt (see "Prompts" below) — throws
+1. Validates config: `qualityControl.enabled`, `qualityControl.modelName` resolves to a configured
+   model, and that model has a `BaseQualityControlPrompt` prompt (see "Prompts" below) — throws
    immediately on a misconfiguration rather than silently no-op'ing or reviewing with a missing
    prompt.
 2. Loads every file's `Converted/*.yaml` up front (`LoadFileStatesAsync`, one `QcFileState` per
@@ -84,7 +97,7 @@ authority for the whole column.
    would be biased toward whichever file happens to be enumerated first) before processing. This
    exists specifically so a candidate model can be tried on a small, representative sample before
    committing an entire run to it — see the downstream plan doc's "sample run" methodology.
-4. Runs `Parallel.ForEachAsync` (bounded by `qualityReview.maxConcurrency`, falling back to
+4. Runs `Parallel.ForEachAsync` (bounded by `qualityControl.maxConcurrency`, falling back to
    `maxConcurrency` → `batchSize` → 20, same chain every other concurrency knob uses) over the work
    items, calling `ReviewColumnAsync` per column, writing back through the same
    `Utility/BufferedFileWriter` the translation schedulers use: a file is re-serialized only when a
@@ -101,7 +114,7 @@ lowest `SubIndex`, template, reconstructed raw text). The four QC LLM calls shar
 builder (`BuildQcUserPrompt` - the glossary block is omitted when no glossary term occurs in the
 source) and one send helper (`SendQcCallAsync`). The validation gate (`EvaluateQcCandidate`) is
 the same on the review path and the rule-check path, and both validate against the QC model
-(`qualityReview.modelName`, falling back to the first configured model if that doesn't resolve).
+(`qualityControl.modelName`, falling back to the first configured model if that doesn't resolve).
 A rule-check give-up sets `QcDefectCategories = [Unknown]`, the same as a review-pass give-up.
 
 `ReviewColumnAsync(config, modelConfig, client, item)` per column:
@@ -109,14 +122,14 @@ A rule-check give-up sets `QcDefectCategories = [Unknown]`, the same as a review
 1. **Readiness check** — skips (no LLM call) if any fragment in the column is still
    `FlaggedForRetranslation`, `!SafeToTranslate`, or missing its translation. Reviewing a column
    mid-retry-loop would waste a call on text about to be replaced anyway.
-2. Computes the **effective text** via `Utility.QualityReviewHelpers.ComputeEffectiveTranslatedText`
+2. Computes the **effective text** via `Utility.QualityControlHelpers.ComputeEffectiveTranslatedText`
    — for a templated column, `CompoundFieldSplitter.Reconstruct(template, fragments.Select(f =>
    f.Translated))` (the exact string that would be written to the CSV today); for a plain column,
    just `anchor.Translated`. This is the **review unit**: the QC pass judges the fully reconstructed
    cell, not individual fragments in isolation, since the splitter-seam problem it exists to catch
    is a property of the whole cell.
-3. **Skip if already reviewed and unchanged**: `QualityReviewHelpers.IsQcReviewFresh(anchor,
-   template, fragments, qualityReview)` — compares the freshly computed effective text against the stored
+3. **Skip if already reviewed and unchanged**: `QualityControlHelpers.IsQcReviewFresh(anchor,
+   template, fragments, qualityControl)` — compares the freshly computed effective text against the stored
    `QcReviewedText`. True means no LLM call needed. This is the "don't re-review every line every
    run" mechanism, and it's fully self-invalidating: if `Translated` changes for any reason
    (retranslation, a future re-export/merge), the next run's freshly computed effective text won't
@@ -129,7 +142,7 @@ A rule-check give-up sets `QcDefectCategories = [Unknown]`, the same as a review
    dynamic token.
 5. Builds the QC prompt: masked raw + masked translation + relevant glossary lines (via
    `GlossaryLine.AppendPromptsFor`, so the model knows canonical name/term mappings), sent as a
-   single user message against the `BaseQualityReviewPrompt` system prompt. One LLM call
+   single user message against the `BaseQualityControlPrompt` system prompt. One LLM call
    (`TranslationService.TranslateMessagesAsync`, reused directly — no new HTTP-calling code) —
    producing both the score and the verdict in the same round trip.
 6. Parses the response: `SCORE: <0-100>` (required — `ScoreLineRegex`), `DEFECT: <category|NONE>`
@@ -169,14 +182,14 @@ every fragment's `Text`, not just the anchor fragment's own piece), and the tran
 judged to produce this flag (and matches what a stale review fails to match against a
 since-changed `Translated`, see below).
 
-## Staleness / freshness (`Utility/QualityReviewHelpers.cs`)
+## Staleness / freshness (`Utility/QualityControlHelpers.cs`)
 
 `Workflow.TranslationWorkflow.UpdateSplit` snapshots `Translated` before applying the ordinary
 translation rules, and `TranslationService`'s two LLM-retranslation paths (batched and
 continuous-worker-pool, including each one's own dedupe-copy pass) do the same around their direct
 `split.Translated = ...` writes. If the value changes, all of these call `ResetQcState()`
-immediately - but on the column's **anchor** fragment (`QualityReviewHelpers.FindQcAnchor`, same
-`SubIndex == 0` convention/column-key grouping `QualityReviewWorkflow` and every packaging path
+immediately - but on the column's **anchor** fragment (`QualityControlHelpers.FindQcAnchor`, same
+`SubIndex == 0` convention/column-key grouping `QualityControlWorkflow` and every packaging path
 already use), not necessarily on the fragment whose `Translated` actually changed. For a plain
 column these are the same split. For a templated/compound column, a retranslated `SubIndex >= 1`
 fragment never carried QC state of its own (see the anchor convention above) - resetting it
@@ -193,8 +206,8 @@ meaningful.
 
 The freshness check remains a defense in depth for changes made by other workflows or external
 editing: every place that would otherwise trust `QcTranslated`/
-`QcQualityScore` must first check **`QualityReviewHelpers.IsQcReviewFresh(anchor, template,
-fragments, qualityReview)`** — recomputes the current effective text and compares it against
+`QcQualityScore` must first check **`QualityControlHelpers.IsQcReviewFresh(anchor, template,
+fragments, qualityControl)`** — recomputes the current effective text and compares it against
 `QcReviewedText`. `false` means treat the column exactly as if it had never been reviewed (fall
 through to plain `Translated`, ignore the score gate entirely) — never trust stale Qc data just
 because it happens to be non-empty. Used identically by the QC engine itself (to decide "does this
@@ -202,7 +215,7 @@ need re-reviewing" — see step 3 above) and by every packaging path (to decide 
 right now").
 
 `IsQcReviewFresh` also returns `false` outright, before checking anything else, when
-`qualityReview.enabled` is `false` — see "Packaging" below for why this matters beyond just gating
+`qualityControl.enabled` is `false` — see "Packaging" below for why this matters beyond just gating
 whether the QC pass runs.
 
 `GameFileHandlingBase.MergeFilesIntoTranslatedAsync` (re-export merge) also now carries a matched
@@ -219,13 +232,13 @@ Every packaging path — `CsvGameDataWorkflow.PackageAsync`, `JsonGameDataWorkfl
 `PrefabTextWorkflow.PackagePrefabTextAsync`, `DynamicStringWorkflow.PackageDynamicStringsAsync`
 (all four in this repo) — applies the same two checks per column, both gated on `IsQcReviewFresh`:
 
-1. If fresh and `Utility.QualityReviewHelpers.PassesQcScoreGate(QcQualityScore, QcDefectCategory,
-   qualityReview)` returns `false` → the proposed `QcTranslated` correction is discarded, but that's
+1. If fresh and `Utility.QualityControlHelpers.PassesQcScoreGate(QcQualityScore, QcDefectCategory,
+   qualityControl)` returns `false` → the proposed `QcTranslated` correction is discarded, but that's
    ALL that's discarded: the column still packages normally on its ordinary pre-QC `Translated` text
    (step 3 below), exactly as if QC had never touched it. `PassesQcScoreGate` is the single choke
    point every packaging path shares for this decision: it passes outright if the score cleared
-   `qualityReview.minAcceptableScore`, and otherwise still passes if `QcDefectCategory` is in
-   `qualityReview.AutoAcceptDefectCategories` — see "DEFECT categories and per-category policy"
+   `qualityControl.minAcceptableScore`, and otherwise still passes if `QcDefectCategory` is in
+   `qualityControl.AutoAcceptDefectCategories` — see "DEFECT categories and per-category policy"
    below for what that second clause is for.
 
   A score-gate failure skips only the `QcTranslated` shortcut. The ordinary `Translated` value
@@ -233,12 +246,12 @@ Every packaging path — `CsvGameDataWorkflow.PackageAsync`, `JsonGameDataWorkfl
 2. Else if fresh and `QcTranslated` is non-empty → use it in place of `Translated` (for a templated
    column, this bypasses `Reconstruct()` for that column entirely, using the anchor's `QcTranslated`
    as the literal cell value).
-3. Otherwise (never reviewed, reviewed-but-stale, or `qualityReview.enabled: false`) → falls through
+3. Otherwise (never reviewed, reviewed-but-stale, or `qualityControl.enabled: false`) → falls through
    to ordinary `Translated`-based packaging, unaffected by anything Qc-related.
 
-**`qualityReview.enabled` gates packaging too, not just the QC pass.** Because step 1 is gated on
+**`qualityControl.enabled` gates packaging too, not just the QC pass.** Because step 1 is gated on
 `IsQcReviewFresh` and that now returns `false` whenever `enabled` is `false`, setting
-`qualityReview.enabled: false` and re-running packaging (no LLM calls) makes every column package as
+`qualityControl.enabled: false` and re-running packaging (no LLM calls) makes every column package as
 if QC had never touched it — plain pre-QC `Translated` text everywhere, with
 `minAcceptableScore`/`autoAcceptDefectCategories` never consulted, even for columns that already
 have a stored `QcTranslated`/`QcQualityScore` from a prior run. This is the intended way to isolate
@@ -266,7 +279,7 @@ that was deliberately left as Chinese, re-triggering whatever that check does on
 replace-and-recheck cycle that can loop. Omitting the entry instead means no substitution happens at
 all: visually identical to a raw-Chinese entry (the original text is untouched either way), but with
 no re-match risk. See
-the [local quality-review postmortems](../../investigations/quality-review-postmortems.md) for the real
+the [local quality-control postmortems](../../investigations/quality-control-postmortems.md) for the real
 incident this generalizes from.
 
 **Known limitation** (`DynamicStringWorkflow`): a single-fragment template's "bare label" dictionary
@@ -289,7 +302,7 @@ file/column.
 
 `GameHooks.CustomQcExclusionRule` (`Func<TextFileToSplit, int?, string, bool>`, receiving
 `(textFile, column, rawText)`) lets a downstream project keep a column out of the QC pass entirely,
-decided once per column while `QualityReviewWorkflow.RunAsync` builds its work-item list - BEFORE
+decided once per column while `QualityControlWorkflow.RunAsync` builds its work-item list - BEFORE
 any LLM call, not after. `rawText` is already the fully reconstructed whole-cell raw text (same
 `CompoundFieldSplitter.Reconstruct` call `ReviewColumnAsync` itself uses), so the hook sees exactly
 what the QC model would have been shown. Returning `true` means the column never becomes a
@@ -315,15 +328,15 @@ the structural shape (a stricter "must look exactly like `;Identifier`" regex ri
 structural variants, e.g. a trailing bare `;` with nothing after it, or a multi-`;`/`&`-separated
 numeric-parameter record).
 
-Register it on the same `GameHooks` instance already passed to every `QualityReviewWorkflow`/
+Register it on the same `GameHooks` instance already passed to every `QualityControlWorkflow`/
 `TranslationWorkflow` call site (`CustomPostRepair`/`CustomColumnRepair`/`CustomColumnValidator`
 live there too) - no separate wiring needed.
 
 ## Resetting Qc state
 
 Every reset method below runs on one shared sweep and writes back only the files it changed.
-None of them check `TextFileToSplit.EnableQualityReview`, and only `ResetStaleQcState` checks
-`qualityReview.enabled`.
+None of them check `TextFileToSplit.EnableQualityControl`, and only `ResetStaleQcState` checks
+`qualityControl.enabled`.
 
 Five levels, narrowest to broadest:
 
@@ -342,9 +355,9 @@ Five levels, narrowest to broadest:
   `FailedValidation`/rejected columns untouched.
 - **`ResetLowScoreQcState(workingDirectory, textFiles, hooks, scoreThreshold: null)`** — resets
   only columns whose current `QcQualityScore` is below `scoreThreshold` (default:
-  `qualityReview.minAcceptableScore`), leaving every already-accepted column with an acceptable
+  `qualityControl.minAcceptableScore`), leaving every already-accepted column with an acceptable
   score untouched. Use this after changing how the score is judged - tuning
-  `BaseQualityReviewPrompt.txt`'s scoring rubric, or switching `qualityReview.modelName` to a model
+  `BaseQualityControlPrompt.txt`'s scoring rubric, or switching `qualityControl.modelName` to a model
   that scores on a different scale - so columns sitting below threshold under the OLD calculation
   get a genuinely fresh score under the new one, without paying for a full corpus re-review. A
   rejected-correction column (`Reason` set) is never touched here - its `QcQualityScore` is already
@@ -353,7 +366,7 @@ Five levels, narrowest to broadest:
   if the change is broad enough that even comfortably-passing scores are suspect.
 - **`ResetNonAutoAcceptedQcState(workingDirectory, textFiles, hooks)`** — the DEFECT-category
   counterpart to `ResetLowScoreQcState`: resets every currently-flagged column whose
-  `QcDefectCategory` is NOT in `qualityReview.AutoAcceptDefectCategories` back to `NotReviewed`,
+  `QcDefectCategory` is NOT in `qualityControl.AutoAcceptDefectCategories` back to `NotReviewed`,
   leaving auto-accepted-category columns and everything not flagged in the first place untouched.
   `QcDefectCategory.Unknown` always lands in this bucket (a line whose response predates the
   DEFECT-first prompt, or otherwise failed to parse a `DEFECT:` line), so this doubles as the way to
@@ -390,7 +403,7 @@ Five levels, narrowest to broadest:
   started eagerly calling `ResetQcState()` on the anchor for every `Translated` change. Called
   automatically at the end of `TranslationWorkflow.ApplyAllRulesToCurrentTranslation`, so re-running
   "2. ApplyRulesToCurrentTranslation" sweeps the whole corpus clean without a separate manual step.
-  A no-op if `qualityReview.enabled` is false.
+  A no-op if `qualityControl.enabled` is false.
 
 ## Triage and fix-prompt generation (`GetQcTriageAsync`/`WriteTriageReportAsync`/`WriteFixPromptsAsync`)
 
@@ -432,29 +445,29 @@ diagnosis request plus concrete raw/kept-translation/rejected-correction example
 for the low-score sample (asking whether the low scores look like genuine problems or an overly
 harsh rubric on short/idiomatic phrases). This is deliberately a **prompt generator, not a fix
 generator** — it produces text meant to be pasted into a chat with an LLM one section at a time, not
-an automated pipeline that edits prompt files itself. The actual fixes (`BaseQualityReviewPrompt
-.txt` wording, a glossary rule, `qualityReview.minAcceptableScore`) are small and judgment-heavy
+an automated pipeline that edits prompt files itself. The actual fixes (`BaseQualityControlPrompt
+.txt` wording, a glossary rule, `qualityControl.minAcceptableScore`) are small and judgment-heavy
 enough that a human should read the examples and apply the change themselves.
 
 ### Wiring this into a new project
 
 Both methods take exactly the same `(workingDirectory, textFiles, hooks)` signature every other
-`QualityReviewWorkflow` method already does, and produce the same `TestResults/*` output regardless
+`QualityControlWorkflow` method already does, and produce the same `TestResults/*` output regardless
 of which game's corpus they're reading — no per-project glue needed beyond two thin `Fact` wrappers.
 Add them to your project's QC workflow test file right after your project's "find flagged" step
 (see DragonHierOverLlm's `Tests/QualityControlWorkflowTests.cs` for the reference wiring):
 
 ```csharp
-[Fact(DisplayName = "Triage Flagged Quality Review Items")]
+[Fact(DisplayName = "Triage Flagged Quality Control Items")]
 public async Task TriageFlaggedQcReviews()
 {
-    await QualityReviewWorkflow.WriteTriageReportAsync(GameFileHandling.WorkingDirectory, TextFileConfiguration.TextFilesToSplit, GameFileHandling.Hooks);
+    await QualityControlWorkflow.WriteTriageReportAsync(GameFileHandling.WorkingDirectory, TextFileConfiguration.TextFilesToSplit, GameFileHandling.Hooks);
 }
 
-[Fact(DisplayName = "Generate Quality Review Fix Prompts")]
+[Fact(DisplayName = "Generate Quality Control Fix Prompts")]
 public async Task GenerateQcFixPrompts()
 {
-    await QualityReviewWorkflow.WriteFixPromptsAsync(GameFileHandling.WorkingDirectory, TextFileConfiguration.TextFilesToSplit, GameFileHandling.Hooks);
+    await QualityControlWorkflow.WriteFixPromptsAsync(GameFileHandling.WorkingDirectory, TextFileConfiguration.TextFilesToSplit, GameFileHandling.Hooks);
 }
 ```
 
@@ -483,7 +496,7 @@ stratified and policed *by category* instead of treating every flagged line iden
    *original* pre-QC translation, see `TranslationSplit.QcReviewedText`'s doc comment - against
    `qcTranslated` - QC's *proposed correction* - to judge whether a genuine defect was caught and
    fixed) and compute a rough precision (genuine defects / sample size) for each category.
-3. **Set `qualityReview.autoAcceptDefectCategories`** in `Config.yaml` to the categories that came
+3. **Set `qualityControl.autoAcceptDefectCategories`** in `Config.yaml` to the categories that came
    back at or near 0% precision - packaging then trusts `QcTranslated` for those wholesale
    (`PassesQcScoreGate`, "Packaging" above) instead of holding every such line back for human
    review. Categories with meaningfully higher precision are left off the list and stay in the
@@ -526,18 +539,18 @@ deliberately, not via the same precision-sampling loop used for the other catego
 `GetLlmVerdictAsync` runs up to five kinds of call per (source, translation, glossary) key, each with a
 single job, so no call ever grades text it wrote:
 
-1. **Detection, calls 1/2** (`DetectDefectsAsync`, `BaseQualityReviewPrompt.txt`) - names defects only
+1. **Detection, calls 1/2** (`DetectDefectsAsync`, `BaseQualityControlPrompt.txt`) - names defects only
    (`DEFECTS: NONE` or a category list); never corrects or scores. Call 2 is a second independent
    detection, merged as a union, and only runs when `doubledDetectionEnabled` is true.
    `detectionTemperature` overrides the model temperature for these calls, and `detectionPrefillEnabled`
    pre-fills the reply with `DEFECTS:`. Nothing found: the column passes with score 100 and no more calls.
    Only `UNCERTAIN`: flagged for a human, no correction attempted.
-2. **Correction, call 3** (`GenerateCorrectionAsync`, `BaseQualityReviewCorrectionPrompt.txt`) - one
+2. **Correction, call 3** (`GenerateCorrectionAsync`, `BaseQualityControlCorrectionPrompt.txt`) - one
    `CORRECTED:` line fixing every confirmed category together.
 3. **Pre-verification gate** (`preVerificationGateEnabled`, default true) - the candidate goes through the
    column's validation gate (`EvaluateQcCandidate`, the same check the accept path runs). A failure
    skips verification and goes straight to a repair told the gate's reason as `RULE CHECK FAILURE`.
-4. **Verification, call 4** (`GetVerificationVerdictAsync`, `BaseQualityReviewVerificationPrompt.txt`) -
+4. **Verification, call 4** (`GetVerificationVerdictAsync`, `BaseQualityControlVerificationPrompt.txt`) -
    judges the candidate against SOURCE, the original TRANSLATION and the full confirmed set:
    ```
    UNRESOLVED: <NONE or confirmed categories still unfixed>
@@ -545,10 +558,10 @@ single job, so no call ever grades text it wrote:
    SCORE: <0-100; given as 0 on a rejection, by design>
    ```
    Accepted only when both lists are `NONE`. With `verificationEvidenceEnabled`, the
-   `BaseQualityReviewVerificationEvidencePrompt.txt` variant adds an `EVIDENCE:` line quoting the text
+   `BaseQualityControlVerificationEvidencePrompt.txt` variant adds an `EVIDENCE:` line quoting the text
    each claim is about; a claim whose quote is not in SOURCE (or, except DROPPED_CONTENT, the candidate)
    is dropped by `QcVerificationResponseParser.FilterByEvidence`.
-5. **Repair, call 5** (`GetCorrectionRepairAsync`, `BaseQualityReviewCorrectionRepairPrompt.txt`) - one
+5. **Repair, call 5** (`GetCorrectionRepairAsync`, `BaseQualityControlCorrectionRepairPrompt.txt`) - one
    improved `CORRECTED:` for the unresolved/new categories (plus `RULE CHECK FAILURE` / `VERIFIER EVIDENCE`
    lines when available), or `NONE`. The new candidate goes back through the gate and verification.
 
@@ -559,8 +572,8 @@ final gate and `minAcceptableScore` decide whether it is accepted, flagged, or r
 correction/repair is first normalised to SOURCE's line-break form (`MatchSourceNewlines`: real breaks
 vs a literal `\n`).
 
-The QC evaluator's correction-generation comparison (`QualityEvaluatorAssessmentWorkflow`, with
-`qualityEvaluatorAssessment.enableRepairLoop`) runs the same loop over gold rows, with a separate
+The QC evaluator's correction-generation comparison (`QualityControlAssessmentWorkflow`, with
+`qualityControlAssessment.enableRepairLoop`) runs the same loop over gold rows, with a separate
 corrector and judge model: gate first (a draft that never passes is reported as `RejectedByGate`, not
 judged), gate reason / judge evidence into the repair, at most `maxScoreRepairIterations` repairs per
 row, and an unchanged repair stops the row. Its `Results.yaml` carries a `PipelineVersion`; a file from an
@@ -569,12 +582,12 @@ older pipeline is discarded and re-run rather than resumed.
 If the model has no verification or repair prompt, a corrected column is accepted with `Score = null`
 and always flagged. Cost: a defective column costs detection + correction + one verification, plus a
 repair and re-check per rejected round; clean columns cost detection only. Measured costs and the
-reasons verification rejects are in `docs/investigations/quality-review-postmortems.md` ("Correction
+reasons verification rejects are in `docs/investigations/quality-control-postmortems.md` ("Correction
 cost").
 
-## Configuration (`Configuration/QualityReviewConfig.cs`)
+## Configuration (`Configuration/QualityControlConfig.cs`)
 
-`LlmConfig.QualityReview` (`qualityReview:` in `Config.yaml`):
+`LlmConfig.QualityControl` (`qualityControl:` in `Config.yaml`):
 
 - `enabled` (bool, default false) — gates both whether the QC pass runs AND whether packaging
   trusts any already-stored `QcTranslated`/`QcQualityScore` (via `IsQcReviewFresh` — see
@@ -650,7 +663,7 @@ retry forever. `num_ctx` is back at 8192 (costs ~0.3GB on UD-IQ4_XS). To keep th
 `QcDetectionResult` now carries a `QcDetectionFailureKind` - `RequestError` (HTTP failure),
 `Truncated` (server stop reason `length`, via `TranslationService.TranslateMessagesWithStopReasonAsync`)
 or `ParseError` (model finished but broke the protocol) - plus the error/raw response, and
-`QualityEvaluatorAssessmentWorkflow` writes both into each `Results.yaml` row (`failureKind`/
+`QualityControlAssessmentWorkflow` writes both into each `Results.yaml` row (`failureKind`/
 `failureDetail`) and the per-kind counts into the summary (`detectionUnscoredByFailureKind`). A
 `RequestError`/`Truncated` count above zero means "re-measure prompt size against `num_ctx`", not
 "tune the prompt wording".
@@ -676,7 +689,7 @@ translate a 侠-family wuxia term, tripping `TranslationWorkflow.MatchesBadWords
 burning a full extra QC pass per attempt, incrementing `QcRuleCheckFailureCount` toward
 `MaxRuleCheckRetries` with the model never actually being told what it did wrong.
 
-`QualityReviewConfig.InlineRuleCheckRetries` (default `0`, a no-op) lets `GetLlmVerdictAsync` retry
+`QualityControlConfig.InlineRuleCheckRetries` (default `0`, a no-op) lets `GetLlmVerdictAsync` retry
 *within the same call*, in the same conversation, instead: if a proposed correction matches the
 bad-words list, it appends the model's own rejected answer plus a correction turn (via
 `TranslationService.AddCorrectionMessages`, the same helper the main translation pipeline's
@@ -713,38 +726,38 @@ separate from `MaxRuleCheckRetries` so the worst-case cost for a persistently-st
 
 ## Prompts: per-model-family, not a shared/generic file
 
-`BaseQualityReviewPrompt` is **not** a single universal prompt merged into every model — it lives
+`BaseQualityControlPrompt` is **not** a single universal prompt merged into every model — it lives
 inside each model preset's own prompt set, the same tier as `BaseSystemPrompt`/
 `BaseCorrectionSuffixPrompt`, because different model families can need differently-tuned wording
 to reliably produce the exact `SCORE:`/`CORRECTED:` format without leaking instructions back into
  their own output (the exact failure mode `docs/investigations/translation-retry-escalation-and-fixes.md`'s
 correction-suffix behavior documented in the translation retry guide). Concretely:
 
-- `BaseFiles/Qwen25/Prompts/BaseQualityReviewPrompt.txt` — includes an explicit anti-echo
+- `BaseFiles/Qwen25/Prompts/BaseQualityControlPrompt.txt` — includes an explicit anti-echo
   instruction line, informed by that documented `qwen2.5` quirk.
 - `Qwen38`, `HyMT2` and `HyMT2Moe` share the same wording, which lives in
-  `BaseFiles/Common/Prompts/BaseQualityReviewPrompt.txt` (see `LoadPresetPromptsWithCommon`) rather
+  `BaseFiles/Common/Prompts/BaseQualityControlPrompt.txt` (see `LoadPresetPromptsWithCommon`) rather
   than being duplicated under each preset.
 
-A downstream repo can still override either per-model with its own `BaseQualityReviewPrompt.txt`
+A downstream repo can still override either per-model with its own `BaseQualityControlPrompt.txt`
 under that model's `CustomPromptsPath` folder — same workspace-prompt-overrides-preset convention
 every other prompt already follows.
 
 ## Sample-run support
 
-`QualityReviewWorkflow.RunAsync`'s `sampleSize` parameter exists so a candidate model's real
+`QualityControlWorkflow.RunAsync`'s `sampleSize` parameter exists so a candidate model's real
 speed/score-distribution/correction-quality can be judged on a small, representative sample (e.g.
 ~300 columns, randomly drawn across every file) before committing an entire run to it. See the
-downstream repo's `RunQualityReviewPassSample`-style test fact and the plan doc's "Sample
+downstream repo's `RunQualityControlPassSample`-style test fact and the plan doc's "Sample
 run before committing to a full-corpus pass" section for the full methodology and reasoning
 (expected corpus size, why a full run is a many-hour job regardless of model choice, what to look
 for in the sample's results).
 
 ### Progress logging
 
-`RunAsync` logs `"Quality review: N column(s) ... to consider"` up front, then, every
+`RunAsync` logs `"Quality control: N column(s) ... to consider"` up front, then, every
 `TranslationService.BatchlessLog` columns *processed* (not just reviewed — every work item counts,
-`Skipped` included) and again on the very last one: `"Quality review progress: {processed}/{total}
+`Skipped` included) and again on the very last one: `"Quality control progress: {processed}/{total}
 column(s) processed ({remaining} remaining) - reviewed: …, corrected: …, rejected by gate: …,
 flagged: …"`. Using every processed item (not just ones that made a real LLM call) as the
 denominator matters on a re-run over a large corpus: most columns are `Skipped` (already fresh),
@@ -754,4 +767,4 @@ progress, not just LLM-call progress.
 
 ## Investigations and regressions
 
-Historical model-run analysis lives in [the quality-review postmortems investigation](../../investigations/quality-review-postmortems.md).
+Historical model-run analysis lives in [the quality-control postmortems investigation](../../investigations/quality-control-postmortems.md).

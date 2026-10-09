@@ -46,23 +46,35 @@ public class GlossaryLine
     public static string AppendPromptsFor(string raw, List<GlossaryLine> glossaryLines, string outputFile)
     {
         StringBuilder? prompt = null;
-        var shadowed = FindShadowedByLongerMatch(raw, glossaryLines, outputFile);
 
-        foreach (var line in glossaryLines)
+        foreach (var line in SelectFor(raw, glossaryLines, outputFile))
         {
-            if (!line.AppliesToFile(outputFile) || shadowed.Contains(line))
-                continue;
-
-            var matched = line.MatchIn(raw);
-            if (matched == null)
-                continue;
-
             prompt ??= new StringBuilder().AppendLine("```");
-            prompt.AppendLine(ToPromptString(matched, line.Result, line.AllowedAlternatives));
+            prompt.AppendLine(ToPromptString(line.MatchIn(raw)!, line.Result, line.AllowedAlternatives));
         }
 
         return prompt == null ? string.Empty : prompt.AppendLine("```").ToString();
     }
+
+    /// <summary>
+    /// The entries that apply to <paramref name="raw"/> in <paramref name="outputFile"/>: scoped to the
+    /// file, matched in the text, and not shadowed by a longer term. The selection behind
+    /// <see cref="AppendPromptsFor"/>, also used to snapshot the glossary a gold-set case was judged with.
+    /// </summary>
+    public static List<GlossaryLine> SelectFor(string raw, IEnumerable<GlossaryLine> glossaryLines, string outputFile)
+    {
+        var lines = glossaryLines as IList<GlossaryLine> ?? glossaryLines.ToList();
+        var shadowed = FindShadowedByLongerMatch(raw, lines, outputFile);
+        return lines.Where(line => line.AppliesToFile(outputFile) && !shadowed.Contains(line) && line.MatchIn(raw) != null).ToList();
+    }
+
+    /// <summary>A copy for persisting in a gold-set snapshot: the entry's content with file scoping dropped, since the snapshot is already scoped.</summary>
+    public GlossaryLine ToSnapshot() => new()
+    {
+        Raw = Raw, RawSimplified = RawSimplified, RawTraditional = RawTraditional, Result = Result,
+        AllowedAlternatives = [.. AllowedAlternatives], Direct = Direct, Literal = Literal, Context = Context,
+        CheckForMisusedTranslation = CheckForMisusedTranslation, CheckForBadTranslation = CheckForBadTranslation,
+    };
 
     /// <summary>
     /// The raw variant (<see cref="Raw"/>, then <see cref="RawSimplified"/>, then

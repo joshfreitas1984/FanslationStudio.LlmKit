@@ -42,10 +42,10 @@ additional `docs/` folders; all repo documentation belongs in the single root do
 
 ## Cross-linking rule
 
-Per this repo's own `docs/README.md`, LlmKit-internal mechanics (the `QualityReviewWorkflow`
+Per this repo's own `docs/README.md`, LlmKit-internal mechanics (the `QualityControlWorkflow`
 implementation, packaging logic, retry/escalation mechanics) are documented **only** in
 `FanslationStudio.LlmKit/docs/`, and a downstream repo's docs should cross-link to those rather than
 re-explaining LlmKit-internal behavior locally. A child repo's `docs/README.md` should demonstrate this
 directly in its "Where should I look?" row for the QC pass, pointing to
-`../FanslationStudio.LlmKit/docs/features/translation-pipeline/quality-review-pass.md` and labeling it "sibling
-repo — the actual `QualityReviewWorkflow` implementation lives there, not in this repo."
+`../FanslationStudio.LlmKit/docs/features/translation-pipeline/quality-control-pass.md` and labeling it "sibling
+repo — the actual `QualityControlWorkflow` implementation lives there, not in this repo."

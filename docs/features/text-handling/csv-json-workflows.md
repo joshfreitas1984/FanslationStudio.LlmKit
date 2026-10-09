@@ -14,7 +14,7 @@ A consuming project normally runs these stages for each configured `TextFileToSp
 1. Dump or copy the source file into the expected raw folder.
 2. Call the format's `ExportToCustomFormat` method.
 3. Translate the generated `Raw/Export/{path}.yaml` data into `Converted/{path}.yaml`.
-4. Optionally run the rules pass and quality review.
+4. Optionally run the rules pass and quality control.
 5. Call the format's `PackageAsync` method to write `Mod/{path}`.
 6. Let the game-specific plugin or loader consume the packaged file.
 
@@ -115,7 +115,7 @@ For each translated line it:
 
 JSON packaging is field-granular. If one field is unsafe, flagged, or missing a translation, that field remains at its original raw value while other translated fields in the same object are still emitted. The returned `RawFallback` count records those failed fields.
 
-## Quality review and fallback
+## Quality control and fallback
 
 Both workflows use the shared QC freshness and score-gate helpers. A fresh accepted `QcTranslated` value can replace the ordinary translation. If QC is stale, disabled, or below the configured score gate, packaging falls back to the ordinary `Translated` value; a low QC score alone does not cause CSV or JSON packaging failure.
 

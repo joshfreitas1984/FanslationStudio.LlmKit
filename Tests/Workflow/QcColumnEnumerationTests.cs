@@ -5,7 +5,7 @@ using FanslationStudio.LlmKit.Workflow;
 namespace Tests.Workflow;
 
 /// <summary>
-/// <see cref="QualityReviewWorkflow.EnumerateColumns"/> - the single column iterator every QC pass
+/// <see cref="QualityControlWorkflow.EnumerateColumns"/> - the single column iterator every QC pass
 /// (review, rule check, resets, flagged report) now shares.
 /// </summary>
 public sealed class QcColumnEnumerationTests
@@ -22,7 +22,7 @@ public sealed class QcColumnEnumerationTests
             Templates = [new FieldTemplate { Split = 2, Template = "{0}<br>{1}" }],
         };
 
-        var columns = QualityReviewWorkflow.EnumerateColumns(line).ToList();
+        var columns = QualityControlWorkflow.EnumerateColumns(line).ToList();
 
         Assert.Equal(2, columns.Count);
         var compound = columns.Single(c => c.Key == "#2");
@@ -52,7 +52,7 @@ public sealed class QcColumnEnumerationTests
             Templates = [new FieldTemplate { Split = 0, SplitPath = "Desc", Template = "{0}" }],
         };
 
-        var columns = QualityReviewWorkflow.EnumerateColumns(line).ToList();
+        var columns = QualityControlWorkflow.EnumerateColumns(line).ToList();
 
         Assert.Equal(["Name", "Desc"], columns.Select(c => c.Key));
         Assert.Null(columns[0].Template);
@@ -66,7 +66,7 @@ public sealed class QcColumnEnumerationTests
         var sub1 = new TranslationSplit { Split = 1, SubIndex = 1, Text = "甲" };
         var line = new TranslationLine { Splits = [sub2, sub1] };
 
-        var column = Assert.Single(QualityReviewWorkflow.EnumerateColumns(line));
+        var column = Assert.Single(QualityControlWorkflow.EnumerateColumns(line));
 
         Assert.Same(sub1, column.Anchor);
     }

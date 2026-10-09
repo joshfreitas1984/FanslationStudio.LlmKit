@@ -1,0 +1,29 @@
+# Assessment host working directory (FanslationStudio.LlmKit.Assessments). Model assessments and the
+# QC gold-set run live here, not in a game: a gold-set case carries the glossary it was judged with,
+# so no game is needed. Cases without a snapshot fall back to the preset glossary below.
+models:
+  - name: Qwen38Qc-IQ4XS
+    modelPreset: Qwen38
+    modelPresetType: Standard
+    model: "hf.co/unsloth/Qwen3.8-27B-GGUF:UD-IQ4_XS"
+glossaryPreset:
+  usePresetChineseGlossary: true
+  chineseGlossaryTypesToSupress:
+    - Phonetics
+qualityControl:
+  enabled: true
+  modelName: Qwen38Qc-IQ4XS
+  minAcceptableScore: 60
+  maxConcurrency: 2
+  inlineRuleCheckRetries: 2
+  autoAcceptDefectCategories: [HardToParseSeam, OtherNamedDefect, DroppedContent, DroppedStutter]
+  doubledDetectionEnabled: false
+  detectionTemperature: 0
+  maxScoreRepairIterations: 1
+  verificationEvidenceEnabled: true
+qualityControlAssessment:
+  enabled: true
+  modelNames:
+    - Qwen38Qc-IQ4XS
+  goldSetPath: GoldSets/ChineseToEnglishWuxia.yaml
+  outputPath: TestResults/QcAssessment

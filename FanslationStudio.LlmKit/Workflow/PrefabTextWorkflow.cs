@@ -75,7 +75,7 @@ public static class PrefabTextWorkflow
         Directory.CreateDirectory(outputPath);
 
         config ??= ConfigurationExtensions.GetConfiguration(workingDirectory);
-        var qualityReview = config.QualityReview;
+        var qualityControl = config.QualityControl;
 
         var results = new List<PrefabTextResult>();
         var counts = new PackagingCounts();
@@ -84,7 +84,7 @@ public static class PrefabTextWorkflow
         {
             foreach (var line in fileLines)
             {
-                var (result, reason) = ReconstructLine(line, textFile, qualityReview);
+                var (result, reason) = ReconstructLine(line, textFile, qualityControl);
 
                 // Count regardless of whether result is null - a RawFallback (or, more rarely, a
                 // QcRejected whose Translated also turned out unusable) is a real, reportable
@@ -113,8 +113,8 @@ public static class PrefabTextWorkflow
     /// Reconstructs a single line's packaged output. The returned <see cref="PackagingFailureReason"/>
     /// is purely informational, for <see cref="PackagePrefabTextAsync"/>'s reporting counts:
     /// <c>QcRejected</c> means the line packaged fine on its ordinary pre-QC <c>Translated</c> text
-    /// (see docs/plans/quality-review-pass.md), but a proposed correction existed and was held back
-    /// by <see cref="Utility.QualityReviewHelpers.PassesQcScoreGate"/> (a low score not covered by an
+    /// (see docs/plans/quality-control-pass.md), but a proposed correction existed and was held back
+    /// by <see cref="Utility.QualityControlHelpers.PassesQcScoreGate"/> (a low score not covered by an
     /// auto-accepted DEFECT category). <c>RawFallback</c> means a fragment/split was unsafe, flagged
     /// for retranslation, or missing its translation entirely, with no usable <c>Translated</c> to
     /// fall back to either.
@@ -134,7 +134,7 @@ public static class PrefabTextWorkflow
     /// regardless of outcome - this only decides what gets written to <c>Files/Mod</c>, never what's
     /// kept in <c>Files/Converted</c>.
     /// </summary>
-    private static (string? Result, PackagingFailureReason Reason) ReconstructLine(TranslationLine line, TextFileToSplit textFile, QualityReviewConfig qualityReview)
+    private static (string? Result, PackagingFailureReason Reason) ReconstructLine(TranslationLine line, TextFileToSplit textFile, QualityControlConfig qualityControl)
     {
         var template = line.Templates.FirstOrDefault(t => t.Split == 0);
         if (template != null)
@@ -144,7 +144,7 @@ public static class PrefabTextWorkflow
             // A low score/unaccepted DEFECT category only skips the QcTranslated shortcut; the
             // already-good pre-QC fragments still reconstruct normally (see
             // DragonHierOverLlm/Tests/docs/qc-run-startup-crash-investigation-2026-09-15.md).
-            var resolved = PackagingHelpers.ResolveFragments(fragments, template, textFile, qualityReview, anchorFallsBackToFirst: false);
+            var resolved = PackagingHelpers.ResolveFragments(fragments, template, textFile, qualityControl, anchorFallsBackToFirst: false);
             return (resolved.Text, resolved.Reason);
         }
 
@@ -152,7 +152,7 @@ public static class PrefabTextWorkflow
         if (split == null)
             return (null, PackagingFailureReason.None);
 
-        var plain = PackagingHelpers.ResolvePlainSplit(split, qualityReview);
+        var plain = PackagingHelpers.ResolvePlainSplit(split, qualityControl);
         return (plain.Text, plain.Reason);
     }
 }

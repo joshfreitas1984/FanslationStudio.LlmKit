@@ -1,0 +1,9 @@
+# Sibling game checkouts LlmKit reads (read-only) for cross-game scans. Paths are relative to this
+# file's directory. A missing checkout is skipped with a warning, never a failure.
+games:
+  - name: DragonHierOverLlm
+    path: ../../../DragonHierOverLlm/Files
+  - name: LegendOfMortalOverLlm
+    path: ../../../LegendOfMortalOverLlm/Files
+  - name: WanXiangOverLlm
+    path: ../../../WanXiangOverLlm/Files

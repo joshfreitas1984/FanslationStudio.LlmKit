@@ -5,12 +5,12 @@ using FanslationStudio.LlmKit.Workflow;
 namespace Tests.Workflow;
 
 /// <summary>
-/// End-to-end coverage of <see cref="QualityReviewWorkflow.GetLlmVerdictAsync"/>'s five-call
+/// End-to-end coverage of <see cref="QualityControlWorkflow.GetLlmVerdictAsync"/>'s five-call
 /// orchestration (detect x2, merge, generate, verify/repair loop), using <see cref="ScriptedLlmHandler"/>
 /// (see TranslationServiceTests.cs) to script each call's response by matching on the labeled
 /// section of the request body that call actually sends - never a real LLM.
 /// </summary>
-public sealed class QualityReviewFiveCallFlowTests
+public sealed class QualityControlFiveCallFlowTests
 {
     private const string Source = "你好世界";
     private const string Translation = "Hello world";
@@ -19,7 +19,7 @@ public sealed class QualityReviewFiveCallFlowTests
     {
         var config = new LlmConfig
         {
-            QualityReview = new QualityReviewConfig
+            QualityControl = new QualityControlConfig
             {
                 Enabled = true,
                 MaxScoreRepairIterations = maxRepairAttempts,
@@ -33,10 +33,10 @@ public sealed class QualityReviewFiveCallFlowTests
             Model = "test-model",
             Prompts = new Dictionary<string, string>
             {
-                ["BaseQualityReviewPrompt"] = "detection system prompt",
-                ["BaseQualityReviewCorrectionPrompt"] = "correction system prompt",
-                ["BaseQualityReviewVerificationPrompt"] = "verification system prompt",
-                ["BaseQualityReviewCorrectionRepairPrompt"] = "repair system prompt",
+                ["BaseQualityControlPrompt"] = "detection system prompt",
+                ["BaseQualityControlCorrectionPrompt"] = "correction system prompt",
+                ["BaseQualityControlVerificationPrompt"] = "verification system prompt",
+                ["BaseQualityControlCorrectionRepairPrompt"] = "repair system prompt",
             },
         };
 
@@ -70,8 +70,8 @@ public sealed class QualityReviewFiveCallFlowTests
         Responses = [response],
     };
 
-    private static async Task<QualityReviewWorkflow.LlmVerdict> RunAsync(LlmConfig config, HttpClient client) =>
-        await QualityReviewWorkflow.GetLlmVerdictAsync(config, config.Runtime.Models["Default"], client, Source, Source, Translation, string.Empty);
+    private static async Task<QualityControlWorkflow.LlmVerdict> RunAsync(LlmConfig config, HttpClient client) =>
+        await QualityControlWorkflow.GetLlmVerdictAsync(config, config.Runtime.Models["Default"], client, Source, Source, Translation, string.Empty);
 
     [Fact(DisplayName = "Both independent detectors agree NONE - accepted at fixed score 100, no correction")]
     public async Task BothDetectorsAgreeNone_AcceptsWithScore100()

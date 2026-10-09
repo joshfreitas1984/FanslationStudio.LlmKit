@@ -63,5 +63,5 @@ Known legacy layouts are migration inputs, not supported alternatives:
 This doc (and its four siblings) covers structure — file/folder layout, naming, and config shape.
 It does not cover LlmKit-internal mechanics (workflow classes, data model, retry/escalation) — that
 lives in this repo's `architecture/ARCHITECTURE.md`,
-`features/translation-pipeline/quality-review-pass.md`, and
+`features/translation-pipeline/quality-control-pass.md`, and
 `features/packaging/packaging-workflows.md`, per `docs/README.md`'s taxonomy.

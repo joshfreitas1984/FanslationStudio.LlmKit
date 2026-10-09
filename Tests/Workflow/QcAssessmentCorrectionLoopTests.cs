@@ -4,16 +4,16 @@ using FanslationStudio.LlmKit.Workflow;
 using System.Net;
 using System.Text;
 using System.Text.Json;
-using static FanslationStudio.LlmKit.Workflow.QualityEvaluatorAssessmentWorkflow;
+using static FanslationStudio.LlmKit.Workflow.QualityControlAssessmentWorkflow;
 
 namespace Tests.Workflow;
 
 /// <summary>
 /// The QC evaluator's correction-generation repair loop must mirror production's
-/// <see cref="QualityReviewWorkflow.GetLlmVerdictAsync"/>: gate before judging, gate reason / judge
+/// <see cref="QualityControlWorkflow.GetLlmVerdictAsync"/>: gate before judging, gate reason / judge
 /// evidence into the repair, real defect tokens as repair targets, and an unchanged repair stops the row.
 /// </summary>
-public sealed class QcEvaluatorCorrectionLoopTests : IDisposable
+public sealed class QcAssessmentCorrectionLoopTests : IDisposable
 {
     private const string Source = "{0}在{1}与{2}切磋武艺，最终{3}技高一筹。";
     private const string Translation = "{0} In {1} And {2} Sparring, in the end {3} One notch above";
@@ -21,7 +21,7 @@ public sealed class QcEvaluatorCorrectionLoopTests : IDisposable
     private const string Fixed = "{0} spars with {1} and {2}, and {3} proves the superior fighter.";
     private const string Accepted = "UNRESOLVED: NONE\nNEW_DEFECTS: NONE\nSCORE: 95";
 
-    private readonly string outputDirectory = Path.Combine(Path.GetTempPath(), "QcEvaluatorLoopTests-" + Guid.NewGuid().ToString("N"));
+    private readonly string outputDirectory = Path.Combine(Path.GetTempPath(), "QcAssessmentLoopTests-" + Guid.NewGuid().ToString("N"));
 
     public void Dispose()
     {
@@ -62,10 +62,10 @@ public sealed class QcEvaluatorCorrectionLoopTests : IDisposable
         ModelParams = new Dictionary<string, object> { ["temperature"] = 0.15 },
         Prompts = new Dictionary<string, string>
         {
-            ["BaseQualityReviewCorrectionPrompt"] = "correction",
-            ["BaseQualityReviewCorrectionRepairPrompt"] = "repair",
-            ["BaseQualityReviewVerificationPrompt"] = "verification",
-            ["BaseQualityReviewVerificationEvidencePrompt"] = "verification-evidence",
+            ["BaseQualityControlCorrectionPrompt"] = "correction",
+            ["BaseQualityControlCorrectionRepairPrompt"] = "repair",
+            ["BaseQualityControlVerificationPrompt"] = "verification",
+            ["BaseQualityControlVerificationEvidencePrompt"] = "verification-evidence",
             ["CorrectRemovalPrompt"] = "Restore `{0}` to the translation, as it was incorrectly removed.",
             ["CorrectAdditionalPrompt"] = "`{0}` appears in the result but not in the original text.",
             ["CorrectAlternativesPrompt"] = "Alternatives were provided.",
@@ -80,14 +80,14 @@ public sealed class QcEvaluatorCorrectionLoopTests : IDisposable
     {
         var config = new LlmConfig
         {
-            QualityReview = new QualityReviewConfig
+            QualityControl = new QualityControlConfig
             {
                 Enabled = true,
                 MaxScoreRepairIterations = 1,
                 VerificationEvidenceEnabled = evidence,
             },
         };
-        var settings = new QualityEvaluatorAssessmentConfig
+        var settings = new QualityControlAssessmentConfig
         {
             CorrectorModelNames = ["Corrector"],
             JudgeModelName = "Judge",

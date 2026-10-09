@@ -9,13 +9,13 @@ public class QcCorrectionGuardTests
     [InlineData("a  b", "a b", true)]
     [InlineData("half-dead", "half-alive", false)]
     public void IsEquivalentText(string a, string b, bool expected) =>
-        Assert.Equal(expected, QualityReviewWorkflow.IsEquivalentText(a, b));
+        Assert.Equal(expected, QualityControlWorkflow.IsEquivalentText(a, b));
 
     [Fact(DisplayName = "CheckRunawayRepetition rejects new long letter runs only")]
     public void RunawayRepetition()
     {
-        Assert.NotNull(QualityReviewWorkflow.CheckRunawayRepetition("Who are you", "Waaah who are youuuuuuuuuuuuu"));
-        Assert.Null(QualityReviewWorkflow.CheckRunawayRepetition("Who are you", "Who are you?!"));
-        Assert.Null(QualityReviewWorkflow.CheckRunawayRepetition("Ahhhhhhhhhhhh", "Ahhhhhhhhhhhh!"));
+        Assert.NotNull(QualityControlWorkflow.CheckRunawayRepetition("Who are you", "Waaah who are youuuuuuuuuuuuu"));
+        Assert.Null(QualityControlWorkflow.CheckRunawayRepetition("Who are you", "Who are you?!"));
+        Assert.Null(QualityControlWorkflow.CheckRunawayRepetition("Ahhhhhhhhhhhh", "Ahhhhhhhhhhhh!"));
     }
 }

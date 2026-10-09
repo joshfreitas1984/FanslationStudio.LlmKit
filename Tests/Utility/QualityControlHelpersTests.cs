@@ -4,9 +4,9 @@ using FanslationStudio.LlmKit.Utility;
 
 namespace Tests.Utility;
 
-public class QualityReviewHelpersTests
+public class QualityControlHelpersTests
 {
-    private static readonly QualityReviewConfig EnabledConfig = new() { Enabled = true };
+    private static readonly QualityControlConfig EnabledConfig = new() { Enabled = true };
 
     [Theory(DisplayName = "IsCorrectedLabelLeak flags a QcTranslated still carrying a CORRECTED: label")]
     [InlineData("Wealth in the millions CORRECTED: NONE", true)]
@@ -16,12 +16,12 @@ public class QualityReviewHelpersTests
     [InlineData("", false)]
     public void FlagsLeakedCorrectedLabel(string? qcTranslated, bool expected)
     {
-        Assert.Equal(expected, QualityReviewHelpers.IsCorrectedLabelLeak(qcTranslated));
+        Assert.Equal(expected, QualityControlHelpers.IsCorrectedLabelLeak(qcTranslated));
     }
 
     // Regression test for the corrupted QcTranslated values found in DragonHierOverLlm's
     // AchievementData.csv.yaml - even if a leaked "CORRECTED:" label somehow made it into
-    // QcTranslated (from any code path, not just QualityReviewWorkflow's own parsing),
+    // QcTranslated (from any code path, not just QualityControlWorkflow's own parsing),
     // IsQcReviewFresh must refuse to vouch for it so every packaging path falls back to the
     // pre-QC Translated text instead of shipping the corrupted string.
     [Fact(DisplayName = "IsQcReviewFresh refuses to trust a QcTranslated with a leaked CORRECTED: label")]
@@ -35,7 +35,7 @@ public class QualityReviewHelpersTests
             QcTranslated = "Wealth in the millions CORRECTED: NONE",
         };
 
-        var fresh = QualityReviewHelpers.IsQcReviewFresh(split, null, [split], EnabledConfig);
+        var fresh = QualityControlHelpers.IsQcReviewFresh(split, null, [split], EnabledConfig);
 
         Assert.False(fresh);
     }
@@ -43,7 +43,7 @@ public class QualityReviewHelpersTests
     // Regression test: retranslating a non-zero SubIndex fragment of a compound/templated column
     // used to call TranslationSplit.ResetQcState() on the retranslated fragment itself, which never
     // carries QC state for a compound column - only the SubIndex == 0 fragment does (see the anchor
-    // convention in docs/features/translation-pipeline/quality-review-pass.md). That left the anchor's
+    // convention in docs/features/translation-pipeline/quality-control-pass.md). That left the anchor's
     // stale QcStatus/QcQualityScore/QcTranslated sitting untouched until IsQcReviewFresh's own dynamic
     // recompute caught up on the next QC run - this test locks in that FindQcAnchor resolves the
     // correct fragment (the anchor) so every caller (TranslationWorkflow.UpdateSplit,
@@ -63,7 +63,7 @@ public class QualityReviewHelpersTests
 
         // Retranslating subIndex2 (not the anchor) must still resolve back to subIndex 0's fragment,
         // not to subIndex2 itself and not to the unrelated column sharing the same line.
-        var resolved = QualityReviewHelpers.FindQcAnchor(line, subIndex2);
+        var resolved = QualityControlHelpers.FindQcAnchor(line, subIndex2);
 
         Assert.Same(anchorSplit, resolved);
     }
@@ -72,7 +72,7 @@ public class QualityReviewHelpersTests
     public void FindQcAnchorResolvesAnchorForJsonStyleColumn()
     {
         // JSON field-path files leave Split == 0 for every field on the line (see
-        // QualityReviewWorkflow.ColumnKey's own doc comment) and disambiguate columns via SplitPath
+        // QualityControlWorkflow.ColumnKey's own doc comment) and disambiguate columns via SplitPath
         // instead - this must be respected here too, or a JSON compound field's retranslated
         // non-zero-SubIndex fragment would get grouped with an unrelated field that also has
         // Split == 0.
@@ -85,7 +85,7 @@ public class QualityReviewHelpersTests
             Splits = [anchorSplit, subIndex1, unrelatedField],
         };
 
-        var resolved = QualityReviewHelpers.FindQcAnchor(line, subIndex1);
+        var resolved = QualityControlHelpers.FindQcAnchor(line, subIndex1);
 
         Assert.Same(anchorSplit, resolved);
     }
@@ -96,7 +96,7 @@ public class QualityReviewHelpersTests
         var plainSplit = new TranslationSplit { Split = 3, SubIndex = 0, Text = "plain", Translated = "Plain" };
         var line = new TranslationLine { Splits = [plainSplit] };
 
-        var resolved = QualityReviewHelpers.FindQcAnchor(line, plainSplit);
+        var resolved = QualityControlHelpers.FindQcAnchor(line, plainSplit);
 
         Assert.Same(plainSplit, resolved);
     }
@@ -112,11 +112,11 @@ public class QualityReviewHelpersTests
             QcTranslated = "Wealth in the millions",
         };
 
-        var fresh = QualityReviewHelpers.IsQcReviewFresh(split, null, [split], EnabledConfig);
+        var fresh = QualityControlHelpers.IsQcReviewFresh(split, null, [split], EnabledConfig);
 
         Assert.True(fresh);
 
-        var disabledFresh = QualityReviewHelpers.IsQcReviewFresh(split, null, [split], new QualityReviewConfig { Enabled = false });
+        var disabledFresh = QualityControlHelpers.IsQcReviewFresh(split, null, [split], new QualityControlConfig { Enabled = false });
         Assert.False(disabledFresh);
     }
 

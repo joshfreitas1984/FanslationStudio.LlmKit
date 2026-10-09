@@ -6,7 +6,7 @@ namespace Tests;
 /// Covers <see cref="FileHelper"/>'s retry behavior for the transient "file locked by another
 /// process" failure (an IDE/antivirus/sync tool briefly holding the output `.yaml` open) that
 /// otherwise takes down an entire multi-hour translation/QC run - see
-/// docs/plans/quality-review-pass.md (DragonHierOverLlm repo) for the background.
+/// docs/plans/quality-control-pass.md (DragonHierOverLlm repo) for the background.
 /// </summary>
 public class FileHelperTests
 {

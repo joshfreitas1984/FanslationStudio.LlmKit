@@ -10,7 +10,7 @@ public static class QcDetectionResponseParser
         RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Compiled);
 
     /// <param name="assumeDefectsPrefix">
-    /// The reply was pre-filled with <c>DEFECTS:</c> (see <see cref="Configuration.QualityReviewConfig.DetectionPrefillEnabled"/>),
+    /// The reply was pre-filled with <c>DEFECTS:</c> (see <see cref="Configuration.QualityControlConfig.DetectionPrefillEnabled"/>),
     /// and a server may return only the continuation (<c>NONE</c>) or the whole line. A response
     /// with no <c>DEFECTS:</c> line is then parsed as if it had one.
     /// </param>

@@ -10,7 +10,8 @@ public static class ConfigurationExtensions
     public static LlmConfig GetConfiguration(string workingDirectory, GameHooks? hooks = null)
     {
         var deserializer = YamlHelper.CreateDeserializer();
-        var response = deserializer.Deserialize<LlmConfig>(File.ReadAllText($"{workingDirectory}/Config.yaml", Encoding.UTF8));
+        var configText = File.ReadAllText($"{workingDirectory}/Config.yaml", Encoding.UTF8);
+        var response = deserializer.Deserialize<LlmConfig>(configText);
 
         response.Hooks = hooks ?? new GameHooks();
 
@@ -23,10 +24,18 @@ public static class ConfigurationExtensions
         response.SplitRegexPatterns ??= new List<string>();
         response.SplitCharactersList ??= new List<string>();
         response.ExtraStringTokenReplacers ??= new List<string>();
-        // Same guard as above for a `qualityReview:` key present with no content underneath it
+        // Same guard as above for a `qualityControl:` key present with no content underneath it
         // (e.g. every field commented out) - the property initializer only covers a fully absent
         // key, not one present but empty.
-        response.QualityReview ??= new QualityReviewConfig();
+        response.QualityControl ??= new QualityControlConfig();
+
+        // Legacy `qualityReview:` key (renamed `qualityControl:`): honoured when the new key is absent.
+        if (response.LegacyQualityReview != null)
+        {
+            WarnLegacy("Config.yaml key 'qualityReview:' is deprecated; rename it to 'qualityControl:'.");
+            if (!HasTopLevelKey(configText, "qualityControl"))
+                response.QualityControl = response.LegacyQualityReview;
+        }
 
         response.Runtime.WorkingDirectory = workingDirectory;
 
@@ -86,14 +95,14 @@ public static class ConfigurationExtensions
                 $"EscalationModelName '{response.EscalationModelName}' does not match any configured model name. " +
                 $"Configured model names: {string.Join(", ", response.Runtime.Models.Keys)}");
 
-        // Same fail-fast treatment for the quality review pass's model name (see
-        // QualityReviewConfig.ModelName doc comment) - only checked when QC is actually enabled,
-        // so a project that never opts in never needs a qualityReview: section at all.
-        if (response.QualityReview.Enabled
-            && !string.IsNullOrEmpty(response.QualityReview.ModelName)
-            && !response.Runtime.Models.ContainsKey(response.QualityReview.ModelName))
+        // Same fail-fast treatment for the quality control pass's model name (see
+        // QualityControlConfig.ModelName doc comment) - only checked when QC is actually enabled,
+        // so a project that never opts in never needs a qualityControl: section at all.
+        if (response.QualityControl.Enabled
+            && !string.IsNullOrEmpty(response.QualityControl.ModelName)
+            && !response.Runtime.Models.ContainsKey(response.QualityControl.ModelName))
             throw new InvalidOperationException(
-                $"QualityReview.ModelName '{response.QualityReview.ModelName}' does not match any configured model name. " +
+                $"QualityControl.ModelName '{response.QualityControl.ModelName}' does not match any configured model name. " +
                 $"Configured model names: {string.Join(", ", response.Runtime.Models.Keys)}");
 
         // Load Preset Glossary before workspace glossary so that workspace can override preset entries
@@ -199,10 +208,26 @@ public static class ConfigurationExtensions
         return prompts;
     }
 
+    private static readonly HashSet<string> WarnedLegacy = new();
+
+    private static void WarnLegacy(string message)
+    {
+        lock (WarnedLegacy)
+            if (!WarnedLegacy.Add(message))
+                return;
+        Console.Error.WriteLine("WARNING: " + message);
+    }
+
+    private static bool HasTopLevelKey(string yaml, string key) =>
+        System.Text.RegularExpressions.Regex.IsMatch(yaml, $@"^{key}\s*:", System.Text.RegularExpressions.RegexOptions.Multiline);
+
     public static void MergeWorkspacePrompts(string promptsDirectory, ModelExecutionConfig config)
     {
         if (!Directory.Exists(promptsDirectory))
             return;
+
+        foreach (var legacy in Directory.EnumerateFiles(promptsDirectory, "BaseQualityReview*"))
+            WarnLegacy($"Prompt override '{Path.GetFileName(legacy)}' uses a legacy name and no longer applies; rename it to 'BaseQualityControl*'.");
 
         // Merge with existing prompts, allowing workspace prompts to override preset prompts
         foreach (var file in Directory.EnumerateFiles(promptsDirectory))

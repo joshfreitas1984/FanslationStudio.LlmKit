@@ -56,7 +56,7 @@ The validator is also applied by the shared translation rule evaluation used by 
 
 ### `CustomQcExclusionRule`
 
-`Func<TextFileToSplit, int?, string, bool>` receives the file, column, and reconstructed raw column text. Return `true` to omit the column from the QC pass entirely. This differs from validation: exclusion prevents a QC LLM call, while validation permits a candidate and then rejects it when it violates a rule. Use the per-file quality-review setting when the whole file should be excluded; use this hook for selected columns.
+`Func<TextFileToSplit, int?, string, bool>` receives the file, column, and reconstructed raw column text. Return `true` to omit the column from the QC pass entirely. This differs from validation: exclusion prevents a QC LLM call, while validation permits a candidate and then rejects it when it violates a rule. Use the per-file quality-control setting when the whole file should be excluded; use this hook for selected columns.
 
 ### `CustomUnsafeToTranslateRule`
 
@@ -108,6 +108,6 @@ Keep hooks deterministic, narrow, and game-specific. Avoid network calls, mutabl
 
 - A hook never runs: confirm the consuming project passes it into configuration or the top-level workflow; YAML cannot register it.
 - A repaired value is still retried: inspect built-in validation and the custom validator reason; repair runs before both.
-- QC still reviews an excluded column: verify the rule returns `true` for the reconstructed raw text and is attached before `QualityReviewWorkflow.RunAsync` builds its work list.
+- QC still reviews an excluded column: verify the rule returns `true` for the reconstructed raw text and is attached before `QualityControlWorkflow.RunAsync` builds its work list.
 - A split is still translated despite `CustomUnsafeToTranslateRule`: run `ApplyAllRulesToCurrentTranslation` (or brute-force translation) with the hooks attached; plain `TranslateLines` does not evaluate it.
 - Packaged output changes while `Converted` does not: this is expected for `CustomPackagingFixup`, which is output-only.

@@ -554,7 +554,7 @@ public static partial class LineValidation
         }
 
         // Exclude the literal "\n" escape - this pipeline's own convention for an embedded line
-        // break (which BaseQualityReviewPrompt.txt explicitly requires the QC model to use when
+        // break (which BaseQualityControlPrompt.txt explicitly requires the QC model to use when
         // joining a multi-sentence correction) - so a correctly-formed correction doesn't get
         // mistaken for a stray backslash/alternative.
         if (result.Replace("\\n", "").Contains('\\') && !raw.Contains('\\'))

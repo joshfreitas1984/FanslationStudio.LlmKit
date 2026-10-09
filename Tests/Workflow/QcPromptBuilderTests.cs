@@ -22,7 +22,7 @@ public sealed class QcPromptBuilderTests
     [Fact(DisplayName = "Detection prompt: SOURCE, CURRENT TRANSLATION, glossary block")]
     public void BuildsDetectionPrompt()
     {
-        var prompt = QualityReviewWorkflow.BuildQcUserPrompt("剑法威力", "Sword Power", Glossary);
+        var prompt = QualityControlWorkflow.BuildQcUserPrompt("剑法威力", "Sword Power", Glossary);
 
         Assert.Equal(Expected(
             "SOURCE (Chinese): 剑法威力",
@@ -34,7 +34,7 @@ public sealed class QcPromptBuilderTests
     [Fact(DisplayName = "Empty glossary prompt omits the glossary header entirely")]
     public void OmitsEmptyGlossaryBlock()
     {
-        var prompt = QualityReviewWorkflow.BuildQcUserPrompt("剑法威力", "Sword Power", string.Empty);
+        var prompt = QualityControlWorkflow.BuildQcUserPrompt("剑法威力", "Sword Power", string.Empty);
 
         Assert.Equal(Expected("SOURCE (Chinese): 剑法威力", "CURRENT TRANSLATION (English): Sword Power"), prompt);
     }
@@ -42,7 +42,7 @@ public sealed class QcPromptBuilderTests
     [Fact(DisplayName = "Extra labelled fields go between CURRENT TRANSLATION and the glossary, in order")]
     public void PlacesExtraFieldsBeforeGlossary()
     {
-        var prompt = QualityReviewWorkflow.BuildQcUserPrompt("剑法威力", "Sword Power", Glossary,
+        var prompt = QualityControlWorkflow.BuildQcUserPrompt("剑法威力", "Sword Power", Glossary,
             ("CONFIRMED DEFECTS", "DOMAIN_TERM, DROPPED_CONTENT"),
             ("PROPOSED CORRECTION", "Sword Technique Power"));
 
@@ -76,7 +76,7 @@ public sealed class QcPromptBuilderTests
 
     private static (LlmConfig Config, ModelExecutionConfig Model) BuildConfig()
     {
-        var config = new LlmConfig { QualityReview = new QualityReviewConfig { Enabled = true } };
+        var config = new LlmConfig { QualityControl = new QualityControlConfig { Enabled = true } };
         var model = new ModelExecutionConfig
         {
             Url = "http://test.local/v1/chat/completions",
@@ -84,10 +84,10 @@ public sealed class QcPromptBuilderTests
             Model = "test-model",
             Prompts = new Dictionary<string, string>
             {
-                ["BaseQualityReviewPrompt"] = "detection system prompt",
-                ["BaseQualityReviewCorrectionPrompt"] = "correction system prompt",
-                ["BaseQualityReviewVerificationPrompt"] = "verification system prompt",
-                ["BaseQualityReviewCorrectionRepairPrompt"] = "repair system prompt",
+                ["BaseQualityControlPrompt"] = "detection system prompt",
+                ["BaseQualityControlCorrectionPrompt"] = "correction system prompt",
+                ["BaseQualityControlVerificationPrompt"] = "verification system prompt",
+                ["BaseQualityControlCorrectionRepairPrompt"] = "repair system prompt",
             },
         };
         config.Runtime.Models["Default"] = model;
@@ -101,16 +101,16 @@ public sealed class QcPromptBuilderTests
         QcDefectCategory[] defects = [QcDefectCategory.DomainTerm, QcDefectCategory.DroppedContent];
 
         var detectHandler = new CapturingHandler("DEFECTS: NONE");
-        await QualityReviewWorkflow.DetectDefectsAsync(config, model, new HttpClient(detectHandler), "raw", "剑法威力", "Sword Power", Glossary, null);
+        await QualityControlWorkflow.DetectDefectsAsync(config, model, new HttpClient(detectHandler), "raw", "剑法威力", "Sword Power", Glossary, null);
 
         var correctionHandler = new CapturingHandler("CORRECTED: Sword Technique Power");
-        var correction = await QualityReviewWorkflow.GenerateCorrectionAsync(config, model, new HttpClient(correctionHandler), "raw", "剑法威力", "Sword Power", string.Empty, defects, null);
+        var correction = await QualityControlWorkflow.GenerateCorrectionAsync(config, model, new HttpClient(correctionHandler), "raw", "剑法威力", "Sword Power", string.Empty, defects, null);
 
         var verifyHandler = new CapturingHandler("UNRESOLVED: NONE\nNEW_DEFECTS: NONE\nSCORE: 90");
-        await QualityReviewWorkflow.GetVerificationVerdictAsync(config, model, new HttpClient(verifyHandler), "raw", "剑法威力", "Sword Power", Glossary, defects, "Sword Technique Power");
+        await QualityControlWorkflow.GetVerificationVerdictAsync(config, model, new HttpClient(verifyHandler), "raw", "剑法威力", "Sword Power", Glossary, defects, "Sword Technique Power");
 
         var repairHandler = new CapturingHandler("CORRECTED: NONE");
-        var repair = await QualityReviewWorkflow.GetCorrectionRepairAsync(config, model, new HttpClient(repairHandler), "raw", "剑法威力", "Sword Power", Glossary, [QcDefectCategory.DomainTerm], "Sword Tech Power");
+        var repair = await QualityControlWorkflow.GetCorrectionRepairAsync(config, model, new HttpClient(repairHandler), "raw", "剑法威力", "Sword Power", Glossary, [QcDefectCategory.DomainTerm], "Sword Tech Power");
 
         Assert.Equal(("detection system prompt", Expected(
             "SOURCE (Chinese): 剑法威力",
@@ -150,9 +150,9 @@ public sealed class QcPromptBuilderTests
     {
         var (config, model) = BuildConfig();
 
-        var correction = await QualityReviewWorkflow.GenerateCorrectionAsync(config, model, new HttpClient(new CapturingHandler(response)),
+        var correction = await QualityControlWorkflow.GenerateCorrectionAsync(config, model, new HttpClient(new CapturingHandler(response)),
             "raw", "剑法威力", "Sword Power", string.Empty, [QcDefectCategory.DomainTerm], null);
-        var repair = await QualityReviewWorkflow.GetCorrectionRepairAsync(config, model, new HttpClient(new CapturingHandler(response)),
+        var repair = await QualityControlWorkflow.GetCorrectionRepairAsync(config, model, new HttpClient(new CapturingHandler(response)),
             "raw", "剑法威力", "Sword Power", string.Empty, [QcDefectCategory.DomainTerm], "Sword Tech Power");
 
         Assert.Null(correction);

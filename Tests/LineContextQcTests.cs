@@ -15,7 +15,7 @@ public class LineContextQcTests
     [Fact(DisplayName = "QC user prompt is unchanged when there is no line context")]
     public void NoContext_PromptUnchanged()
     {
-        var prompt = QualityReviewWorkflow.BuildQcUserPrompt("源", "src", "术语=Term");
+        var prompt = QualityControlWorkflow.BuildQcUserPrompt("源", "src", "术语=Term");
 
         Assert.DoesNotContain("Line context", prompt);
         Assert.Contains("Relevant glossary terms", prompt);
@@ -27,7 +27,7 @@ public class LineContextQcTests
     {
         var combined = "术语=Term" + LineContexts.QcSeparator + "The speaker is a female character.";
 
-        var prompt = QualityReviewWorkflow.BuildQcUserPrompt("源", "src", combined);
+        var prompt = QualityControlWorkflow.BuildQcUserPrompt("源", "src", combined);
 
         Assert.Contains("Line context from the game", prompt);
         Assert.Contains("The speaker is a female character.", prompt);
@@ -41,7 +41,7 @@ public class LineContextQcTests
     [Fact(DisplayName = "QC user prompt renders a line context even when there are no glossary terms")]
     public void ContextWithoutGlossary_StillRenders()
     {
-        var prompt = QualityReviewWorkflow.BuildQcUserPrompt("源", "src", LineContexts.QcSeparator + "Narration addressed to the player.");
+        var prompt = QualityControlWorkflow.BuildQcUserPrompt("源", "src", LineContexts.QcSeparator + "Narration addressed to the player.");
 
         Assert.Contains("Narration addressed to the player.", prompt);
         Assert.DoesNotContain("Relevant glossary terms", prompt);

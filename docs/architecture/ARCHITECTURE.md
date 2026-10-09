@@ -60,7 +60,7 @@ Single entry point, called once per workflow invocation. Loads, in order:
    `CustomPromptsPath` if set) and an API key file (`{ModelName}ApiKey.txt`). Presets today:
    `Qwen25`, `Qwen38`, `HyMT2`, `HyMT2Moe` (`BaseFiles/<Preset>/`) — each is model params (Standard
    vs. StructuredText) + a prompt set (`BaseSystemPrompt`, `BaseGlossaryPrompt`,
-   `BaseCorrectionSuffixPrompt`, `Corrections/*`, `Dynamics/*`, `BaseQualityReviewPrompt` and
+   `BaseCorrectionSuffixPrompt`, `Corrections/*`, `Dynamics/*`, `BaseQualityControlPrompt` and
    friends). A preset's prompt set is loaded via `LoadPresetPromptsWithCommon`
    (`ConfigurationExtensions.cs`), which loads `BaseFiles/Common/` first — the prompt files two or
    more presets agree on verbatim — then overlays the preset's own `BaseFiles/<Preset>/` files by
@@ -217,15 +217,15 @@ sanity. Returns a `ValidationResult` with a `CorrectionPrompt` describing exactl
 the retry attempt can self-correct rather than blindly re-asking. Only checks structural/format
 correctness, not translation quality/fluency — see the next section for the pass that does.
 
-## Quality review pass (`Workflow/QualityReviewWorkflow.cs`) — optional, independent of translation
+## Quality control pass (`Workflow/QualityControlWorkflow.cs`) — optional, independent of translation
 
 A second, independent pass over already-translated text: an LLM (typically a different model than
 primary translation) judges each column's fluency/accuracy, optionally proposes a correction
 (validated through the same `LineValidation` gate plus a glossary-drift check before being
-accepted), and rates its own confidence 0-100. Entirely opt-in (`qualityReview.enabled` in
+accepted), and rates its own confidence 0-100. Entirely opt-in (`qualityControl.enabled` in
 `Config.yaml`) and additive — new `TranslationSplit` fields only, no change to the
 `Line`/`Splits`/`Templates` contract. Full reference:
-[`../features/translation-pipeline/quality-review-pass.md`](../features/translation-pipeline/quality-review-pass.md).
+[`../features/translation-pipeline/quality-control-pass.md`](../features/translation-pipeline/quality-control-pass.md).
 
 ## String/text utilities (`Utility/`)
 

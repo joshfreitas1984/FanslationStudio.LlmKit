@@ -7,7 +7,7 @@ using System.Text.Json;
 namespace Tests.Workflow;
 
 /// <summary>
-/// The verify/repair loop in <see cref="QualityReviewWorkflow.GetLlmVerdictAsync"/> must stop when a
+/// The verify/repair loop in <see cref="QualityControlWorkflow.GetLlmVerdictAsync"/> must stop when a
 /// repair hands back the candidate it was given: re-verifying identical text can only repeat the
 /// same rejection, so the extra verification and repair calls are pure cost.
 /// </summary>
@@ -49,19 +49,19 @@ public sealed class QcRepairLoopTests
         ModelParams = new Dictionary<string, object> { ["temperature"] = 0.15 },
         Prompts = new Dictionary<string, string>
         {
-            ["BaseQualityReviewPrompt"] = "detection",
-            ["BaseQualityReviewCorrectionPrompt"] = "correction",
-            ["BaseQualityReviewVerificationPrompt"] = "verification",
-            ["BaseQualityReviewCorrectionRepairPrompt"] = "repair",
+            ["BaseQualityControlPrompt"] = "detection",
+            ["BaseQualityControlCorrectionPrompt"] = "correction",
+            ["BaseQualityControlVerificationPrompt"] = "verification",
+            ["BaseQualityControlCorrectionRepairPrompt"] = "repair",
         },
     };
 
-    private static async Task<(QualityReviewWorkflow.LlmVerdict Verdict, ScriptedHandler Handler)> RunAsync(
+    private static async Task<(QualityControlWorkflow.LlmVerdict Verdict, ScriptedHandler Handler)> RunAsync(
         Func<int, string> repairReply, Func<int, string> verificationReply, int maxRepairs = 2)
     {
         var config = new LlmConfig
         {
-            QualityReview = new QualityReviewConfig
+            QualityControl = new QualityControlConfig
             {
                 Enabled = true,
                 DoubledDetectionEnabled = false,
@@ -71,7 +71,7 @@ public sealed class QcRepairLoopTests
         var handler = new ScriptedHandler(repairReply, verificationReply);
         using var client = new HttpClient(handler);
 
-        var verdict = await QualityReviewWorkflow.GetLlmVerdictAsync(config, BuildModel(), client, "你好", "你好", "Hello", string.Empty);
+        var verdict = await QualityControlWorkflow.GetLlmVerdictAsync(config, BuildModel(), client, "你好", "你好", "Hello", string.Empty);
         return (verdict, handler);
     }
 

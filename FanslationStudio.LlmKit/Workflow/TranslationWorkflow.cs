@@ -15,8 +15,8 @@ public static class TranslationWorkflow
 
         // Catches columns left with a stale Qc* verdict from before UpdateSplit (above) eagerly
         // reset the anchor on every Translated change - e.g. a corpus translated/QC'd under an
-        // older build. See QualityReviewWorkflow.ResetStaleQcState's doc comment.
-        await QualityReviewWorkflow.ResetStaleQcState(workingDirectory, textFiles, hooks);
+        // older build. See QualityControlWorkflow.ResetStaleQcState's doc comment.
+        await QualityControlWorkflow.ResetStaleQcState(workingDirectory, textFiles, hooks);
     }
 
     public static async Task TranslateLines(string workingDirectory, TextFileToSplit[] textFiles, GameHooks? hooks = null)
@@ -188,7 +188,7 @@ public static class TranslationWorkflow
         var modified = UpdateSplitCore(logLines, split, textFile, config, chineseCharRegex, tokenReplacer, pronouns);
 
         if (!string.Equals(translatedBeforeRules, split.Translated, StringComparison.Ordinal))
-            QualityReviewHelpers.FindQcAnchor(line, split).ResetQcState();
+            QualityControlHelpers.FindQcAnchor(line, split).ResetQcState();
 
         return modified;
     }
@@ -522,7 +522,7 @@ public static class TranslationWorkflow
         // Single shared rule list (see EvaluateRules) - covers bad words, glossary mistranslation/
         // hallucination, missing ellipsis, missing required token, any game-specific
         // CustomColumnValidator, and the generic structural check. A new rule added there applies
-        // here and to QualityReviewWorkflow's QC gate/rule-check without anything more to edit.
+        // here and to QualityControlWorkflow's QC gate/rule-check without anything more to edit.
         var ruleResult = EvaluateRules(config, modelConfig, preparedRaw, split.Text, split.Translated, textFile, split.Split);
 
         if (ruleResult.MistranslatedGlossaryTerms.Count > 0)
@@ -590,7 +590,7 @@ public static class TranslationWorkflow
     /// <summary>
     /// True when <paramref name="preparedRaw"/> ends in an ellipsis that <paramref name="translated"/>
     /// fails to preserve - shared between <see cref="ApplyTranslationRules"/> (the main
-    /// translate/retranslate pipeline) and <see cref="Workflow.QualityReviewWorkflow"/>'s QC
+    /// translate/retranslate pipeline) and <see cref="Workflow.QualityControlWorkflow"/>'s QC
     /// validation gate, so a QC-proposed correction is held to the same bar as a normal translation
     /// attempt instead of silently allowing what would otherwise trigger a retranslation.
     /// </summary>
@@ -624,12 +624,12 @@ public static class TranslationWorkflow
     /// <summary>
     /// True when <paramref name="translated"/> dropped a negative-number sign ("-0.5%" -> "0.5%")
     /// that <paramref name="preparedRaw"/> has - a real observed QC-correction quirk (see
-    /// docs/features/translation-pipeline/quality-review-pass.md) where a stat/buff tooltip's leading "-" before a
+    /// docs/features/translation-pipeline/quality-control-pass.md) where a stat/buff tooltip's leading "-" before a
     /// percentage got silently stripped while the rest of the line was accepted as a valid
     /// correction. Compares counts rather than exact positions since a fragment can legitimately
     /// reorder clauses around a number - what must never happen is the raw text having MORE
     /// negative-number signs than the candidate ends up with. Shared between
-    /// <see cref="ApplyTranslationRules"/> and <see cref="Workflow.QualityReviewWorkflow"/>'s QC
+    /// <see cref="ApplyTranslationRules"/> and <see cref="Workflow.QualityControlWorkflow"/>'s QC
     /// validation gate, same as <see cref="IsMissingRequiredEllipsis"/>.
     /// </summary>
     internal static bool IsMissingRequiredNegativeSign(string preparedRaw, string translated)
@@ -651,7 +651,7 @@ public static class TranslationWorkflow
     /// Returns the first configured <see cref="LlmConfig.ExtraStringTokenReplacers"/> token present
     /// in <paramref name="raw"/> but missing from <paramref name="translated"/>, or null if every
     /// such token that appears in <paramref name="raw"/> was preserved. Shared between
-    /// <see cref="ApplyTranslationRules"/> and <see cref="Workflow.QualityReviewWorkflow"/>'s QC
+    /// <see cref="ApplyTranslationRules"/> and <see cref="Workflow.QualityControlWorkflow"/>'s QC
     /// validation gate - see <see cref="IsMissingRequiredEllipsis"/>'s doc comment for why.
     /// </summary>
     internal static string? FindMissingRequiredToken(string raw, string translated, IEnumerable<string> extraTokens)
@@ -670,7 +670,7 @@ public static class TranslationWorkflow
     /// shared by every caller: a normal translation attempt's post-LLM rule pass
     /// (<see cref="ApplyTranslationRules"/>), a freshly proposed QC correction's accept-time gate,
     /// and QC's retroactive re-check of an already-accepted <see cref="TranslationSplit.QcTranslated"/>
-    /// (both in <see cref="Workflow.QualityReviewWorkflow"/>). Adding a brand new kind of check
+    /// (both in <see cref="Workflow.QualityControlWorkflow"/>). Adding a brand new kind of check
     /// belongs here, once - every caller reading <see cref="RuleCheckResult.AllReasons"/> (or a
     /// specific field, for a category it wants to report distinctly - see
     /// <see cref="TranslationSplit.FlaggedMistranslation"/>/<see cref="TranslationSplit.FlaggedHallucination"/>)
@@ -775,14 +775,14 @@ public static class TranslationWorkflow
 
     /// <summary>
     /// Pure glossary-mistranslation detector shared (via <see cref="EvaluateRules"/>) by the normal
-    /// translation pipeline's rule check and <see cref="Workflow.QualityReviewWorkflow"/>'s QC
+    /// translation pipeline's rule check and <see cref="Workflow.QualityControlWorkflow"/>'s QC
     /// gate/rule-check - a single implementation so a change to what counts as "this glossary term
     /// was mistranslated" only has to be made once instead of drifting between two pipelines. Returns
     /// every glossary line whose Raw/RawSimplified/RawTraditional matched in <paramref name="rawText"/>
     /// but whose Result (or an allowed alternative) is missing from <paramref name="candidate"/> -
     /// empty if none. Mirrors <see cref="IsGlossaryHallucination"/>'s matching approach (all three raw
     /// variants), which the older, QC-only version of this check
-    /// (<c>QualityReviewWorkflow.CheckGlossaryDrift</c>) already did but this one, checking only
+    /// (<c>QualityControlWorkflow.CheckGlossaryDrift</c>) already did but this one, checking only
     /// <see cref="GlossaryLine.Raw"/>, did not - unifying picks up that stricter behavior for both
     /// pipelines rather than the other way round.
     /// </summary>
@@ -910,7 +910,7 @@ public static class TranslationWorkflow
     /// Every distinct bad-words-list term found in <paramref name="input"/> (empty if none) - used
     /// both to build a specific, actionable <see cref="RuleCheckResult.BadWordsReason"/> (rather
     /// than a bare "matches the list" with no indication of which word) and by
-    /// <see cref="Workflow.QualityReviewWorkflow.GetLlmVerdictAsync"/>'s inline retry loop to tell
+    /// <see cref="Workflow.QualityControlWorkflow.GetLlmVerdictAsync"/>'s inline retry loop to tell
     /// the model exactly what to avoid on its next attempt.
     /// </summary>
     internal static IReadOnlyList<string> FindBadWordMatches(string input) =>

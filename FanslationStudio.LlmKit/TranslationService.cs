@@ -579,7 +579,7 @@ public static partial class TranslationService
             }
 
             if (!string.Equals(original, split.Translated, StringComparison.Ordinal))
-                QualityReviewHelpers.FindQcAnchor(line, split).ResetQcState();
+                QualityControlHelpers.FindQcAnchor(line, split).ResetQcState();
 
             split.ResetFlags(split.Translated != original);
             work = SplitWork.Processed;
@@ -831,7 +831,7 @@ public static partial class TranslationService
                     split.Translated = firstSplit.Translated;
 
                     if (!string.Equals(originalDupe, split.Translated, StringComparison.Ordinal))
-                        QualityReviewHelpers.FindQcAnchor(line, split).ResetQcState();
+                        QualityControlHelpers.FindQcAnchor(line, split).ResetQcState();
 
                     split.ResetFlags();
                     propagated++;

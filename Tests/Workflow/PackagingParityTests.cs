@@ -14,7 +14,7 @@ namespace FanslationStudio.LlmKit.Tests.Workflow;
 /// </summary>
 public class PackagingParityTests
 {
-    private const string ConfigYaml = "models:\n  - name: Standard\n    model: test-model\n    url: \"http://localhost/test\"\nqualityReview:\n  enabled: true\n  minAcceptableScore: 70\n";
+    private const string ConfigYaml = "models:\n  - name: Standard\n    model: test-model\n    url: \"http://localhost/test\"\nqualityControl:\n  enabled: true\n  minAcceptableScore: 70\n";
 
     private sealed class TempWorkingDirectory : IDisposable
     {
@@ -113,7 +113,7 @@ public class PackagingParityTests
         dir.WriteConverted("Dynamic.txt", ColumnZeroLines());
         dir.WriteConverted("Data.csv", CsvLines());
         dir.WriteConverted("Data.json", JsonLines());
-        var config = new FanslationStudio.LlmKit.Configuration.LlmConfig { QualityReview = new() { Enabled = true, MinAcceptableScore = 70 } };
+        var config = new FanslationStudio.LlmKit.Configuration.LlmConfig { QualityControl = new() { Enabled = true, MinAcceptableScore = 70 } };
 
         var prefab = await PrefabTextWorkflow.PackagePrefabTextAsync(dir.Path, new TextFileToSplit { Path = "Prefab.txt", PackageOutput = true }, config);
         AssertPinned(PrefabExpected, dir.ReadMod("Prefab.txt.yaml"), prefab);

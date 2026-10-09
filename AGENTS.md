@@ -55,4 +55,4 @@ downstream consuming repos (e.g. `DragonHierOverLlm`).
 
 See [`docs/README.md`](docs/README.md)'s "Where should I look?" table for task-specific starting
 points (compound-field splitting, translation retry/escalation, PrefabText workflow, the
-in-progress quality-review-pass feature, etc.).
+in-progress quality-control-pass feature, etc.).

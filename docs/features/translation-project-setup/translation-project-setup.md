@@ -31,7 +31,7 @@ The scaffold is intentionally not a finished mod. In the downstream repo:
 5. Generate IL2CPP interop assemblies before building an IL2CPP plugin.
 6. Keep game-specific behavior in the downstream repo; propose changes to LlmKit only when the behavior is genuinely shared across games.
 
-Read the [translation pipeline feature docs](../translation-pipeline/) for extraction, splitting, glossary, validation, and quality-review behavior. Read the [packaging workflow guide](../packaging/packaging-workflows.md) before adding custom packaging logic.
+Read the [translation pipeline feature docs](../translation-pipeline/) for extraction, splitting, glossary, validation, and quality-control behavior. Read the [packaging workflow guide](../packaging/packaging-workflows.md) before adding custom packaging logic.
 
 ## 3. Run a translation
 
@@ -41,7 +41,7 @@ Use the downstream repo's numbered pipeline steps in `Tests/` as the runbook. Th
 2. Export the configured files into split YAML under `Files/Raw/Export/`.
 3. Run translation against the configured local model. The workflow validates placeholders, tags, formatting, and game-specific rules while retrying invalid results.
 4. Inspect the generated `Files/Converted/*.yaml` files. Confirm each expected `TranslationSplit` has a translated value before packaging.
-5. Run the optional quality-review pass when it is enabled in `Files/Config.yaml`. Review rejected, low-score, or flagged items according to the downstream project's triage process.
+5. Run the optional quality-control pass when it is enabled in `Files/Config.yaml`. Review rejected, low-score, or flagged items according to the downstream project's triage process.
 6. Package the accepted translations into `Files/Mod/`.
 7. Build/copy the plugin and install the generated mod using the game's normal BepInEx layout.
 8. Start the game and verify representative CSV, JSON, prefab, and dynamic-string paths in-game. Keep the raw input, converted YAML, packaged output, and game log for any failure you need to diagnose.
@@ -58,7 +58,7 @@ Start with the symptom and invoke exactly one of these skills from the downstrea
 | `Files/Mod` has the wrong content, raw fallback, skipped columns, or reconstruction errors | [`investigate-packaging-issue`](../../../.claude/skills/investigate-packaging-issue/SKILL.md) | Which `TextFileType`, packaging workflow, or downstream post-processing owns the output? |
 | QC scores, accepted corrections, freshness, or score gating look wrong | [`investigate-qc-issue`](../../../.claude/skills/investigate-qc-issue/SKILL.md) | Is QC enabled and fresh, and what do the workflow/helper/tests say should happen? |
 
-For a missing translation, inspect the same line in this order: `Raw/Dumped` -> `Raw/Export` or `Converted` -> `Mod` -> runtime injection. For packaging, check `TextFileType`, `PackageOutput`, `SkipColumns`, and the downstream packaging entry point before changing shared code. For QC, check the downstream `qualityReview` config, then `QualityReviewWorkflow`, `QualityReviewHelpers`, and the focused tests.
+For a missing translation, inspect the same line in this order: `Raw/Dumped` -> `Raw/Export` or `Converted` -> `Mod` -> runtime injection. For packaging, check `TextFileType`, `PackageOutput`, `SkipColumns`, and the downstream packaging entry point before changing shared code. For QC, check the downstream `qualityControl` config, then `QualityControlWorkflow`, `QualityControlHelpers`, and the focused tests.
 
 If the investigation proves a generic LlmKit defect, record the settled behavior in this repository's `docs/`, not only in the downstream project's notes. Keep downstream-specific extraction, plugin, config, and game quirks in the downstream repository.
 
@@ -69,4 +69,4 @@ If the investigation proves a generic LlmKit defect, record the settled behavior
 - [Config shape](../../architecture/downstream-project-structure/downstream-config-shape.md)
 - [Translation pipeline](../translation-pipeline/)
 - [Packaging workflows](../packaging/packaging-workflows.md)
-- [Quality review pass](../translation-pipeline/quality-review-pass.md)
+- [Quality control pass](../translation-pipeline/quality-control-pass.md)

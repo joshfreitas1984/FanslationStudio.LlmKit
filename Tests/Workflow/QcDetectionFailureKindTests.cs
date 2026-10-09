@@ -7,10 +7,10 @@ using System.Text;
 namespace Tests.Workflow;
 
 /// <summary>
-/// <see cref="QualityReviewWorkflow.DetectDefectsAsync"/> must report WHY a detection failed, not
+/// <see cref="QualityControlWorkflow.DetectDefectsAsync"/> must report WHY a detection failed, not
 /// just <c>Success = false</c> - a context-size 400 and a "length"-truncated answer were once
 /// indistinguishable from a genuine protocol violation in the QC evaluator's Results.yaml (see
-/// docs/features/translation-pipeline/quality-review-pass.md's "Context headroom regression").
+/// docs/features/translation-pipeline/quality-control-pass.md's "Context headroom regression").
 /// </summary>
 public sealed class QcDetectionFailureKindTests
 {
@@ -22,16 +22,16 @@ public sealed class QcDetectionFailureKindTests
 
     private static async Task<QcDetectionResult> DetectAsync(HttpStatusCode status, string body)
     {
-        var config = new LlmConfig { QualityReview = new QualityReviewConfig { Enabled = true } };
+        var config = new LlmConfig { QualityControl = new QualityControlConfig { Enabled = true } };
         var model = new ModelExecutionConfig
         {
             Url = "http://test.local/api/chat",
             ApiKeyRequired = false,
             Model = "test-model",
-            Prompts = new Dictionary<string, string> { ["BaseQualityReviewPrompt"] = "detection system prompt" },
+            Prompts = new Dictionary<string, string> { ["BaseQualityControlPrompt"] = "detection system prompt" },
         };
         using var client = new HttpClient(new FixedResponseHandler(status, body));
-        return await QualityReviewWorkflow.DetectDefectsAsync(config, model, client, "你好", "你好", "Hello", string.Empty, null);
+        return await QualityControlWorkflow.DetectDefectsAsync(config, model, client, "你好", "你好", "Hello", string.Empty, null);
     }
 
     [Fact(DisplayName = "Context-size 400 is reported as RequestError with the server's message")]

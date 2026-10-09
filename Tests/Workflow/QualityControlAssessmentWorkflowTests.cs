@@ -3,7 +3,7 @@ using FanslationStudio.LlmKit.Workflow;
 
 namespace Tests.Workflow;
 
-public sealed class QualityEvaluatorAssessmentWorkflowTests
+public sealed class QualityControlAssessmentWorkflowTests
 {
     /// <summary>
     /// Locks in ParseCategory's mapping from the gold set's free-form kebab-case category
@@ -33,13 +33,13 @@ public sealed class QualityEvaluatorAssessmentWorkflowTests
     [InlineData("mistranslation", QcDefectCategory.OtherNamedDefect)]
     public void ParseCategory_MapsEveryGoldSetCategory(string goldSetCategory, QcDefectCategory expected)
     {
-        Assert.Equal(expected, QualityEvaluatorAssessmentWorkflow.ParseCategory(goldSetCategory));
+        Assert.Equal(expected, QualityControlAssessmentWorkflow.ParseCategory(goldSetCategory));
     }
 
     [Fact]
     public void LoadGoldSet_FlattensCurrentCandidateShape()
     {
-        var goldSet = QualityEvaluatorAssessmentWorkflow.LoadGoldSet("""
+        var goldSet = QualityControlAssessmentWorkflow.LoadGoldSet("""
             schemaVersion: 1
             labelVersion: test
             items:
@@ -90,7 +90,7 @@ public sealed class QualityEvaluatorAssessmentWorkflowTests
             """;
 
         var exception = Assert.Throws<InvalidOperationException>(() =>
-            QualityEvaluatorAssessmentWorkflow.LoadGoldSet(yaml));
+            QualityControlAssessmentWorkflow.LoadGoldSet(yaml));
 
         Assert.Contains("duplicate", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -98,7 +98,7 @@ public sealed class QualityEvaluatorAssessmentWorkflowTests
     [Fact]
     public void CalculateFingerprint_ChangesWhenReviewedLabelChanges()
     {
-        var first = QualityEvaluatorAssessmentWorkflow.LoadGoldSet("""
+        var first = QualityControlAssessmentWorkflow.LoadGoldSet("""
             schemaVersion: 1
             items:
             - sampleId: sample-1
@@ -106,7 +106,7 @@ public sealed class QualityEvaluatorAssessmentWorkflowTests
               candidates: { Model: 译文 }
               labels: { Model: { label: Pass } }
             """);
-        var second = QualityEvaluatorAssessmentWorkflow.LoadGoldSet("""
+        var second = QualityControlAssessmentWorkflow.LoadGoldSet("""
             schemaVersion: 1
             items:
             - sampleId: sample-1
@@ -116,14 +116,14 @@ public sealed class QualityEvaluatorAssessmentWorkflowTests
             """);
 
         Assert.NotEqual(
-            QualityEvaluatorAssessmentWorkflow.CalculateFingerprint(first),
-            QualityEvaluatorAssessmentWorkflow.CalculateFingerprint(second));
+            QualityControlAssessmentWorkflow.CalculateFingerprint(first),
+            QualityControlAssessmentWorkflow.CalculateFingerprint(second));
     }
 
         [Fact]
         public void Summary_SeparatesUnscoredDetectionFromFalsePositives()
         {
-          var report = new QualityEvaluatorAssessmentWorkflow.EvaluatorResultFile
+          var report = new QualityControlAssessmentWorkflow.EvaluatorResultFile
           {
             ModelName = "Evaluator",
             Results =
@@ -147,7 +147,7 @@ public sealed class QualityEvaluatorAssessmentWorkflowTests
         [Fact]
         public void Summary_ReportsCorrectionSafetyOutcomes()
         {
-          var report = new QualityEvaluatorAssessmentWorkflow.EvaluatorResultFile
+          var report = new QualityControlAssessmentWorkflow.EvaluatorResultFile
           {
             ModelName = "Evaluator",
             Results =

@@ -13,12 +13,12 @@ namespace FanslationStudio.LlmKit.Workflow;
 /// translation assessment, this workflow never writes Converted data and evaluates the same
 /// existing translation with every model.
 /// </summary>
-public static class QualityEvaluatorAssessmentWorkflow
+public static class QualityControlAssessmentWorkflow
 {
     public static async Task RunAsync(string workingDirectory, GameHooks? hooks = null)
     {
         var config = ConfigurationExtensions.GetConfiguration(workingDirectory, hooks);
-        var settings = config.QualityEvaluatorAssessment;
+        var settings = config.QualityControlAssessment;
         if (!settings.Enabled)
         {
             Console.WriteLine("Quality evaluator assessment is disabled.");
@@ -27,7 +27,7 @@ public static class QualityEvaluatorAssessmentWorkflow
 
         var modelNames = settings.ModelNames;
         if (modelNames.Count == 0)
-            throw new InvalidOperationException("QualityEvaluatorAssessment.ModelNames must contain at least one configured model.");
+            throw new InvalidOperationException("QualityControlAssessment.ModelNames must contain at least one configured model.");
 
         var goldSetFile = Path.Combine(workingDirectory, settings.GoldSetPath.Replace('/', Path.DirectorySeparatorChar));
         if (!File.Exists(goldSetFile))
@@ -36,6 +36,7 @@ public static class QualityEvaluatorAssessmentWorkflow
         var goldSet = YamlHelper.CreateDeserializer().Deserialize<GoldSet>(File.ReadAllText(goldSetFile))
             ?? throw new InvalidOperationException($"QC evaluator gold set '{goldSetFile}' was empty.");
         ValidateGoldSet(goldSet);
+        RegisterCaseGlossaries(goldSet);
 
         var outputDirectory = Path.Combine(workingDirectory, settings.OutputPath.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(outputDirectory);
@@ -50,8 +51,8 @@ public static class QualityEvaluatorAssessmentWorkflow
         {
             if (!configuredModels.TryGetValue(modelName, out var model))
                 throw new InvalidOperationException($"QC evaluator model '{modelName}' is not configured.");
-            if (!model.Prompts.ContainsKey("BaseQualityReviewPrompt"))
-                throw new InvalidOperationException($"QC evaluator model '{modelName}' has no BaseQualityReviewPrompt.");
+            if (!model.Prompts.ContainsKey("BaseQualityControlPrompt"))
+                throw new InvalidOperationException($"QC evaluator model '{modelName}' has no BaseQualityControlPrompt.");
 
             Console.WriteLine($"QC evaluator assessment: {modelName}");
             var report = await RunModelAsync(config, client, modelName, model, goldSet, fingerprint, outputDirectory);
@@ -73,11 +74,11 @@ public static class QualityEvaluatorAssessmentWorkflow
 
     /// <summary>
     /// Validates docs/plans/qc-fast-corrector-model-swap.md's theory: for every gold row with a
-    /// known confirmed defect set, have each <see cref="QualityEvaluatorAssessmentConfig.CorrectorModelNames"/>
-    /// candidate draft its OWN correction via <see cref="QualityReviewWorkflow.GenerateCorrectionAsync"/>
+    /// known confirmed defect set, have each <see cref="QualityControlAssessmentConfig.CorrectorModelNames"/>
+    /// candidate draft its OWN correction via <see cref="QualityControlWorkflow.GenerateCorrectionAsync"/>
     /// (never reusing the gold set's human-authored <see cref="CorrectionSample.ProposedCorrection"/>,
     /// which exists for a different purpose - scoring verification, not generation), then score every
-    /// draft's safety with <see cref="QualityEvaluatorAssessmentConfig.JudgeModelName"/> - a model
+    /// draft's safety with <see cref="QualityControlAssessmentConfig.JudgeModelName"/> - a model
     /// never grades its own draft.
     ///
     /// Runs as two full phases per corrector model rather than interleaving generate/verify per row:
@@ -89,18 +90,18 @@ public static class QualityEvaluatorAssessmentWorkflow
     internal static async Task RunCorrectionGenerationComparisonAsync(
         LlmConfig config,
         HttpClient client,
-        QualityEvaluatorAssessmentConfig settings,
+        QualityControlAssessmentConfig settings,
         GoldSet goldSet,
         string fingerprint,
         string outputDirectory,
         Dictionary<string, ModelExecutionConfig> configuredModels)
     {
         if (string.IsNullOrEmpty(settings.JudgeModelName))
-            throw new InvalidOperationException("QualityEvaluatorAssessment.JudgeModelName is required when CorrectorModelNames is set.");
+            throw new InvalidOperationException("QualityControlAssessment.JudgeModelName is required when CorrectorModelNames is set.");
         if (!configuredModels.TryGetValue(settings.JudgeModelName, out var judgeModel))
             throw new InvalidOperationException($"QC evaluator judge model '{settings.JudgeModelName}' is not configured.");
-        if (!judgeModel.Prompts.ContainsKey("BaseQualityReviewVerificationPrompt"))
-            throw new InvalidOperationException($"QC evaluator judge model '{settings.JudgeModelName}' has no BaseQualityReviewVerificationPrompt.");
+        if (!judgeModel.Prompts.ContainsKey("BaseQualityControlVerificationPrompt"))
+            throw new InvalidOperationException($"QC evaluator judge model '{settings.JudgeModelName}' has no BaseQualityControlVerificationPrompt.");
 
         var pool = BuildCorrectionGenerationPool(goldSet);
         if (pool.Count == 0)
@@ -123,8 +124,8 @@ public static class QualityEvaluatorAssessmentWorkflow
                     "not to certify this model's corrections as actually safe.");
             if (!configuredModels.TryGetValue(correctorModelName, out var correctorModel))
                 throw new InvalidOperationException($"QC evaluator corrector model '{correctorModelName}' is not configured.");
-            if (!correctorModel.Prompts.ContainsKey("BaseQualityReviewCorrectionPrompt"))
-                throw new InvalidOperationException($"QC evaluator corrector model '{correctorModelName}' has no BaseQualityReviewCorrectionPrompt.");
+            if (!correctorModel.Prompts.ContainsKey("BaseQualityControlCorrectionPrompt"))
+                throw new InvalidOperationException($"QC evaluator corrector model '{correctorModelName}' has no BaseQualityControlCorrectionPrompt.");
 
             var modelDirectory = Path.Combine(comparisonDirectory, SafeName(correctorModelName));
             Directory.CreateDirectory(modelDirectory);
@@ -139,11 +140,12 @@ public static class QualityEvaluatorAssessmentWorkflow
                 config.Runtime.Models = new Dictionary<string, ModelExecutionConfig> { [correctorModelName] = correctorModel };
                 foreach (var result in report.Results.Where(r => !r.GenerationAttempted))
                 {
+                    using var caseGlossary = UseCaseGlossary(config, result.SampleId);
                     var sample = MaskSample(config, result.Source, result.CurrentTranslation);
                     var confirmedDefects = result.ConfirmedDefectCategories.Select(ParseCategory).Distinct().ToList();
 
                     var stopwatch = Stopwatch.StartNew();
-                    result.ProposedCorrection = await QualityReviewWorkflow.GenerateCorrectionAsync(
+                    result.ProposedCorrection = await QualityControlWorkflow.GenerateCorrectionAsync(
                         config, correctorModel, client, result.SampleId, sample.MaskedRaw, sample.MaskedTranslated,
                         sample.GlossaryPrompt, confirmedDefects, null);
                     stopwatch.Stop();
@@ -160,7 +162,7 @@ public static class QualityEvaluatorAssessmentWorkflow
                     WriteYamlAtomically(resultPath, report);
                 }
 
-                // Mirrors QualityReviewConfig.PreVerificationGateEnabled: a draft the validation
+                // Mirrors QualityControlConfig.PreVerificationGateEnabled: a draft the validation
                 // gate rejects is never judged - it is repaired against the gate's reason below, or
                 // (no repair loop / budget) recorded as RejectedByGate, which production's final
                 // gate would do too.
@@ -176,7 +178,7 @@ public static class QualityEvaluatorAssessmentWorkflow
                 // then judge with only the judge resident) so repeated iterations still cost ~2
                 // swaps for the WHOLE batch, not per row - see the Twenty-second round's swap-cost
                 // finding this design depends on.
-                var maxRepairAttempts = settings.EnableRepairLoop ? Math.Max(0, config.QualityReview.MaxScoreRepairIterations) : 0;
+                var maxRepairAttempts = settings.EnableRepairLoop ? Math.Max(0, config.QualityControl.MaxScoreRepairIterations) : 0;
                 for (var attempt = 0; attempt < maxRepairAttempts; attempt++)
                 {
                     var needsRepair = report.Results.Where(r => r.RepairAttemptsUsed < maxRepairAttempts && NeedsRepair(r)).ToList();
@@ -233,6 +235,33 @@ public static class QualityEvaluatorAssessmentWorkflow
         public string Mask(string text) => TokenReplacer.Replace(text);
     }
 
+    /// <summary>Per-case glossary snapshots of the gold set being run, by sample ID (schema v2; cases without one use the loaded config's glossary).</summary>
+    private static readonly AsyncLocal<Dictionary<string, List<GlossaryLine>>?> CaseGlossaries = new();
+
+    private static void RegisterCaseGlossaries(GoldSet goldSet) =>
+        CaseGlossaries.Value = goldSet.Items.Select(x => (x.SampleId, x.Glossary))
+            .Concat(goldSet.CorrectionSamples.Select(x => (x.SampleId, x.Glossary)))
+            .Where(x => x.Glossary != null)
+            .ToDictionary(x => x.SampleId, x => x.Glossary!);
+
+    /// <summary>
+    /// Swaps <paramref name="sampleId"/>'s glossary snapshot in as the run's glossary (prompt block and the
+    /// gate's drift check both read it) until disposed. A no-op for a case without a snapshot. Runs are
+    /// sequential, so the swap is never observed by another case.
+    /// </summary>
+    private static IDisposable UseCaseGlossary(LlmConfig config, string sampleId)
+    {
+        var previous = config.Runtime.GlossaryLines;
+        if (CaseGlossaries.Value?.TryGetValue(sampleId, out var snapshot) == true)
+            config.Runtime.GlossaryLines = snapshot;
+        return new Restore(() => config.Runtime.GlossaryLines = previous);
+    }
+
+    private sealed class Restore(Action action) : IDisposable
+    {
+        public void Dispose() => action();
+    }
+
     private static MaskedSample MaskSample(LlmConfig config, string source, string translation)
     {
         var tokenReplacer = new StringTokenReplacer();
@@ -246,12 +275,13 @@ public static class QualityEvaluatorAssessmentWorkflow
     private static async Task<(QcVerificationResult Verdict, long ElapsedMilliseconds)> JudgeCorrectionAsync(
         LlmConfig config, ModelExecutionConfig judgeModel, HttpClient client, CorrectionGenerationResult result)
     {
+        using var caseGlossary = UseCaseGlossary(config, result.SampleId);
         var sample = MaskSample(config, result.Source, result.CurrentTranslation);
         var maskedCorrection = sample.Mask(result.ProposedCorrection!);
         var confirmedDefects = result.ConfirmedDefectCategories.Select(ParseCategory).Distinct().ToList();
 
         var stopwatch = Stopwatch.StartNew();
-        var verdict = await QualityReviewWorkflow.GetVerificationVerdictAsync(
+        var verdict = await QualityControlWorkflow.GetVerificationVerdictAsync(
             config, judgeModel, client, result.SampleId, sample.MaskedRaw, sample.MaskedTranslated,
             sample.GlossaryPrompt, confirmedDefects, maskedCorrection);
         stopwatch.Stop();
@@ -274,7 +304,7 @@ public static class QualityEvaluatorAssessmentWorkflow
             ? verdict.UnresolvedDefects.Concat(verdict.NewDefects).Distinct().ToList()
             : [];
         result.UnresolvedDefectCategories = toFix.Select(QcDefectCategoryTokens.ToToken).ToList();
-        result.VerifierEvidence = QualityReviewWorkflow.FormatVerifierEvidence(verdict, toFix);
+        result.VerifierEvidence = QualityControlWorkflow.FormatVerifierEvidence(verdict, toFix);
     }
 
     /// <summary>A gold row's outcome when its draft fails the validation gate and is never repaired into a passing one.</summary>
@@ -290,11 +320,12 @@ public static class QualityEvaluatorAssessmentWorkflow
     /// <summary>Gold rows have no output file; rule checks see an empty-path CSV file, as glossary scoping does in <see cref="MaskSample"/>.</summary>
     private static readonly TextFileToSplit GoldTextFile = new() { Path = string.Empty, TextFileType = TextFileType.RawCsv };
 
-    /// <summary>The production pre-verification gate (<see cref="QualityReviewWorkflow.BuildCandidateValidator"/>) on <paramref name="result"/>'s current draft.</summary>
+    /// <summary>The production pre-verification gate (<see cref="QualityControlWorkflow.BuildCandidateValidator"/>) on <paramref name="result"/>'s current draft.</summary>
     private static string? CheckGate(LlmConfig config, ModelExecutionConfig model, CorrectionGenerationResult result)
     {
+        using var caseGlossary = UseCaseGlossary(config, result.SampleId);
         var sample = MaskSample(config, result.Source, result.CurrentTranslation);
-        var validator = QualityReviewWorkflow.BuildCandidateValidator(
+        var validator = QualityControlWorkflow.BuildCandidateValidator(
             config, model, result.Source, result.CurrentTranslation, sample.TokenReplacer, GoldTextFile, 0);
         return validator?.Invoke(sample.Mask(result.ProposedCorrection!));
     }
@@ -308,10 +339,11 @@ public static class QualityEvaluatorAssessmentWorkflow
     /// One repair call for <paramref name="result"/>: against the gate's reason when the draft failed
     /// the gate (all confirmed categories as targets), otherwise against the judge's unresolved/new
     /// categories and evidence. A NONE or unchanged answer ends the row's repairs, exactly as in
-    /// <see cref="QualityReviewWorkflow.GetLlmVerdictAsync"/>; a new draft is re-gated and left unjudged.
+    /// <see cref="QualityControlWorkflow.GetLlmVerdictAsync"/>; a new draft is re-gated and left unjudged.
     /// </summary>
     private static async Task RepairAsync(LlmConfig config, HttpClient client, ModelExecutionConfig correctorModel, CorrectionGenerationResult result)
     {
+        using var caseGlossary = UseCaseGlossary(config, result.SampleId);
         var sample = MaskSample(config, result.Source, result.CurrentTranslation);
         var maskedPrevious = sample.Mask(result.ProposedCorrection!);
         var gateFailure = result.GateFailure;
@@ -320,7 +352,7 @@ public static class QualityEvaluatorAssessmentWorkflow
             : result.UnresolvedDefectCategories.Select(QcDefectCategoryTokens.Parse).Distinct().ToList();
 
         var stopwatch = Stopwatch.StartNew();
-        var repaired = await QualityReviewWorkflow.GetCorrectionRepairAsync(
+        var repaired = await QualityControlWorkflow.GetCorrectionRepairAsync(
             config, correctorModel, client, result.SampleId, sample.MaskedRaw, sample.MaskedTranslated,
             sample.GlossaryPrompt, targetDefects, maskedPrevious, null,
             ruleCheckFailure: gateFailure, verifierEvidence: gateFailure == null ? result.VerifierEvidence : null);
@@ -359,7 +391,7 @@ public static class QualityEvaluatorAssessmentWorkflow
         {
             var (verdict, elapsedMilliseconds) = await JudgeCorrectionAsync(config, judgeModel, client, result);
             result.VerificationElapsedMilliseconds = (result.VerificationElapsedMilliseconds ?? 0) + elapsedMilliseconds;
-            ApplyJudgeVerdict(result, verdict, config.QualityReview.MinAcceptableScore);
+            ApplyJudgeVerdict(result, verdict, config.QualityControl.MinAcceptableScore);
             if (recordInitial && result.InitialCorrectionSafety == null)
                 result.InitialCorrectionSafety = result.ActualCorrectionSafety;
             WriteYamlAtomically(resultPath, report);
@@ -511,8 +543,8 @@ public static class QualityEvaluatorAssessmentWorkflow
 
                 report.Results.Add(await ReviewDetectionAsync(config, model, client, resultId,
                     item.SampleId, item.SampleKind, item.Source, candidate.Value,
-                    expected, config.QualityEvaluatorAssessment.DoubledDetection,
-                    config.QualityEvaluatorAssessment.DetectionThinkingEnabled));
+                    expected, config.QualityControlAssessment.DoubledDetection,
+                    config.QualityControlAssessment.DetectionThinkingEnabled));
                 WriteYamlAtomically(resultPath, report);
             }
         }
@@ -524,7 +556,7 @@ public static class QualityEvaluatorAssessmentWorkflow
                 continue;
 
             report.Results.Add(await ReviewCorrectionAsync(config, model, client, resultId, item, modelName,
-                config.QualityEvaluatorAssessment.DoubledVerification));
+                config.QualityControlAssessment.DoubledVerification));
             WriteYamlAtomically(resultPath, report);
         }
 
@@ -537,14 +569,14 @@ public static class QualityEvaluatorAssessmentWorkflow
     }
 
     /// <summary>
-    /// Calls <see cref="QualityReviewWorkflow.DetectDefectsAsync"/> directly (once, or twice merged
+    /// Calls <see cref="QualityControlWorkflow.DetectDefectsAsync"/> directly (once, or twice merged
     /// via <see cref="QcDetectionResult.Merge"/> when <paramref name="doubledDetection"/> is true)
-    /// rather than the full five-call <see cref="QualityReviewWorkflow.GetLlmVerdictAsync"/>
+    /// rather than the full five-call <see cref="QualityControlWorkflow.GetLlmVerdictAsync"/>
     /// orchestrator - detection is the only thing scored here, so calls 3-5 (correction draft/
     /// verify/repair) would only contaminate elapsed-time measurements without affecting the score.
     /// See docs/plans/qc-evaluator-comparison.md's "Handoff: Implementing Process Variants" section.
     /// The classification below (None/Uncertain/named -> Pass/Abstain/Defect) mirrors
-    /// <see cref="QualityReviewWorkflow.GetLlmVerdictAsync"/>'s own mapping up to the point where it
+    /// <see cref="QualityControlWorkflow.GetLlmVerdictAsync"/>'s own mapping up to the point where it
     /// would start drafting a correction.
     /// </summary>
     private static async Task<EvaluatorResult> ReviewDetectionAsync(
@@ -560,14 +592,15 @@ public static class QualityEvaluatorAssessmentWorkflow
         bool doubledDetection,
         bool enableThinking = false)
     {
+        using var caseGlossary = UseCaseGlossary(config, sampleId);
         var stopwatch = Stopwatch.StartNew();
         var sample = MaskSample(config, source, translation);
 
-        var call1 = await QualityReviewWorkflow.DetectDefectsAsync(config, model, client, source, sample.MaskedRaw, sample.MaskedTranslated, sample.GlossaryPrompt, null, enableThinking);
+        var call1 = await QualityControlWorkflow.DetectDefectsAsync(config, model, client, source, sample.MaskedRaw, sample.MaskedTranslated, sample.GlossaryPrompt, null, enableThinking);
         var confirmed = call1;
         if (doubledDetection && call1.Success)
         {
-            var call2 = await QualityReviewWorkflow.DetectDefectsAsync(config, model, client, source, sample.MaskedRaw, sample.MaskedTranslated, sample.GlossaryPrompt, null, enableThinking);
+            var call2 = await QualityControlWorkflow.DetectDefectsAsync(config, model, client, source, sample.MaskedRaw, sample.MaskedTranslated, sample.GlossaryPrompt, null, enableThinking);
             confirmed = QcDetectionResult.Merge(call1, call2);
         }
         stopwatch.Stop();
@@ -625,7 +658,7 @@ public static class QualityEvaluatorAssessmentWorkflow
     }
 
     /// <summary>
-    /// Under the five-call redesign, call 4 (<see cref="QualityReviewWorkflow.GetVerificationVerdictAsync"/>)
+    /// Under the five-call redesign, call 4 (<see cref="QualityControlWorkflow.GetVerificationVerdictAsync"/>)
     /// only checks whether a correction resolves an ALREADY-CONFIRMED defect set and introduces no
     /// new one - it no longer re-litigates whether the claimed defect exists at all (that judgment
     /// moved entirely to calls 1/2's detection/merge). So <paramref name="item"/>'s gold-labeled
@@ -637,7 +670,7 @@ public static class QualityEvaluatorAssessmentWorkflow
     ///
     /// Variant 2 (doubled verification, see docs/plans/qc-evaluator-comparison.md's "Process
     /// Variants"): when <paramref name="doubledVerification"/> is true, runs
-    /// <see cref="QualityReviewWorkflow.GetVerificationVerdictAsync"/> twice (fresh, independent
+    /// <see cref="QualityControlWorkflow.GetVerificationVerdictAsync"/> twice (fresh, independent
     /// calls) and combines them via <see cref="QcVerificationResult.Merge"/>, which merges strictly
     /// (either call's objection rejects the correction) - the opposite direction from doubled
     /// detection's permissive merge, since here the worse failure is accepting a harmful correction,
@@ -656,29 +689,30 @@ public static class QualityEvaluatorAssessmentWorkflow
         var confirmedDefects = item.DefectCategories.Count == 0
             ? [QcDefectCategory.OtherNamedDefect]
             : item.DefectCategories.Select(ParseCategory).Distinct().ToList();
+        using var caseGlossary = UseCaseGlossary(config, item.SampleId);
         var sample = MaskSample(config, item.Source, item.CurrentTranslation);
         var maskedCorrection = sample.Mask(item.ProposedCorrection);
 
         QcVerificationResult verdict;
-        if (!model.Prompts.ContainsKey("BaseQualityReviewVerificationPrompt"))
+        if (!model.Prompts.ContainsKey("BaseQualityControlVerificationPrompt"))
         {
             verdict = new QcVerificationResult(false, [], [], 0);
         }
         else
         {
-            var call1 = await QualityReviewWorkflow.GetVerificationVerdictAsync(config, model, client, item.Source,
+            var call1 = await QualityControlWorkflow.GetVerificationVerdictAsync(config, model, client, item.Source,
                 sample.MaskedRaw, sample.MaskedTranslated, sample.GlossaryPrompt, confirmedDefects, maskedCorrection);
             verdict = call1;
             if (doubledVerification && call1.Success)
             {
-                var call2 = await QualityReviewWorkflow.GetVerificationVerdictAsync(config, model, client, item.Source,
+                var call2 = await QualityControlWorkflow.GetVerificationVerdictAsync(config, model, client, item.Source,
                     sample.MaskedRaw, sample.MaskedTranslated, sample.GlossaryPrompt, confirmedDefects, maskedCorrection);
                 verdict = QcVerificationResult.Merge(call1, call2);
             }
         }
         stopwatch.Stop();
 
-        var actualSafety = ClassifyCorrectionSafety(verdict, config.QualityReview.MinAcceptableScore);
+        var actualSafety = ClassifyCorrectionSafety(verdict, config.QualityControl.MinAcceptableScore);
         return new EvaluatorResult
         {
             ResultId = resultId,
@@ -740,6 +774,8 @@ public static class QualityEvaluatorAssessmentWorkflow
 
     private static void ValidateGoldSet(GoldSet goldSet)
     {
+        if (goldSet.SchemaVersion > CurrentGoldSetSchemaVersion)
+            throw new InvalidOperationException($"QC gold set schemaVersion {goldSet.SchemaVersion} is newer than supported ({CurrentGoldSetSchemaVersion}).");
         if (goldSet.Items.Count == 0 && goldSet.CorrectionSamples.Count == 0)
             throw new InvalidOperationException("The QC evaluator gold set contains no samples.");
         var ids = new HashSet<string>();
@@ -748,7 +784,7 @@ public static class QualityEvaluatorAssessmentWorkflow
                 throw new InvalidOperationException($"Duplicate QC evaluator gold-set sample ID '{id}'.");
     }
 
-    internal static GoldSet LoadGoldSet(string yaml)
+    public static GoldSet LoadGoldSet(string yaml)
     {
         var goldSet = YamlHelper.CreateDeserializer().Deserialize<GoldSet>(yaml)
             ?? throw new InvalidOperationException("The QC evaluator gold set was empty.");
@@ -758,14 +794,21 @@ public static class QualityEvaluatorAssessmentWorkflow
 
     internal static string CalculateFingerprint(GoldSet goldSet) => Fingerprint(goldSet);
 
+    /// <summary>1: items and correction samples. 2: adds per-case <c>game</c>, <c>sourceFile</c> and a <c>glossary</c> snapshot.</summary>
+    internal const int CurrentGoldSetSchemaVersion = 2;
+
+    /// <summary>Empty for a case without a snapshot, so schema-1 fingerprints are unchanged.</summary>
+    private static string GlossaryFingerprint(List<GlossaryLine>? glossary) =>
+        glossary == null ? "" : "|g:" + string.Join(';', glossary.Select(g => $"{g.Raw}={g.Result}/{string.Join(',', g.AllowedAlternatives)}"));
+
     private static string Fingerprint(GoldSet goldSet) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
             string.Join('\n', goldSet.Items.SelectMany(x => x.Candidates.Select(candidate =>
                 string.Join('|', x.SampleId, candidate.Key, candidate.Value,
                     x.Labels.TryGetValue(candidate.Key, out var label) ? label.Label : "",
-                    x.Labels.TryGetValue(candidate.Key, out label) ? string.Join(',', label.DefectCategories) : "")))
+                    x.Labels.TryGetValue(candidate.Key, out label) ? string.Join(',', label.DefectCategories) : "") + GlossaryFingerprint(x.Glossary)))
                 .Concat(goldSet.CorrectionSamples.Select(x => string.Join('|', x.SampleId, x.Source,
-                    x.CurrentTranslation, x.ProposedCorrection, x.Label, string.Join(',', x.DefectCategories)))))))).ToLowerInvariant();
+                    x.CurrentTranslation, x.ProposedCorrection, x.Label, string.Join(',', x.DefectCategories)) + GlossaryFingerprint(x.Glossary))))))).ToLowerInvariant();
 
     private static string SafeName(string value) => string.Concat(value.Select(c => char.IsLetterOrDigit(c) || c is '-' or '_' ? c : '_'));
 
@@ -815,6 +858,12 @@ public static class QualityEvaluatorAssessmentWorkflow
     {
         public string SampleId { get; set; } = string.Empty;
         public string SampleKind { get; set; } = "split";
+        /// <summary>Schema 2: the game the case came from.</summary>
+        public string Game { get; set; } = string.Empty;
+        /// <summary>Schema 2: the output file the source sat in (for <c>only:</c>/<c>exclude:</c> glossary scoping).</summary>
+        public string SourceFile { get; set; } = string.Empty;
+        /// <summary>Schema 2: the glossary entries that applied when the case was judged; null = use the loaded config's glossary.</summary>
+        public List<GlossaryLine>? Glossary { get; set; }
         public string Source { get; set; } = string.Empty;
         public Dictionary<string, string> Candidates { get; set; } = [];
         public Dictionary<string, GoldLabel> Labels { get; set; } = [];
@@ -831,6 +880,12 @@ public static class QualityEvaluatorAssessmentWorkflow
     {
         public string SampleId { get; set; } = string.Empty;
         public string SampleKind { get; set; } = "split";
+        /// <summary>Schema 2: the game the case came from.</summary>
+        public string Game { get; set; } = string.Empty;
+        /// <summary>Schema 2: the output file the source sat in (for <c>only:</c>/<c>exclude:</c> glossary scoping).</summary>
+        public string SourceFile { get; set; } = string.Empty;
+        /// <summary>Schema 2: the glossary entries that applied when the case was judged; null = use the loaded config's glossary.</summary>
+        public List<GlossaryLine>? Glossary { get; set; }
         public string Source { get; set; } = string.Empty;
         public string CurrentTranslation { get; set; } = string.Empty;
         public string Label { get; set; } = string.Empty;
@@ -987,7 +1042,7 @@ public static class QualityEvaluatorAssessmentWorkflow
 
         /// <summary>
         /// The validation gate's reason for rejecting the current draft (see
-        /// <see cref="QualityReviewConfig.PreVerificationGateEnabled"/>), or null when it passes. Persisted
+        /// <see cref="QualityControlConfig.PreVerificationGateEnabled"/>), or null when it passes. Persisted
         /// so a resumed run knows which rows still need a gate repair instead of a judge call.
         /// </summary>
         public string? GateFailure { get; set; }
@@ -997,7 +1052,7 @@ public static class QualityEvaluatorAssessmentWorkflow
 
         /// <summary>
         /// The FIRST verify call's outcome, captured before any repair loop runs (only meaningfully
-        /// different from <see cref="ActualCorrectionSafety"/> when <see cref="QualityEvaluatorAssessmentConfig.EnableRepairLoop"/>
+        /// different from <see cref="ActualCorrectionSafety"/> when <see cref="QualityControlAssessmentConfig.EnableRepairLoop"/>
         /// is true) - lets a summary report both "how often does the first draft land safe" and "how
         /// often does the row end up safe after repair" from the same run.
         /// </summary>

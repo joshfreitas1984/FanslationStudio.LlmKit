@@ -19,7 +19,7 @@ modelParams:
   # at 4096 (actual completion length measured at 10-70 tokens) since it only caps generation
   # length, not KV-cache size, and a correction call legitimately needs room for a full rewritten
   # translation.
-  # num_ctx raised back 4096 -> 8192 2026-09-26: BaseQualityReviewPrompt.txt had grown enough
+  # num_ctx raised back 4096 -> 8192 2026-09-26: BaseQualityControlPrompt.txt had grown enough
   # (prompt tidy + UNNATURAL_PHRASING) that glossary-heavy fullCell detection prompts reached
   # 4096-4108 tokens - the server 400'd them outright (exceed_context_size_error, ~30ms "Unscored")
   # or truncated the answer mid-token ("DEFECTS: HARD_TO_PARSE_SE"). Measured on the UD-IQ4_XS
@@ -30,7 +30,7 @@ modelParams:
   # than the prompt growth itself (gold-set median detection 873ms at 8192 vs 694ms at 6144, same
   # prompt, recall/precision unchanged; 8192 also sat at ~15.8/16.3GB VRAM and crashed the runner
   # once). Full-corpus measurement: the detection system prompt alone is 4585 tokens and the
-  # largest whole detection prompt 5450, so 6144 leaves ~690. QualityReviewWorkflow re-checks this
+  # largest whole detection prompt 5450, so 6144 leaves ~690. QualityControlWorkflow re-checks this
   # at the start of every review pass and fails fast if a prompt would not fit.
   # Tried OLLAMA_FLASH_ATTENTION=1 + OLLAMA_KV_CACHE_TYPE=q8_0 the same day: KV cache 512 -> 272MB
   # (hybrid model - only 16/64 layers have KV), but still 63/66 layers offloaded, and the gold-set

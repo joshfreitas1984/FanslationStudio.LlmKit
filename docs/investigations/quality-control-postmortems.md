@@ -1,6 +1,6 @@
-# Quality Review Postmortems
+# Quality Control Postmortems
 
-The current feature behavior is documented in [the quality review guide](../features/translation-pipeline/quality-review-pass.md).
+The current feature behavior is documented in [the quality control guide](../features/translation-pipeline/quality-control-pass.md).
 This page keeps the temporary model-run analysis and corrective history out of that guide.
 
 ## Scope
@@ -31,11 +31,11 @@ validation gates, and the dated ADRs under `docs/architecture/decisions/`.
 
 ## QC evaluator model comparison: prompt tuning vs. capability ceiling (2026-09-20)
 
-Two independent `BaseQualityReviewPrompt.txt` rounds targeting specific hard-defect patterns
+Two independent `BaseQualityControlPrompt.txt` rounds targeting specific hard-defect patterns
 (placeholder/null-value leaks and name-as-gloss mistranslations in round one; an invented
 synonym-pair over-translation pattern plus a forced pre-answer name self-check in round two) were
 each verified against a real, freshly-run comparison (see the caching trap below) using
-`QualityEvaluatorAssessmentWorkflow` in `DragonHierOverLlm`'s `Files/Goldset/GoldSet.yaml`
+`QualityControlAssessmentWorkflow` in `DragonHierOverLlm`'s `Files/Goldset/GoldSet.yaml`
 (121 detection items as of this writing). Result, both rounds: **Qwen38Qc** (the stronger, general
 reasoning-capable model) genuinely improved on every targeted pattern each round. **HyMT2-30B-A3B**
 (a translation-specialized model) only ever picked up the purely pattern-matchable defect shape
@@ -85,11 +85,11 @@ flagged. A quant-vs-quant comparison of Qwen38 itself found:
 See `docs/plans/qc-evaluator-comparison.md` in `DragonHierOverLlm` for the full live numbers, since
 that comparison is tied to that repo's gold set and config.
 
-**Caching trap:** `QualityEvaluatorAssessmentWorkflow` caches each model's `Results.yaml` keyed only
+**Caching trap:** `QualityControlAssessmentWorkflow` caches each model's `Results.yaml` keyed only
 on the gold-set fingerprint, not on prompt content - re-running the assessment after a prompt
 change with an unchanged gold set silently reuses stale pre-change results (finishes in under a
 second, looks like a successful run). Always delete the model's output directory under
-`Files/TestResults/QcEvaluatorAssessment/<model>/` before a round meant to test a prompt or model
+`Files/TestResults/QcAssessment/<model>/` before a round meant to test a prompt or model
 config change, or at minimum check `Results.yaml`'s timestamp against the relevant prompt commit
 before drawing a conclusion from it.
 
@@ -109,12 +109,12 @@ separated the two suspects:
 - **The larger context was the main cost.** The same prompt was ~20% faster at 6144 than at 8192,
   with no loss in recall or precision. The prompt growth cost ~14% at a fixed context. At 8192, the
   16GB card sat at ~15.8GB used, and the Ollama runner crashed once mid-run.
-- **The detection system prompt is nearly the whole context.** `BaseQualityReviewPrompt.txt` alone
+- **The detection system prompt is nearly the whole context.** `BaseQualityControlPrompt.txt` alone
   measured 4585 tokens. Across all ~43k QC columns of the corpus, the per-row part (source, translation
   and glossary) was 87 tokens at p50 and 193 at p90, with a maximum of 865 (worst full prompt 5450). The
   glossary block is too small to be worth trimming. Shrinking the context further means shrinking the
   system prompt.
-- `num_ctx` for the Qwen38 preset is now 6144. `QualityReviewWorkflow.CheckDetectionContextBudgetAsync`
+- `num_ctx` for the Qwen38 preset is now 6144. `QualityControlWorkflow.CheckDetectionContextBudgetAsync`
   runs at the start of every review pass. It measures the pass's five longest detection prompts via
   Ollama's `prompt_eval_count` (generating one token) and fails fast if any would leave less than
   `DetectionAnswerReserveTokens` free. Previously, a prompt edit that outgrew the context only showed
@@ -128,7 +128,7 @@ against Ollama (Qwen38 `UD-IQ4_XS`, num_ctx 6144, temperature 0, 16 gold-set cal
 44% of `total_duration` on Pass rows (~280ms of ~640ms) and 57% on Defect rows.
 
 **Variant A, pre-filling `DEFECTS:`, is worth enabling, and is now the default**
-(`qualityReview.detectionPrefillEnabled: false` opts out). It appends `{"role":"assistant","content":"DEFECTS:"}` to the detection request only (calls 1/2).
+(`qualityControl.detectionPrefillEnabled: false` opts out). It appends `{"role":"assistant","content":"DEFECTS:"}` to the detection request only (calls 1/2).
 Ollama 0.35.1 with `think: false` continues the message cleanly: the reply is `DEFECTS: NONE` with
 2 generated tokens, no `<think>` block, no repeated `DEFECTS:`. `QcDetectionResponseParser.Parse`
 takes `assumeDefectsPrefix` so a server that returns only the continuation (` NONE`) also parses.
@@ -156,7 +156,7 @@ prefill alternated (Base1, Pre1, Base2, Pre2):
   (20ms request failure) that Base1 did not.
 
 **Variant B, short category codes, was tested and rejected.** Built on top of A: only the OUTPUT FORMAT
-category line of `BaseQualityReviewPrompt.txt` was rewritten at runtime to ask for codes (`NUM`, `TERM`,
+category line of `BaseQualityControlPrompt.txt` was rewritten at runtime to ask for codes (`NUM`, `TERM`,
 `IDIOM`, `PINYIN`, `DROP`, `FLIP`, `STUTTER`, `SEAM`, `OTHER`, `AWKWARD`; `NONE`/`UNCERTAIN` unchanged), with
 the codes mapped back to `QcDefectCategory` in the detection parser only. Prefill-only (A) vs prefill +
 codes (B), alternated, 226 calls each:
@@ -202,7 +202,7 @@ today's builds gave the same corrected/flagged/call counts on the same columns (
   from verification rejections, not rule violations.
 
 **Fix (kept):** `GetLlmVerdictAsync` now stops the loop when a repair returns the candidate unchanged
-(`Tests/Workflow/QcRepairLoopTests.cs`), and DragonHierOverLlm sets `qualityReview.maxScoreRepairIterations: 1`.
+(`Tests/Workflow/QcRepairLoopTests.cs`), and DragonHierOverLlm sets `qualityControl.maxScoreRepairIterations: 1`.
 Same-snapshot A/B, 27-28 columns reviewed each: baseline 86 and 90 calls (12 and 14 corrected, 123 s and
 117 s); no-op stop 77 and 76 calls (13 and 13 corrected, 101 s and 103 s), about -13% calls and -14% time;
 adding `maxScoreRepairIterations: 1` gave 74 and 75 calls (12 and 14 corrected). Outcomes are within run noise.
@@ -225,7 +225,7 @@ rejections across two baseline runs, read by hand:
 - **0 corrections were identical to the original translation**, and 0 (source, candidate) pairs were verified
   twice in 8 runs, so skipping or caching those would save nothing (the no-op stop and review cache cover it).
 
-**Fix (kept, on by default): `qualityReview.preVerificationGateEnabled`.** `GetLlmVerdictAsync` runs the column's
+**Fix (kept, on by default): `qualityControl.preVerificationGateEnabled`.** `GetLlmVerdictAsync` runs the column's
 validation gate (`EvaluateQcCandidate`, the same check the final accept path runs) on each candidate before
 verifying it. A failing candidate skips verification and goes to a repair whose prompt carries the gate's
 reason as `RULE CHECK FAILURE` (e.g. "Restore `{3}` to the translation..."); it shares the repair budget, and
@@ -267,8 +267,8 @@ Same sandbox/snapshot, GPU free this time.
   stored visible `\n` text for sources with real line breaks (and models sometimes answered with a real break
   for literal-`\n` sources). `MatchSourceNewlines` now normalises every correction/repair to SOURCE's form.
   Tests: `Tests/Workflow/QcNewlineConventionTests.cs`.
-- **Verifier evidence (`qualityReview.verificationEvidenceEnabled`, default false; DragonHierOverLlm enables
-  it).** Verification uses `BaseQualityReviewVerificationEvidencePrompt.txt`, which adds an
+- **Verifier evidence (`qualityControl.verificationEvidenceEnabled`, default false; DragonHierOverLlm enables
+  it).** Verification uses `BaseQualityControlVerificationEvidencePrompt.txt`, which adds an
   `EVIDENCE: CATEGORY: "quote"` line. `QcVerificationResponseParser.FilterByEvidence` overrules a claim whose
   quote is punctuation-only or not in SOURCE (DROPPED_CONTENT) / SOURCE or the candidate (others); a claim with
   no entry is kept. Surviving quotes reach the repair as `VERIFIER EVIDENCE`. A rejection that survives keeps

@@ -99,22 +99,22 @@ structure). See [`docs/features/text-handling/prefab-text-workflow.md`](../docs/
 design; a consuming project's packaging step must filter `PrefabText` entries out of its CSV
 reconstruction loop and call `PrefabTextWorkflow.PackagePrefabTextAsync` instead.
 
-## Quality review pass (`Workflow/QualityReviewWorkflow.cs`) — optional, opt-in
+## Quality control pass (`Workflow/QualityControlWorkflow.cs`) — optional, opt-in
 
-A second, independent pass over already-translated text (`qualityReview.enabled` in `Config.yaml`)
+A second, independent pass over already-translated text (`qualityControl.enabled` in `Config.yaml`)
 — an LLM judges fluency/accuracy per column, optionally proposes a correction (only accepted if it
 passes `LineValidation.CheckTransalationSuccessful` plus a glossary-drift check), and rates its own
 confidence 0-100. Additive `TranslationSplit` fields only (`QcTranslated`, `QcStatus`,
 `QcQualityScore`, etc.) — no change to the golden-rule contract. **Nothing besides
-`QualityReviewWorkflow` itself resets these fields** — a retranslation or re-export can leave them
+`QualityControlWorkflow` itself resets these fields** — a retranslation or re-export can leave them
 stale, so anything that would trust `QcTranslated`/`QcQualityScore` (packaging, or the QC pass
 deciding whether to re-review) must first check
-`Utility.QualityReviewHelpers.IsQcReviewFresh(...)`. The QC prompt (`BaseQualityReviewPrompt`) is
+`Utility.QualityControlHelpers.IsQcReviewFresh(...)`. The QC prompt (`BaseQualityControlPrompt`) is
 per-model-family like `BaseSystemPrompt`, not a shared/generic file. `GameHooks.
 CustomQcExclusionRule` lets a per-game rule keep a column out of the pass entirely (before any LLM
 call) when it looks like prose but is actually a machine-readable record (e.g. a dialogue-choice
 entry with an embedded function-routing suffix) - see
-[`docs/features/translation-pipeline/quality-review-pass.md`](../docs/features/translation-pipeline/quality-review-pass.md) for the
+[`docs/features/translation-pipeline/quality-control-pass.md`](../docs/features/translation-pipeline/quality-control-pass.md) for the
 full design, including guidance for writing a new exclusion rule.
 
 ## Testing conventions
@@ -140,8 +140,8 @@ full design, including guidance for writing a new exclusion rule.
   deterministic repair/validation hooks, invoked from both a live LLM call and the no-LLM-call
   rules pass (`Workflow/TranslationWorkflow.cs`'s `ApplyAllRulesToCurrentTranslation`).
 - `GameHooks.CustomQcExclusionRule` — per-game rule deciding whether a column should be kept out of
-  the quality review pass entirely, checked once per column before any QC LLM call (see
-  `docs/features/translation-pipeline/quality-review-pass.md`).
+  the quality control pass entirely, checked once per column before any QC LLM call (see
+  `docs/features/translation-pipeline/quality-control-pass.md`).
 - `GameHooks.CustomUnsafeToTranslateRule` — per-game rule (with the whole `TranslationLine` in
   scope) that marks a split `SafeToTranslate = false` during the rules pass (see
   `docs/features/translation-pipeline/game-hooks.md`).

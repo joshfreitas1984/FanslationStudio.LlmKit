@@ -8,7 +8,7 @@ using System.Text.Json;
 namespace Tests.Workflow;
 
 /// <summary>
-/// <see cref="QualityReviewConfig.VerificationEvidenceEnabled"/>: the verifier quotes the text each
+/// <see cref="QualityControlConfig.VerificationEvidenceEnabled"/>: the verifier quotes the text each
 /// rejection is about, a claim whose quote is not in SOURCE/the candidate is overruled, and surviving
 /// quotes reach the repair call.
 /// </summary>
@@ -114,11 +114,11 @@ public sealed class QcVerificationEvidenceTests
         }
     }
 
-    private static async Task<(QualityReviewWorkflow.LlmVerdict Verdict, ScriptedHandler Handler)> RunAsync(string verificationReply, bool evidenceEnabled = true)
+    private static async Task<(QualityControlWorkflow.LlmVerdict Verdict, ScriptedHandler Handler)> RunAsync(string verificationReply, bool evidenceEnabled = true)
     {
         var config = new LlmConfig
         {
-            QualityReview = new QualityReviewConfig
+            QualityControl = new QualityControlConfig
             {
                 Enabled = true,
                 DoubledDetectionEnabled = false,
@@ -134,17 +134,17 @@ public sealed class QcVerificationEvidenceTests
             ModelParams = new Dictionary<string, object> { ["temperature"] = 0.15 },
             Prompts = new Dictionary<string, string>
             {
-                ["BaseQualityReviewPrompt"] = "detection",
-                ["BaseQualityReviewCorrectionPrompt"] = "correction",
-                ["BaseQualityReviewVerificationPrompt"] = "verification",
-                ["BaseQualityReviewVerificationEvidencePrompt"] = "verification-evidence",
-                ["BaseQualityReviewCorrectionRepairPrompt"] = "repair",
+                ["BaseQualityControlPrompt"] = "detection",
+                ["BaseQualityControlCorrectionPrompt"] = "correction",
+                ["BaseQualityControlVerificationPrompt"] = "verification",
+                ["BaseQualityControlVerificationEvidencePrompt"] = "verification-evidence",
+                ["BaseQualityControlCorrectionRepairPrompt"] = "repair",
             },
         };
         var handler = new ScriptedHandler(verificationReply);
         using var client = new HttpClient(handler);
 
-        var verdict = await QualityReviewWorkflow.GetLlmVerdictAsync(config, model, client, Source, Source, "{0} In {1} And {2} Sparring, in the end {3} One notch above", string.Empty);
+        var verdict = await QualityControlWorkflow.GetLlmVerdictAsync(config, model, client, Source, Source, "{0} In {1} And {2} Sparring, in the end {3} One notch above", string.Empty);
         return (verdict, handler);
     }
 
@@ -179,5 +179,5 @@ public sealed class QcVerificationEvidenceTests
 
     [Fact(DisplayName = "VerificationEvidenceEnabled defaults to off")]
     public void VerificationEvidence_DefaultsToDisabled() =>
-        Assert.False(new QualityReviewConfig().VerificationEvidenceEnabled);
+        Assert.False(new QualityControlConfig().VerificationEvidenceEnabled);
 }

@@ -75,7 +75,7 @@ public static class DynamicStringWorkflow
         Directory.CreateDirectory(outputPath);
 
         config ??= ConfigurationExtensions.GetConfiguration(workingDirectory);
-        var qualityReview = config.QualityReview;
+        var qualityControl = config.QualityControl;
 
         var results = new List<DynamicStringResult>();
         var seenBareRaw = new HashSet<string>();
@@ -85,7 +85,7 @@ public static class DynamicStringWorkflow
         {
             foreach (var line in fileLines)
             {
-                var (result, reason, bareFragment) = ReconstructLine(line, textFile, qualityReview);
+                var (result, reason, bareFragment) = ReconstructLine(line, textFile, qualityControl);
 
                 // Count regardless of whether result is null - a RawFallback (or, more rarely, a
                 // QcRejected whose Translated also turned out unusable) is a real, reportable
@@ -158,7 +158,7 @@ public static class DynamicStringWorkflow
     /// <c>Result</c> is <c>null</c> for BOTH failure reasons below, meaning the line is entirely
     /// EXCLUDED from the packaged dictionary rather than written with any Chinese text:
     /// <c>QcRejected</c> means a proposed correction existed but was held back by
-    /// <see cref="Utility.QualityReviewHelpers.PassesQcScoreGate"/> (a low score not covered by an
+    /// <see cref="Utility.QualityControlHelpers.PassesQcScoreGate"/> (a low score not covered by an
     /// auto-accepted DEFECT category) AND the column's ordinary pre-QC <c>Translated</c> text was
     /// also unusable (unsafe/flagged/missing) - if a usable <c>Translated</c> exists, that's what
     /// gets packaged instead (see the <c>PassesQcScoreGate</c> check below) and this line reports
@@ -181,7 +181,7 @@ public static class DynamicStringWorkflow
     /// <see cref="PackageDynamicStringsAsync"/> for why this extra bare label/translation pair
     /// needs to be packaged as its own dictionary entry alongside the full reconstructed line.
     /// </summary>
-    private static (string? Result, PackagingFailureReason Reason, (string Raw, string Result)? BareFragment) ReconstructLine(TranslationLine line, TextFileToSplit textFile, QualityReviewConfig qualityReview)
+    private static (string? Result, PackagingFailureReason Reason, (string Raw, string Result)? BareFragment) ReconstructLine(TranslationLine line, TextFileToSplit textFile, QualityControlConfig qualityControl)
     {
         var template = line.Templates.FirstOrDefault(t => t.Split == 0);
         if (template != null)
@@ -190,7 +190,7 @@ public static class DynamicStringWorkflow
 
             // A low score/unaccepted DEFECT category only skips the QcTranslated shortcut; the
             // already-good pre-QC fragments still reconstruct normally (see this method's doc comment).
-            var resolved = PackagingHelpers.ResolveFragments(fragments, template, textFile, qualityReview,
+            var resolved = PackagingHelpers.ResolveFragments(fragments, template, textFile, qualityControl,
                 anchorFallsBackToFirst: false, transform: CompoundFieldSplitter.NormalizeLabelNumberSpacing);
 
             // Known limitation: a whole-cell QC correction bypasses Reconstruct(), so the
@@ -210,7 +210,7 @@ public static class DynamicStringWorkflow
         if (split == null)
             return (null, PackagingFailureReason.None, null);
 
-        var plain = PackagingHelpers.ResolvePlainSplit(split, qualityReview, CompoundFieldSplitter.NormalizeLabelNumberSpacing);
+        var plain = PackagingHelpers.ResolvePlainSplit(split, qualityControl, CompoundFieldSplitter.NormalizeLabelNumberSpacing);
         return (plain.Text, plain.Reason, null);
     }
 }

@@ -136,7 +136,7 @@ public static class DynamicStringsCecilWorkflow
         var serializer = YamlHelper.CreateSerializer();
         await FileHelper.WriteAllTextWithRetryAsync($"{outputPath}/{textFile.Path}.yaml", serializer.Serialize(contracts));
 
-        // This legacy Mono/Cecil format has no quality-review integration - every failure counted
+        // This legacy Mono/Cecil format has no quality-control integration - every failure counted
         // here is a RawFallback (a QcRejected count is never produced by this workflow).
         return (passedCount, 0, rawFallbackCount);
     }

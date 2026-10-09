@@ -1,9 +1,9 @@
 namespace FanslationStudio.LlmKit.Support;
 
 /// <summary>
-/// Outcome of the post-translation quality review pass (<see cref="Workflow.QualityReviewWorkflow"/>)
+/// Outcome of the post-translation quality control pass (<see cref="Workflow.QualityControlWorkflow"/>)
 /// for a <see cref="TranslationSplit"/>/column. See
-/// docs/plans/quality-review-pass.md (DragonHierOverLlm repo) for the full design.
+/// docs/plans/quality-control-pass.md (DragonHierOverLlm repo) for the full design.
 /// </summary>
 public enum QcStatus
 {

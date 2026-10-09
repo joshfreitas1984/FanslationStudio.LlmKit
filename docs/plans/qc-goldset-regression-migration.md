@@ -1,6 +1,6 @@
 # Plan: move the QC gold set and regression into LlmKit
 
-Status: **proposed** (2026-10-07). Nothing in this plan has been implemented.
+Status: **in progress**. Phase 1 (workstream A: rename, loader shims, vocabulary lint test) implemented 2026-10-09 in LlmKit and the three QC-using games (uncommitted). Phase 2 (workstream E step 1) implemented 2026-10-09: `Tests/Configuration/PresetGlossaryLintTests.cs` plus the obvious `CommonStats` fixes (removed 阴/阳/刚/柔/毒, bad alternatives), the 化境 typo, a dead 两 entry and a stray YAML item in `Phonetics`; judgment-call entries (太阳, 承让了, 机关, ...) wait for the corpus audit. Phase 3 (B1-B2) implemented 2026-10-09: `FanslationStudio.LlmKit.Assessments` host project (manual tests gated by `LLMKIT_ASSESSMENTS=1`), schema-v2 gold set (`game`, `sourceFile`, `glossary` snapshot per case), and Dragon Heir's 251 cases imported with snapshots verified to reproduce the live glossary prompt; the live `Assess QC models` run from LlmKit (2026-10-09, snapshot gold set) reproduced Dragon Heir's 2026-10-07 numbers within noise (correction-safety 86.4% vs 84.1%, detection accuracy 72.4% vs 73.0%, recall 53.4% vs 54.0%, precision 90.5% vs 91.6%); B4 (retiring the game copies) is still open. Phase 4 (C1, C3 part) implemented 2026-10-09: `Games.yaml` registry, read-only `GameCorpus`, and deterministic scans (`GlossaryScans`: per-entry match/hit/shadowed stats, preset-change impact, detector blast radius) with CI-safe unit tests and manual cross-game reports (`Files/TestResults/Scans/`); the detector scan has the function but no concrete detector wired yet. Phase 5 (E steps 2-4) first pass implemented 2026-10-09: corpus audit plus the evidenced preset fixes, findings and open decisions in [`investigations/preset-glossary-audit-2026-10.md`](../investigations/preset-glossary-audit-2026-10.md). Phases 6-8 not started.
 
 Audience: LlmKit maintainers and the agents working in this repo and the "over LLM" game repos.
 
@@ -63,8 +63,8 @@ LegendOfMortal to see the blast radius.
 | `DragonHierOverLlm` | 44 | 12 | 4 files (≈47 items after the 10-07 work) | Owns the gold set today. |
 | `LegendOfMortalOverLlm` | 48 | 1 | 32 files, 600 items (547 score 0) | Same verifier-harshness pattern; own `真人` entry overrides the preset. |
 | `WanXiangOverLlm` | 38 | 1 | 15 files (not analysed yet) | |
-| `Xyzj2OverLlm` | 86 | 0 | none (no QC run) | Useful for deterministic scans only. |
-| `FateseekerOverLlm` | 0 | 1 | none | Not yet translated; register for glossary reads only. |
+| `Xyzj2OverLlm` | 86 | 0 | none (no QC run) | Old version; deliberately **not** registered for scans. |
+| `FateseekerOverLlm` | 0 | 1 | none | Not yet translated; deliberately **not** registered for scans. |
 
 ### QC naming today
 
@@ -221,11 +221,6 @@ games:
     path: ../../../LegendOfMortalOverLlm/Files
   - name: WanXiangOverLlm
     path: ../../../WanXiangOverLlm/Files
-  - name: Xyzj2OverLlm
-    path: ../../../Xyzj2OverLlm/Files
-  - name: FateseekerOverLlm
-    path: ../../../FateseekerOverLlm/Files
-    converted: false          # glossary reads only
 ```
 
 A `GameCorpus` helper loads a game with `GetConfiguration(path)` (so preset + workspace glossary merge exactly

@@ -1,0 +1,7 @@
+# Preset entries that changed (or are about to): the impact scan counts, per game, how many existing
+# translations still use the old result. Add a row before changing a preset entry.
+changes:
+  - raw: 真人
+    oldResult: Immortal
+  - raw: 三七
+    oldResult: Sanqi

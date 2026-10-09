@@ -49,7 +49,7 @@ Notes on what's canonical vs. per-repo:
   project) are the canonical part. A new/upgraded repo should have all of these in some form.
 - **Whether Translate and Tests are one project or two is not settled by DragonHeir alone.**
   DragonHeir combines them into a single `Tests/` project (the xunit facts directly call
-  `TranslationWorkflow`/`QualityReviewWorkflow` etc. and also serve as the "run a step of the
+  `TranslationWorkflow`/`QualityControlWorkflow` etc. and also serve as the "run a step of the
   pipeline" entry points). WanXiang and LegendOfMortal split this into a `Translate/` library project
   plus a separate `Tests/` project referencing it. Since DragonHeir is this doc's source of truth,
   **the single-`Tests/`-project shape is the canonical default** for a new repo scaffolded from
@@ -72,5 +72,5 @@ Notes on what's canonical vs. per-repo:
 This doc (and its four siblings) covers structure — file/folder layout, naming, and config shape.
 It does not cover LlmKit-internal mechanics (workflow classes, data model, retry/escalation) — that
 lives in this repo's `architecture/ARCHITECTURE.md`,
-`features/translation-pipeline/quality-review-pass.md`, and
+`features/translation-pipeline/quality-control-pass.md`, and
 `features/packaging/packaging-workflows.md`, per `docs/README.md`'s taxonomy.

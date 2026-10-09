@@ -20,7 +20,7 @@ internal readonly record struct FieldResolution(
 /// (<see cref="Workflow.CsvGameDataWorkflow"/>, <see cref="Workflow.JsonGameDataWorkflow"/>,
 /// <see cref="Workflow.PrefabTextWorkflow"/>, <see cref="Workflow.DynamicStringWorkflow"/>). Neither
 /// method applies <see cref="PackagingTextFixups"/> - each workflow does that with its own raw text
-/// and column. See docs/features/translation-pipeline/quality-review-pass.md for the QC gating rules.
+/// and column. See docs/features/translation-pipeline/quality-control-pass.md for the QC gating rules.
 /// </summary>
 internal static class PackagingHelpers
 {
@@ -38,15 +38,15 @@ internal static class PackagingHelpers
     /// <param name="transform">Optional (sourceText, translated) rewrite of each translated fragment.</param>
     public static FieldResolution ResolveFragments(
         IReadOnlyList<TranslationSplit> fragments, FieldTemplate? template, TextFileToSplit textFile,
-        QualityReviewConfig qualityReview, bool anchorFallsBackToFirst, Func<string, string, string>? transform = null)
+        QualityControlConfig qualityControl, bool anchorFallsBackToFirst, Func<string, string, string>? transform = null)
     {
         var anchor = fragments.FirstOrDefault(f => f.SubIndex == 0)
             ?? (anchorFallsBackToFirst ? fragments.FirstOrDefault() : null);
 
         // Whole-cell QC state lives only on the anchor, and is only trusted while still fresh
         // relative to the fragments' current Translated values.
-        var qcFresh = anchor != null && QualityReviewHelpers.IsQcReviewFresh(anchor, template, fragments, qualityReview);
-        var qcRejected = qcFresh && !QualityReviewHelpers.PassesQcScoreGate(anchor!.QcQualityScore, anchor.QcDefectCategory, qualityReview);
+        var qcFresh = anchor != null && QualityControlHelpers.IsQcReviewFresh(anchor, template, fragments, qualityControl);
+        var qcRejected = qcFresh && !QualityControlHelpers.PassesQcScoreGate(anchor!.QcQualityScore, anchor.QcDefectCategory, qualityControl);
 
         if (qcFresh && !qcRejected && !string.IsNullOrEmpty(anchor!.QcTranslated))
             return new FieldResolution(anchor.QcTranslated, PackagingFailureReason.None, QcAnchor: anchor);
@@ -80,10 +80,10 @@ internal static class PackagingHelpers
     /// retranslation nor unsafe. Does not consult <see cref="TextFileToSplit.PackageOutput"/>.
     /// </summary>
     public static FieldResolution ResolvePlainSplit(
-        TranslationSplit split, QualityReviewConfig qualityReview, Func<string, string, string>? transform = null)
+        TranslationSplit split, QualityControlConfig qualityControl, Func<string, string, string>? transform = null)
     {
-        var qcFresh = QualityReviewHelpers.IsQcReviewFresh(split, null, [split], qualityReview);
-        var qcRejected = qcFresh && !QualityReviewHelpers.PassesQcScoreGate(split.QcQualityScore, split.QcDefectCategory, qualityReview);
+        var qcFresh = QualityControlHelpers.IsQcReviewFresh(split, null, [split], qualityControl);
+        var qcRejected = qcFresh && !QualityControlHelpers.PassesQcScoreGate(split.QcQualityScore, split.QcDefectCategory, qualityControl);
         var useQc = qcFresh && !qcRejected && !string.IsNullOrEmpty(split.QcTranslated);
         var effectiveTranslated = useQc ? split.QcTranslated : split.Translated;
 

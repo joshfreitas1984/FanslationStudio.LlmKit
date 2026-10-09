@@ -18,10 +18,10 @@
   re-export matching order, and the known cost of the fragment model.
 - [`docs/features/prefab-text/prefabtext-workflow.md`](docs/features/prefab-text/prefabtext-workflow.md) — `TextFileType.PrefabText` design:
   a flat, row/column-less alternative to the CSV pipeline for dumped prefab/UI text.
-- [`docs/features/translation-pipeline/quality-review-pass.md`](docs/features/translation-pipeline/quality-review-pass.md) —
-  post-translation quality review pass: `TranslationSplit` Qc\* fields and the `SubIndex == 0`
-  anchor convention, `QualityReviewWorkflow` mechanics, the staleness/freshness problem and its fix
-  (`QualityReviewHelpers.IsQcReviewFresh`, merge preservation), score-gated packaging, and the
+- [`docs/features/translation-pipeline/quality-control-pass.md`](docs/features/translation-pipeline/quality-control-pass.md) —
+  post-translation quality control pass: `TranslationSplit` Qc\* fields and the `SubIndex == 0`
+  anchor convention, `QualityControlWorkflow` mechanics, the staleness/freshness problem and its fix
+  (`QualityControlHelpers.IsQcReviewFresh`, merge preservation), score-gated packaging, and the
   per-model-family (`Qwen25`/`Qwen38`/`HyMT2`/`HyMT2Moe`) prompt design. Includes a 2026-09-16 postmortem/fix: a
   score-gate rejection in `PrefabTextWorkflow`/`DynamicStringWorkflow` used to discard a column all
   the way to raw Chinese text instead of its pre-QC `Translated` value, which shipped raw Chinese
@@ -45,9 +45,9 @@
 
 ## Design history (superseded by a current-state doc above, kept for context)
 
-- [`../DragonHierOverLlm/docs/plans/quality-review-pass.md`](../DragonHierOverLlm/docs/plans/quality-review-pass.md)
-  — the original design plan for the quality review pass (spans this repo + `DragonHierOverLlm`),
+- [`../DragonHierOverLlm/docs/plans/quality-control-pass.md`](../DragonHierOverLlm/docs/plans/quality-control-pass.md)
+  — the original design plan for the quality control pass (spans this repo + `DragonHierOverLlm`),
   including the open questions/tradeoffs that were resolved along the way and the model-selection
   sample-run methodology. Predates most of the feature being built - for current-state reference
-  use [`docs/features/translation-pipeline/quality-review-pass.md`](docs/features/translation-pipeline/quality-review-pass.md)
+  use [`docs/features/translation-pipeline/quality-control-pass.md`](docs/features/translation-pipeline/quality-control-pass.md)
   instead.

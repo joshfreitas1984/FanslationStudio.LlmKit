@@ -38,15 +38,22 @@ public class LlmConfig
     public GlossaryPresetConfig GlossaryPreset { get; set; } = new();
 
     /// <summary>
-    /// Post-translation quality review pass config (see docs/plans/quality-review-pass.md in
-    /// DragonHierOverLlm). Optional - defaults to <see cref="QualityReviewConfig.Enabled"/> =
+    /// Post-translation quality control pass config (see docs/plans/quality-control-pass.md in
+    /// DragonHierOverLlm). Optional - defaults to <see cref="QualityControlConfig.Enabled"/> =
     /// false, a documented no-op for any project that doesn't opt in.
     /// </summary>
-    public QualityReviewConfig QualityReview { get; set; } = new();
+    public QualityControlConfig QualityControl { get; set; } = new();
+
+    /// <summary>
+    /// Legacy <c>qualityReview:</c> config key, read for one release and mapped onto
+    /// <see cref="QualityControl"/> by <see cref="ConfigurationExtensions.GetConfiguration"/>.
+    /// </summary>
+    [YamlMember(Alias = "qualityReview")]
+    public QualityControlConfig? LegacyQualityReview { get; set; }
 
     public TranslationAssessmentConfig TranslationAssessment { get; set; } = new();
 
-    public QualityEvaluatorAssessmentConfig QualityEvaluatorAssessment { get; set; } = new();
+    public QualityControlAssessmentConfig QualityControlAssessment { get; set; } = new();
 
     /// <summary>
     /// Name of a model (matching a <see cref="ModelConfig.Name"/> entry in <see cref="Models"/>) to
@@ -127,12 +134,12 @@ public class TranslationAssessmentConfig
     public List<string> PinnedSampleSources { get; set; } = [];
 }
 
-public class QualityEvaluatorAssessmentConfig
+public class QualityControlAssessmentConfig
 {
     public bool Enabled { get; set; }
     public List<string> ModelNames { get; set; } = [];
-    public string GoldSetPath { get; set; } = "TestResults/QcEvaluatorAssessment/GoldSet.yaml";
-    public string OutputPath { get; set; } = "TestResults/QcEvaluatorAssessment";
+    public string GoldSetPath { get; set; } = "TestResults/QcAssessment/GoldSet.yaml";
+    public string OutputPath { get; set; } = "TestResults/QcAssessment";
 
     /// <summary>
     /// Whether detection runs both calls 1 and 2 (production's default) and merges them via
@@ -143,13 +150,13 @@ public class QualityEvaluatorAssessmentConfig
     public bool DoubledDetection { get; set; } = true;
 
     /// <summary>
-    /// Runs detection (calls 1/2, <see cref="Workflow.QualityReviewWorkflow.DetectDefectsAsync"/>)
+    /// Runs detection (calls 1/2, <see cref="Workflow.QualityControlWorkflow.DetectDefectsAsync"/>)
     /// with Ollama's `think` mode on instead of production's normal thinking-off default. Mirrors
-    /// <see cref="QualityReviewConfig.VerificationThinkingEnabled"/> but for the detection role
+    /// <see cref="QualityControlConfig.VerificationThinkingEnabled"/> but for the detection role
     /// instead of verification - a scoped, assessment-only way to test whether a candidate
     /// detector's capability gap on hard semantic categories (name-as-gloss, invented-synonym-pair)
     /// is a reasoning-budget problem rather than a genuine ceiling, without touching production's
-    /// <see cref="Workflow.QualityReviewWorkflow.RunAsync"/>/<see cref="Workflow.QualityReviewWorkflow.RunBruteForce"/>
+    /// <see cref="Workflow.QualityControlWorkflow.RunAsync"/>/<see cref="Workflow.QualityControlWorkflow.RunBruteForce"/>
     /// path (neither ever passes this flag - see docs/investigations/tests/qc-evaluator-model-selection.md).
     /// As with verification thinking, the reasoning trace shares the same num_ctx/num_predict budget
     /// as the DEFECTS output line, so a candidate model's `modelParams` may need headroom (see that
@@ -173,7 +180,7 @@ public class QualityEvaluatorAssessmentConfig
     /// Candidate models to test in the CORRECTION-GENERATION (call 3) role, instead of always using
     /// the detector model - each drafts a correction for every gold row with known confirmed defect
     /// categories, then <see cref="JudgeModelName"/> scores every draft's safety via
-    /// <see cref="Workflow.QualityReviewWorkflow.GetVerificationVerdictAsync"/>. A model never grades
+    /// <see cref="Workflow.QualityControlWorkflow.GetVerificationVerdictAsync"/>. A model never grades
     /// its own draft. See docs/plans/qc-fast-corrector-model-swap.md - this is that plan's validation
     /// step. Empty (default) skips this evaluation mode entirely; existing detection/verification-only
     /// rounds are unaffected.
@@ -182,7 +189,7 @@ public class QualityEvaluatorAssessmentConfig
 
     /// <summary>
     /// Trusted judge model used to score every <see cref="CorrectorModelNames"/> entry's drafted
-    /// corrections for safety. Must be configured with a BaseQualityReviewVerificationPrompt and must
+    /// corrections for safety. Must be configured with a BaseQualityControlVerificationPrompt and must
     /// not appear in <see cref="CorrectorModelNames"/>. Required only when CorrectorModelNames is
     /// non-empty.
     /// </summary>
@@ -190,13 +197,13 @@ public class QualityEvaluatorAssessmentConfig
 
     /// <summary>
     /// When true, the correction-generation comparison mirrors production's full verify/repair loop
-    /// (<see cref="Workflow.QualityReviewWorkflow.GetLlmVerdictAsync"/>'s calls 4/5) instead of a
+    /// (<see cref="Workflow.QualityControlWorkflow.GetLlmVerdictAsync"/>'s calls 4/5) instead of a
     /// single verify-only pass: a rejected draft goes back through the SAME corrector model's
-    /// <see cref="Workflow.QualityReviewWorkflow.GetCorrectionRepairAsync"/>, then <see cref="JudgeModelName"/>
-    /// re-verifies, up to <see cref="QualityReviewConfig.MaxScoreRepairIterations"/> repairs per row.
+    /// <see cref="Workflow.QualityControlWorkflow.GetCorrectionRepairAsync"/>, then <see cref="JudgeModelName"/>
+    /// re-verifies, up to <see cref="QualityControlConfig.MaxScoreRepairIterations"/> repairs per row.
     /// Like production, a draft the validation gate rejects is repaired against the gate's reason before
-    /// any verify call (<see cref="QualityReviewConfig.PreVerificationGateEnabled"/>), judge evidence
-    /// reaches the repair (<see cref="QualityReviewConfig.VerificationEvidenceEnabled"/>), and an
+    /// any verify call (<see cref="QualityControlConfig.PreVerificationGateEnabled"/>), judge evidence
+    /// reaches the repair (<see cref="QualityControlConfig.VerificationEvidenceEnabled"/>), and an
     /// unchanged repair stops the row. Answering
     /// whether a cheap corrector's higher initial failure rate is rescued by repair, not just how
     /// often its first draft succeeds. Written to a separate `CorrectionGenerationWithRepair` output

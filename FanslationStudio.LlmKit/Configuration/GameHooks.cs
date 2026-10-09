@@ -86,10 +86,10 @@ public class GameHooks
     public Func<TextFileToSplit?, int?, string, string, string>? CustomColumnRepair { get; set; }
 
     /// <summary>
-    /// Invoked once per column while <see cref="Workflow.QualityReviewWorkflow.RunAsync"/> is
+    /// Invoked once per column while <see cref="Workflow.QualityControlWorkflow.RunAsync"/> is
     /// building its work-item list, BEFORE any LLM call - lets a game-specific project keep a
-    /// column out of the quality review pass entirely, even though its file otherwise has
-    /// <see cref="TextFileToSplit.EnableQualityReview"/> set. Exists for text that is structurally
+    /// column out of the quality control pass entirely, even though its file otherwise has
+    /// <see cref="TextFileToSplit.EnableQualityControl"/> set. Exists for text that is structurally
     /// opaque to a QC model despite looking like ordinary translated prose - e.g. this game's
     /// dynamic-string dialogue-choice entries, where the raw/translated cell is
     /// <c>"{label};FunctionName"</c> (a real runtime choice-routing record, not a sentence) and a

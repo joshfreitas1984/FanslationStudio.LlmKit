@@ -39,8 +39,8 @@ public sealed class QcWriteBackAndGiveUpTests : IDisposable
     {
         WriteCorpus(new TranslationSplit { Split = 0, Text = "甲", Translated = "A", QcStatus = QcStatus.Passed, QcReviewedText = "A" });
 
-        await QualityReviewWorkflow.ResetCorrectedQcState(_workingDirectory, [_textFile]);
-        await QualityReviewWorkflow.ResetQcRetryLimits(_workingDirectory, [_textFile]);
+        await QualityControlWorkflow.ResetCorrectedQcState(_workingDirectory, [_textFile]);
+        await QualityControlWorkflow.ResetQcRetryLimits(_workingDirectory, [_textFile]);
 
         Assert.StartsWith(Marker, File.ReadAllText(OutputFile));
     }
@@ -50,7 +50,7 @@ public sealed class QcWriteBackAndGiveUpTests : IDisposable
     {
         WriteCorpus(new TranslationSplit { Split = 0, Text = "甲", Translated = "A", QcStatus = QcStatus.Corrected, QcTranslated = "AA", QcReviewedText = "A" });
 
-        await QualityReviewWorkflow.ResetCorrectedQcState(_workingDirectory, [_textFile]);
+        await QualityControlWorkflow.ResetCorrectedQcState(_workingDirectory, [_textFile]);
 
         Assert.DoesNotContain("untouched-marker", File.ReadAllText(OutputFile));
         Assert.Equal(QcStatus.NotReviewed, ReadCorpus()[0].Splits[0].QcStatus);
@@ -60,11 +60,11 @@ public sealed class QcWriteBackAndGiveUpTests : IDisposable
     public async Task ResetAllOnlyWritesWhenStateExists()
     {
         WriteCorpus(new TranslationSplit { Split = 0, Text = "甲", Translated = "A" });
-        await QualityReviewWorkflow.ResetAllQcState(_workingDirectory, [_textFile]);
+        await QualityControlWorkflow.ResetAllQcState(_workingDirectory, [_textFile]);
         Assert.StartsWith(Marker, File.ReadAllText(OutputFile));
 
         WriteCorpus(new TranslationSplit { Split = 0, Text = "甲", Translated = "A", QcRuleCheckFailureCount = 2 });
-        await QualityReviewWorkflow.ResetAllQcState(_workingDirectory, [_textFile]);
+        await QualityControlWorkflow.ResetAllQcState(_workingDirectory, [_textFile]);
         Assert.Equal(0, ReadCorpus()[0].Splits[0].QcRuleCheckFailureCount);
     }
 
@@ -73,10 +73,10 @@ public sealed class QcWriteBackAndGiveUpTests : IDisposable
     {
         // Not ready for review (still flagged for retranslation) - never dispatched.
         WriteCorpus(new TranslationSplit { Split = 0, Text = "甲", Translated = "A", FlaggedForRetranslation = true });
-        var config = new LlmConfig { QualityReview = new QualityReviewConfig { Enabled = true } };
+        var config = new LlmConfig { QualityControl = new QualityControlConfig { Enabled = true } };
 
-        var fileStates = await QualityReviewWorkflow.LoadFileStatesAsync(_workingDirectory, [_textFile]);
-        var reviewed = await QualityReviewWorkflow.ReviewFileStatesAsync(config, new ModelExecutionConfig(), fileStates, null);
+        var fileStates = await QualityControlWorkflow.LoadFileStatesAsync(_workingDirectory, [_textFile]);
+        var reviewed = await QualityControlWorkflow.ReviewFileStatesAsync(config, new ModelExecutionConfig(), fileStates, null);
 
         Assert.Equal(0, reviewed);
         Assert.StartsWith(Marker, File.ReadAllText(OutputFile));
@@ -85,7 +85,7 @@ public sealed class QcWriteBackAndGiveUpTests : IDisposable
     [Fact(DisplayName = "Rule-check give-up sets QcDefectCategories the same way the review pass's give-up does")]
     public void RuleCheckGiveUpSetsDefectCategories()
     {
-        var config = new LlmConfig { Hooks = new GameHooks(), QualityReview = new QualityReviewConfig { Enabled = true, MaxRuleCheckRetries = 0 } };
+        var config = new LlmConfig { Hooks = new GameHooks(), QualityControl = new QualityControlConfig { Enabled = true, MaxRuleCheckRetries = 0 } };
         var model = new ModelExecutionConfig();
         config.Runtime.Models["Default"] = model;
         var anchor = new TranslationSplit
@@ -101,7 +101,7 @@ public sealed class QcWriteBackAndGiveUpTests : IDisposable
             QcDefectCategories = [QcDefectCategory.DomainTerm],
         };
 
-        var (changed, needsRetry, gaveUp) = QualityReviewWorkflow.ApplyRulesToQcColumn(config, model, anchor, _textFile, "全盔", "Full helmet");
+        var (changed, needsRetry, gaveUp) = QualityControlWorkflow.ApplyRulesToQcColumn(config, model, anchor, _textFile, "全盔", "Full helmet");
 
         Assert.True(changed);
         Assert.False(needsRetry);

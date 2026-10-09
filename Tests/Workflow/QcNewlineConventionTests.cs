@@ -21,7 +21,7 @@ public sealed class QcNewlineConventionTests
     [InlineData("甲乙", "A\\nB", "A\\nB")]
     [InlineData("甲\n乙\\n丙", "A\\nB\nC", "A\\nB\nC")]
     public void MatchSourceNewlines(string source, string candidate, string expected) =>
-        Assert.Equal(expected, QualityReviewWorkflow.MatchSourceNewlines(candidate, source));
+        Assert.Equal(expected, QualityControlWorkflow.MatchSourceNewlines(candidate, source));
 
     private sealed class ScriptedHandler : HttpMessageHandler
     {
@@ -44,7 +44,7 @@ public sealed class QcNewlineConventionTests
     [Fact(DisplayName = "A literal \\n correction for a real-line-break source is returned with a real break")]
     public async Task LiteralNewlineCorrection_UsesSourceRealBreak()
     {
-        var config = new LlmConfig { QualityReview = new QualityReviewConfig { Enabled = true, DoubledDetectionEnabled = false } };
+        var config = new LlmConfig { QualityControl = new QualityControlConfig { Enabled = true, DoubledDetectionEnabled = false } };
         var model = new ModelExecutionConfig
         {
             Url = "http://test.local/api/chat",
@@ -53,15 +53,15 @@ public sealed class QcNewlineConventionTests
             ModelParams = new Dictionary<string, object> { ["temperature"] = 0.15 },
             Prompts = new Dictionary<string, string>
             {
-                ["BaseQualityReviewPrompt"] = "detection",
-                ["BaseQualityReviewCorrectionPrompt"] = "correction",
-                ["BaseQualityReviewVerificationPrompt"] = "verification",
-                ["BaseQualityReviewCorrectionRepairPrompt"] = "repair",
+                ["BaseQualityControlPrompt"] = "detection",
+                ["BaseQualityControlCorrectionPrompt"] = "correction",
+                ["BaseQualityControlVerificationPrompt"] = "verification",
+                ["BaseQualityControlCorrectionRepairPrompt"] = "repair",
             },
         };
         using var client = new HttpClient(new ScriptedHandler());
 
-        var verdict = await QualityReviewWorkflow.GetLlmVerdictAsync(config, model, client, "你、你好\n再见", "你、你好\n再见", "Hello\nBye", string.Empty);
+        var verdict = await QualityControlWorkflow.GetLlmVerdictAsync(config, model, client, "你、你好\n再见", "你、你好\n再见", "Hello\nBye", string.Empty);
 
         Assert.Equal("H-hello\nBye", verdict.CorrectedRawMasked);
     }

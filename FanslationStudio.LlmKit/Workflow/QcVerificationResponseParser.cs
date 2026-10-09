@@ -33,7 +33,7 @@ public static class QcVerificationResponseParser
 
         // UNRESOLVED must be a subset of what was actually confirmed - a verifier naming a category
         // that was never part of CONFIRMED DEFECTS is a protocol violation, not a real signal. With
-        // an EVIDENCE line (BaseQualityReviewVerificationEvidencePrompt) the claim carries a quote
+        // an EVIDENCE line (BaseQualityControlVerificationEvidencePrompt) the claim carries a quote
         // FilterByEvidence checks, so it is kept as a new defect instead of discarding a clear rejection.
         var unconfirmed = unresolved.Where(category => !confirmedDefects.Contains(category)).ToList();
         if (unconfirmed.Count > 0)
@@ -56,7 +56,7 @@ public static class QcVerificationResponseParser
         @"^\s*([A-Za-z_]+)\s*:\s*[""“”']?(.*?)[""“”']?\s*$", RegexOptions.Compiled);
 
     /// <summary>
-    /// The optional <c>EVIDENCE:</c> line of BaseQualityReviewVerificationEvidencePrompt
+    /// The optional <c>EVIDENCE:</c> line of BaseQualityControlVerificationEvidencePrompt
     /// (<c>CATEGORY: "quote" | CATEGORY: "quote"</c>). Null when the line is absent; an entry that
     /// does not parse is skipped, never a parse failure of the whole verdict.
     /// </summary>

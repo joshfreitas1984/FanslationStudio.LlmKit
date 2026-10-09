@@ -15,7 +15,7 @@ Raw/Export/*.yaml -> Converted/*.yaml
 TranslationWorkflow.TranslateLines
         |
         v
-(optional) QualityReviewWorkflow.RunAsync
+(optional) QualityControlWorkflow.RunAsync
         |
         v
 TextFileType-specific Package*Async
@@ -99,21 +99,21 @@ Run it as a dry run first (`flagForRetranslation: false`, the default). It write
 
 With `flagForRetranslation: true` it sets `FlaggedForRetranslation` on each hit. Flagged lines are not packaged until retranslated, so run the flag pass and a translate-flagged pass back to back. QC state resets automatically when a retranslation changes the text, so lines are re-reviewed afterward.
 
-### 4. Run quality review after translation is complete
+### 4. Run quality control after translation is complete
 
-`QualityReviewWorkflow.RunAsync(...)` is an optional second LLM pass. Run it only after ordinary translation has produced complete, valid candidates. It reviews reconstructed columns, not unfinished individual splits, and skips unsafe, missing, or flagged translations.
+`QualityControlWorkflow.RunAsync(...)` is an optional second LLM pass. Run it only after ordinary translation has produced complete, valid candidates. It reviews reconstructed columns, not unfinished individual splits, and skips unsafe, missing, or flagged translations.
 
-Enable it through `qualityReview.enabled` in `Config.yaml`. The workflow itself is invoked by code and accepts an optional `sampleSize` for a representative trial before a full run:
+Enable it through `qualityControl.enabled` in `Config.yaml`. The workflow itself is invoked by code and accepts an optional `sampleSize` for a representative trial before a full run:
 
 ```csharp
-await QualityReviewWorkflow.RunAsync(
+await QualityControlWorkflow.RunAsync(
     workingDirectory,
     textFiles,
     sampleSize: null,
     hooks: hooks);
 ```
 
-Use a sample first when evaluating a new QC model or prompt. After a QC run, use `QualityReviewWorkflow.ApplyRulesToCurrentQcTranslated(...)` when validation or game rules changed and stored QC corrections need to be rechecked. Use `RunBruteForce(...)` only when intentionally retrying rejected QC work across several iterations.
+Use a sample first when evaluating a new QC model or prompt. After a QC run, use `QualityControlWorkflow.ApplyRulesToCurrentQcTranslated(...)` when validation or game rules changed and stored QC corrections need to be rechecked. Use `RunBruteForce(...)` only when intentionally retrying rejected QC work across several iterations.
 
 QC must remain after primary translation. It can propose a correction, but acceptance uses the same structural and game-specific validation rules as normal translation. Packaging reads QC state only when the review is fresh and meets the configured score gate.
 
@@ -208,8 +208,8 @@ foreach (var textFile in textFiles)
 
 await TranslationWorkflow.TranslateLines(workingDirectory, textFiles, hooks);
 
-if (qualityReviewEnabled)
-    await QualityReviewWorkflow.RunAsync(workingDirectory, textFiles, hooks: hooks);
+if (qualityControlEnabled)
+    await QualityControlWorkflow.RunAsync(workingDirectory, textFiles, hooks: hooks);
 
 foreach (var textFile in textFiles)
     await PackageOneFileAsync(workingDirectory, textFile);

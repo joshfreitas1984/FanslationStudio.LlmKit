@@ -4,7 +4,7 @@ using FanslationStudio.LlmKit.Workflow;
 
 namespace Tests.Workflow;
 
-public class QualityReviewWorkflowTests
+public class QualityControlWorkflowTests
 {
     // CorrectedLineRegex is deliberately Singleline (dot matches newline) as of commit 116539a - a
     // multi-sentence correction is frequently joined by a real line break rather than a literal
@@ -50,11 +50,11 @@ public class QualityReviewWorkflowTests
         Assert.True(match.Success);
         var captured = match.Groups[1].Value.Trim();
         Assert.Equal("Wealth in the millions\nCORRECTED: NONE", captured);
-        Assert.True(QualityReviewWorkflow.ContainsLeakedProtocolText(captured));
+        Assert.True(QualityControlWorkflow.ContainsLeakedProtocolText(captured));
     }
 
     private static Regex GetCorrectedLineRegex() =>
-        (Regex)typeof(QualityReviewWorkflow)
+        (Regex)typeof(QualityControlWorkflow)
             .GetField("CorrectedLineRegex", BindingFlags.NonPublic | BindingFlags.Static)!
             .GetValue(null)!;
 
@@ -64,7 +64,7 @@ public class QualityReviewWorkflowTests
     [Fact(DisplayName = "Rejects a correction that shouts in all-caps over a normally-cased original")]
     public void RejectsAllCapsShoutOverNormalCasing()
     {
-        var reason = QualityReviewWorkflow.CheckCapitalizationRegression("Full helmet", "FULL HELMET");
+        var reason = QualityControlWorkflow.CheckCapitalizationRegression("Full helmet", "FULL HELMET");
 
         Assert.NotNull(reason);
     }
@@ -76,7 +76,7 @@ public class QualityReviewWorkflowTests
     [InlineData("I", "I")] // single uppercase letter, no lowercase to regress from
     public void AllowsNonRegressingCorrections(string original, string corrected)
     {
-        var reason = QualityReviewWorkflow.CheckCapitalizationRegression(original, corrected);
+        var reason = QualityControlWorkflow.CheckCapitalizationRegression(original, corrected);
 
         Assert.Null(reason);
     }
@@ -106,6 +106,6 @@ public class QualityReviewWorkflowTests
     [InlineData("When the Buddha was first born, he roared like a lion, declaring that in heaven and on earth, none but I am supreme.", false)]
     public void ContainsLeakedProtocolTextDetectsLeaks(string correctedText, bool expectedLeak)
     {
-        Assert.Equal(expectedLeak, QualityReviewWorkflow.ContainsLeakedProtocolText(correctedText));
+        Assert.Equal(expectedLeak, QualityControlWorkflow.ContainsLeakedProtocolText(correctedText));
     }
 }

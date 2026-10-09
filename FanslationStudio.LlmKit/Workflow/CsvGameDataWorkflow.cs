@@ -103,7 +103,7 @@ public static class CsvGameDataWorkflow
         Directory.CreateDirectory(outputPath);
 
         config ??= ConfigurationExtensions.GetConfiguration(workingDirectory);
-        var qualityReview = config.QualityReview;
+        var qualityControl = config.QualityControl;
 
         var outputLines = new List<string>();
         var counts = new PackagingCounts();
@@ -133,7 +133,7 @@ public static class CsvGameDataWorkflow
 
                     // A QcRejected outcome still packages the plain pre-QC reconstruction, so only a
                     // missing result fails the row.
-                    var resolved = PackagingHelpers.ResolveFragments(fragments, template, textFile, qualityReview, anchorFallsBackToFirst: true);
+                    var resolved = PackagingHelpers.ResolveFragments(fragments, template, textFile, qualityControl, anchorFallsBackToFirst: true);
                     if (resolved.Text == null)
                     {
                         failed = true;
@@ -164,7 +164,7 @@ public static class CsvGameDataWorkflow
 
                         // Flags were checked above, so a missing result here only means no usable
                         // translation - which leaves an empty-Text cell untouched rather than failing.
-                        var resolved = PackagingHelpers.ResolvePlainSplit(split, qualityReview);
+                        var resolved = PackagingHelpers.ResolvePlainSplit(split, qualityControl);
 
                         if (resolved.Text != null)
                         {

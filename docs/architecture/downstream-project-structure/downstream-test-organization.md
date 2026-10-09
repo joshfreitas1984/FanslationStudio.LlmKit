@@ -13,7 +13,7 @@ DragonHeir:
 
 | File | Class | What it covers |
 | --- | --- | --- |
-| `QualityControlWorkflowTests.cs` | `QualityControlWorkflowTests` | Every QC-pass entry point: sample run, full run, apply-rules, triage, fix-prompt generation, and the numbered reset facts (see below). One dedicated file per major workflow (here, `QualityReviewWorkflow`) is the pattern to follow when a workflow has enough entry points/reset facts to justify its own file. |
+| `QualityControlWorkflowTests.cs` | `QualityControlWorkflowTests` | Every QC-pass entry point: sample run, full run, apply-rules, triage, fix-prompt generation, and the numbered reset facts (see below). One dedicated file per major workflow (here, `QualityControlWorkflow`) is the pattern to follow when a workflow has enough entry points/reset facts to justify its own file. |
 | `TranslationWorkflowTests.cs` | `TranslationWorkflowTests` | The main translate → apply-rules → translate-lines → find-failures → flag/clean-up-regex pipeline. Multiple loosely related `[Fact]`s share one file because they're sequential steps of the *same* linear workflow, not because the workflow is small. |
 | `FileInputWorkflowTests.cs` | `FileInputWorkflowTests` | Extraction-side steps: export assets/prefab-text into translated, IL2CPP string-map/column/name/poetry/etc. candidate extraction, dedupe, merge, line-count check. |
 | `FileOutputWorkflowTests.cs` | `FileOutputWorkflowTests` | Packaging-side steps: package to game files, zip release. |
@@ -38,9 +38,9 @@ alphabetical order:
 - **`"0. ..."` is reserved for a brute-force/reset/combined entry point** — something that resets
   or re-derives state from scratch rather than doing an incremental step. Two real examples:
   - `TranslationWorkflowTests`: `"0. Reset All Flags"`.
-  - `QualityControlWorkflowTests`: `"0. TranslateAndQualityReviewBruteForce"` — a **combined**
+  - `QualityControlWorkflowTests`: `"0. TranslateAndQualityControlBruteForce"` — a **combined**
     brute-force fact that runs `TranslationWorkflow.TranslateLinesBruteForce`, then
-    `QualityReviewWorkflow.RunBruteForce`, then packages, in one call. This exists specifically so
+    `QualityControlWorkflow.RunBruteForce`, then packages, in one call. This exists specifically so
     a "glossary changed / bad word added / game needs a repair" reset touches *both* the
     translation and QC brute-force paths and re-packages, instead of a human having to remember to
     run two separate numbered facts (`"1"` in `TranslationWorkflowTests` and a QC brute-force) and
@@ -54,14 +54,14 @@ alphabetical order:
   that file's workflow** — run `1`, then `2`, then `3`, etc. in a fresh pass. Gaps and
   re-used numbers happen legitimately when a fact is scoped to one purpose:
   `QualityControlWorkflowTests` has **three separate facts sharing the display number `"7."`**
-  (`"7. Reset Qc Retry Limits"`, `"7. Reset Low-Score Quality Review State"` appears alongside a
+  (`"7. Reset Qc Retry Limits"`, `"7. Reset Low-Score Quality Control State"` appears alongside a
   `"8."` and `"9."` too) — this is tolerated because they're alternative/branching reset paths for
   different situations at the same rough point in the sequence, not because the numbering is
   sloppy. Don't "fix" duplicate numbers by renumbering unless you're also verifying no doc/runbook
   cross-references the old number.
 - **Facts with no number in the `DisplayName` are one-off reset/regression facts**, not part of
-  the normal sequential run order — e.g. `"Reset Leaked Quality Review Corrections"`,
-  `"RunQualityReviewSampleForOneLine"`, `"QcOmittedSubjectRegression"`, `"Reset ALL Quality Review
+  the normal sequential run order — e.g. `"Reset Leaked Quality Control Corrections"`,
+  `"RunQualityControlSampleForOneLine"`, `"QcOmittedSubjectRegression"`, `"Reset ALL Quality Control
   State (full re-review)"`. These are named as full descriptive phrases (not "N. Verb Phrase") and
   typically exist to reproduce/guard against one specific historical bug or to let a developer
   target one row/file without perturbing the rest of the corpus's QC state.
@@ -74,7 +74,7 @@ alphabetical order:
 
 `WanXiangOverLlm`'s `QualityControlWorkflowTests.cs` had drifted onto a **`"3a"/"3b"/"3c"`
 sub-lettered scheme** for what DragonHeir numbers `"0"`–`"9"` as flat top-level steps, and was
-missing the `"0. TranslateAndQualityReviewBruteForce"` combined fact entirely (WanXiang only had
+missing the `"0. TranslateAndQualityControlBruteForce"` combined fact entirely (WanXiang only had
 the equivalent of DragonHeir's `"1"`/translation-only brute-force, with no QC-inclusive combined
 reset). A reconciliation pass (manual, or a future `upgrade-translation-project` skill run) against
 a QC test file should check for exactly these two things:

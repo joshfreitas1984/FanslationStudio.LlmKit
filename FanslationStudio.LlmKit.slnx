@@ -7,4 +7,5 @@
   <Project Path="FanslationStudio.Installer.Core/FanslationStudio.Installer.Core.csproj" />
   <Project Path="FanslationStudio.Installer.App/FanslationStudio.Installer.App.csproj" />
   <Project Path="Tests/FanslationStudio.LlmKit.Tests.csproj" />
+  <Project Path="FanslationStudio.LlmKit.Assessments/FanslationStudio.LlmKit.Assessments.csproj" />
 </Solution>

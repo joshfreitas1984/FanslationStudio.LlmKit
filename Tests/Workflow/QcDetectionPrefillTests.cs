@@ -7,7 +7,7 @@ using System.Text.Json;
 namespace Tests.Workflow;
 
 /// <summary>
-/// <see cref="QualityReviewConfig.DetectionPrefillEnabled"/> must append a trailing "DEFECTS:" assistant
+/// <see cref="QualityControlConfig.DetectionPrefillEnabled"/> must append a trailing "DEFECTS:" assistant
 /// message to the detection request only, and the parser must accept the answer with or without
 /// the echoed prefix.
 /// </summary>
@@ -31,15 +31,15 @@ public sealed class QcDetectionPrefillTests
         ApiKeyRequired = false,
         Model = "test-model",
         ModelParams = new Dictionary<string, object> { ["temperature"] = 0.15 },
-        Prompts = new Dictionary<string, string> { ["BaseQualityReviewPrompt"] = "detection system prompt" },
+        Prompts = new Dictionary<string, string> { ["BaseQualityControlPrompt"] = "detection system prompt" },
     };
 
     private static async Task<(JsonElement Messages, FanslationStudio.LlmKit.Support.QcDetectionResult Result)> DetectAsync(bool prefill, string reply)
     {
-        var config = new LlmConfig { QualityReview = new QualityReviewConfig { Enabled = true, DetectionPrefillEnabled = prefill } };
+        var config = new LlmConfig { QualityControl = new QualityControlConfig { Enabled = true, DetectionPrefillEnabled = prefill } };
         var handler = new CapturingHandler(reply);
         using var client = new HttpClient(handler);
-        var result = await QualityReviewWorkflow.DetectDefectsAsync(config, BuildModel(), client, "你好", "你好", "Hello", string.Empty, null);
+        var result = await QualityControlWorkflow.DetectDefectsAsync(config, BuildModel(), client, "你好", "你好", "Hello", string.Empty, null);
         return (JsonDocument.Parse(handler.LastBody!).RootElement.GetProperty("messages").Clone(), result);
     }
 
@@ -67,7 +67,7 @@ public sealed class QcDetectionPrefillTests
 
     [Fact(DisplayName = "Detection prefill is on by default")]
     public void DetectionPrefill_DefaultsToEnabled() =>
-        Assert.True(new QualityReviewConfig().DetectionPrefillEnabled);
+        Assert.True(new QualityControlConfig().DetectionPrefillEnabled);
 
     [Theory(DisplayName = "Prefilled detection parses a continuation without the DEFECTS: prefix")]
     [InlineData(" NONE")]

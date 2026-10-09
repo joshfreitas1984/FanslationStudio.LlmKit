@@ -7,7 +7,7 @@ using System.Text.Json;
 namespace Tests.Workflow;
 
 /// <summary>
-/// <see cref="QualityReviewConfig.PreVerificationGateEnabled"/>: a candidate the validation gate rejects
+/// <see cref="QualityControlConfig.PreVerificationGateEnabled"/>: a candidate the validation gate rejects
 /// is never verified; it goes straight to a repair told the gate's reason, and only a candidate that
 /// passes the gate reaches verification.
 /// </summary>
@@ -53,17 +53,17 @@ public sealed class QcPreVerificationGateTests
         ModelParams = new Dictionary<string, object> { ["temperature"] = 0.15 },
         Prompts = new Dictionary<string, string>
         {
-            ["BaseQualityReviewPrompt"] = "detection",
-            ["BaseQualityReviewCorrectionPrompt"] = "correction",
-            ["BaseQualityReviewVerificationPrompt"] = "verification",
-            ["BaseQualityReviewCorrectionRepairPrompt"] = "repair",
+            ["BaseQualityControlPrompt"] = "detection",
+            ["BaseQualityControlCorrectionPrompt"] = "correction",
+            ["BaseQualityControlVerificationPrompt"] = "verification",
+            ["BaseQualityControlCorrectionRepairPrompt"] = "repair",
         },
     };
 
     /// <summary>Gate: any candidate without "{1}" fails with <see cref="GateReason"/>.</summary>
     private static string? PlaceholderGate(string candidate) => candidate.Contains("{1}") ? null : GateReason;
 
-    private static async Task<(QualityReviewWorkflow.LlmVerdict Verdict, ScriptedHandler Handler)> RunAsync(
+    private static async Task<(QualityControlWorkflow.LlmVerdict Verdict, ScriptedHandler Handler)> RunAsync(
         Func<string, string?>? validator,
         Func<int, string> repairReply,
         Func<int, string>? verificationReply = null,
@@ -72,7 +72,7 @@ public sealed class QcPreVerificationGateTests
     {
         var config = new LlmConfig
         {
-            QualityReview = new QualityReviewConfig
+            QualityControl = new QualityControlConfig
             {
                 Enabled = true,
                 DoubledDetectionEnabled = false,
@@ -82,7 +82,7 @@ public sealed class QcPreVerificationGateTests
         var handler = new ScriptedHandler(_ => correction, repairReply, verificationReply ?? (_ => Accepted));
         using var client = new HttpClient(handler);
 
-        var verdict = await QualityReviewWorkflow.GetLlmVerdictAsync(
+        var verdict = await QualityControlWorkflow.GetLlmVerdictAsync(
             config, BuildModel(), client, "{0}与{1}", "{0}与{1}", "{0} and {1}", string.Empty, candidateValidator: validator);
         return (verdict, handler);
     }
@@ -149,5 +149,5 @@ public sealed class QcPreVerificationGateTests
 
     [Fact(DisplayName = "PreVerificationGateEnabled defaults to on")]
     public void PreVerificationGate_DefaultsToEnabled() =>
-        Assert.True(new QualityReviewConfig().PreVerificationGateEnabled);
+        Assert.True(new QualityControlConfig().PreVerificationGateEnabled);
 }

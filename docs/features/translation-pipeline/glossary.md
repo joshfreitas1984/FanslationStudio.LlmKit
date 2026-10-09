@@ -1,6 +1,6 @@
 # Glossary feature
 
-The glossary provides consistent term translations to the primary translation and quality-review prompts. It can also make a result fail validation when a configured term is mistranslated or appears where the source did not contain it.
+The glossary provides consistent term translations to the primary translation and quality-control prompts. It can also make a result fail validation when a configured term is mistranslated or appears where the source did not contain it.
 
 Glossary entries are loaded at configuration time and stored as `GlossaryLine` records in `LlmConfig.Runtime.GlossaryLines`. The glossary is separate from `ManualTranslations`: glossary entries guide the model and participate in validation, while manual translations are direct authored replacements.
 

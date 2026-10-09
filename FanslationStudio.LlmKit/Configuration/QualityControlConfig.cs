@@ -3,14 +3,14 @@ using FanslationStudio.LlmKit.Support;
 namespace FanslationStudio.LlmKit.Configuration;
 
 /// <summary>
-/// Config for the post-translation quality review pass (see docs/plans/quality-review-pass.md,
-/// DragonHierOverLlm repo). Corresponds to a <c>qualityReview:</c> section in <c>Config.yaml</c>.
+/// Config for the post-translation quality control pass (see docs/plans/quality-control-pass.md,
+/// DragonHierOverLlm repo). Corresponds to a <c>qualityControl:</c> section in <c>Config.yaml</c>.
 /// Defaults leave the whole feature a documented no-op (<see cref="Enabled"/> = false) for any
 /// project/run that doesn't opt in - no packaging or workflow behavior changes unless a split
 /// actually has a non-null <see cref="Support.TranslationSplit.QcQualityScore"/>, which only ever
-/// happens after <see cref="Workflow.QualityReviewWorkflow"/> has run.
+/// happens after <see cref="Workflow.QualityControlWorkflow"/> has run.
 /// </summary>
-public class QualityReviewConfig
+public class QualityControlConfig
 {
     public bool Enabled { get; set; } = false;
 
@@ -46,7 +46,7 @@ public class QualityReviewConfig
     public int MinAcceptableScore { get; set; } = 70;
 
     /// <summary>
-    /// How many times <see cref="Workflow.QualityReviewWorkflow.ApplyRulesToCurrentQcTranslated"/>
+    /// How many times <see cref="Workflow.QualityControlWorkflow.ApplyRulesToCurrentQcTranslated"/>
     /// will reset and retry the SAME underlying translation's QC correction before giving up on it
     /// (see <see cref="Support.TranslationSplit.QcRuleCheckFailureCount"/>) and surfacing it for a
     /// human instead. Unlike a normal translation attempt - where more resampling attempts keep
@@ -61,7 +61,7 @@ public class QualityReviewConfig
 
     /// <summary>
     /// How many extra "that broke the bad-words list, try again" turns
-    /// <see cref="Workflow.QualityReviewWorkflow.GetLlmVerdictAsync"/> will spend in-line, within
+    /// <see cref="Workflow.QualityControlWorkflow.GetLlmVerdictAsync"/> will spend in-line, within
     /// the same LLM call/cache entry, when a freshly proposed correction matches
     /// <see cref="Workflow.TranslationWorkflow.MatchesBadWords"/>, before giving up and handing the
     /// candidate back as-is for the normal accept/reject gate and <see cref="MaxRuleCheckRetries"/>-
@@ -71,13 +71,13 @@ public class QualityReviewConfig
     /// after being told exactly what's wrong" case - this budget is spent inside one LLM round-trip
     /// session (a live conversation, not a fresh cold-started run), so it converges a stuck
     /// bad-words rejection in seconds instead of over several separate QC passes. See
-    /// docs/features/translation-pipeline/quality-review-pass.md "Inline rule-check retries".
+    /// docs/features/translation-pipeline/quality-control-pass.md "Inline rule-check retries".
     /// </summary>
     public int InlineRuleCheckRetries { get; set; } = 0;
 
     /// <summary>
-    /// Bounds how many times call 5 (<see cref="Workflow.QualityReviewWorkflow.GetCorrectionRepairAsync"/>)
-    /// will attempt to improve a correction call 4 (<see cref="Workflow.QualityReviewWorkflow.GetVerificationVerdictAsync"/>)
+    /// Bounds how many times call 5 (<see cref="Workflow.QualityControlWorkflow.GetCorrectionRepairAsync"/>)
+    /// will attempt to improve a correction call 4 (<see cref="Workflow.QualityControlWorkflow.GetVerificationVerdictAsync"/>)
     /// found unresolved/regressed, re-verifying against the full confirmed defect set via call 4
     /// after each attempt, before accepting whatever the last attempt was (still flagged via
     /// <see cref="Support.TranslationSplit.FlaggedForQcReview"/> if still unresolved/below threshold -
@@ -89,9 +89,9 @@ public class QualityReviewConfig
     /// <summary>
     /// DEFECT categories (see <see cref="QcDefectCategory"/>) a human has determined - by
     /// hand-validating a per-category sample from
-    /// <see cref="Workflow.QualityReviewWorkflow.GetQcTriageAsync"/>'s <c>ByDefectCategory</c>
+    /// <see cref="Workflow.QualityControlWorkflow.GetQcTriageAsync"/>'s <c>ByDefectCategory</c>
     /// output (written to <c>TestResults/QcTriageByDefectCategory.yaml</c> by
-    /// <see cref="Workflow.QualityReviewWorkflow.WriteTriageReportAsync"/>) and computing that
+    /// <see cref="Workflow.QualityControlWorkflow.WriteTriageReportAsync"/>) and computing that
     /// category's precision (genuine defects / sample size) - are low-precision enough (at or near
     /// 0%) that every flagged line in that category should be trusted/packaged wholesale despite
     /// its low <see cref="Support.TranslationSplit.QcQualityScore"/>, instead of held back for full
@@ -104,20 +104,20 @@ public class QualityReviewConfig
     /// regardless of what its eventual measured precision turns out to be - this is a deliberate
     /// per-category opt-in, not a default that could silently change behavior for a category nobody
     /// has actually hand-validated yet. Checked by
-    /// <see cref="Utility.QualityReviewHelpers.PassesQcScoreGate"/>, the single choke point every
+    /// <see cref="Utility.QualityControlHelpers.PassesQcScoreGate"/>, the single choke point every
     /// packaging path uses for this decision - see its doc comment.
     /// </summary>
     public HashSet<QcDefectCategory> AutoAcceptDefectCategories { get; set; } = new();
 
     /// <summary>
-    /// Runs call 4 (<see cref="Workflow.QualityReviewWorkflow.GetVerificationVerdictAsync"/>) with
+    /// Runs call 4 (<see cref="Workflow.QualityControlWorkflow.GetVerificationVerdictAsync"/>) with
     /// Ollama's `think` mode on, instead of production's normal thinking-off default (see
     /// <see cref="Utility.LlmHelpers.GenerateLlmRequestData"/>). Call 4 only runs for the subset of a
     /// corpus calls 1/2 confirm at least one named defect on - the call where reasoning is most
     /// likely to help without paying for it across the whole corpus. Never affects calls 1/2
-    /// (<see cref="Workflow.QualityReviewWorkflow.GetLlmVerdictAsync"/>), call 3
-    /// (<see cref="Workflow.QualityReviewWorkflow.GetLlmVerdictAsync"/>'s correction generation), or
-    /// call 5 (<see cref="Workflow.QualityReviewWorkflow.GetCorrectionRepairAsync"/>).
+    /// (<see cref="Workflow.QualityControlWorkflow.GetLlmVerdictAsync"/>), call 3
+    /// (<see cref="Workflow.QualityControlWorkflow.GetLlmVerdictAsync"/>'s correction generation), or
+    /// call 5 (<see cref="Workflow.QualityControlWorkflow.GetCorrectionRepairAsync"/>).
     ///
     /// Reasoning tokens are generated into the SAME num_predict/num_ctx budget as the final
     /// UNRESOLVED:/NEW_DEFECTS:/SCORE: answer, so this deliberately does NOT swap in a bigger budget
@@ -128,7 +128,7 @@ public class QualityReviewConfig
     /// to 8192/4096) for a reasoning trace to fit before this flag is turned on, or a real reasoning
     /// trace can consume the whole budget before the model ever reaches SCORE:, turning a
     /// would-be-good verification into an unparseable/unscored one (see
-    /// <see cref="Workflow.QualityReviewWorkflow.GetVerificationVerdictAsync"/>'s parse-failure
+    /// <see cref="Workflow.QualityControlWorkflow.GetVerificationVerdictAsync"/>'s parse-failure
     /// branch) instead of an actual quality read. The reasoning trace itself is still always
     /// discarded before parsing (<see cref="TranslationService.TranslateMessagesAsync"/>'s
     /// `includeThinking` stays false) - only the final labeled lines ever reach the regexes.
@@ -141,7 +141,7 @@ public class QualityReviewConfig
     public bool VerificationThinkingEnabled { get; set; } = false;
 
     /// <summary>
-    /// Runs detection (calls 1/2, <see cref="Workflow.QualityReviewWorkflow.DetectDefectsAsync"/>)
+    /// Runs detection (calls 1/2, <see cref="Workflow.QualityControlWorkflow.DetectDefectsAsync"/>)
     /// twice and merges via <see cref="Support.QcDetectionResult.Merge"/> (a set union - doubling can
     /// only match or exceed a single call's catch rate), instead of trusting call 1 alone. Measured
     /// in docs/investigations/tests/qc-evaluator-model-selection.md: a real but thin recall lift
@@ -155,7 +155,7 @@ public class QualityReviewConfig
 
     /// <summary>
     /// Overrides the QC model's <c>modelParams.temperature</c> for detection calls only
-    /// (<see cref="Workflow.QualityReviewWorkflow.DetectDefectsAsync"/>); null keeps the model's own
+    /// (<see cref="Workflow.QualityControlWorkflow.DetectDefectsAsync"/>); null keeps the model's own
     /// value. Detection is a classification, so 0 makes the same SOURCE/TRANSLATION always get the
     /// same verdict - at Qwen38's 0.15 an identical request was observed to return NONE on one call
     /// and DROPPED_CONTENT on the next, which shows up as run-to-run label flips on the gold set.
@@ -167,7 +167,7 @@ public class QualityReviewConfig
     public double? DetectionTemperature { get; set; }
 
     /// <summary>
-    /// Pre-fills the detection reply (calls 1/2) with <see cref="Workflow.QualityReviewWorkflow.DetectionReplyPrefill"/>
+    /// Pre-fills the detection reply (calls 1/2) with <see cref="Workflow.QualityControlWorkflow.DetectionReplyPrefill"/>
     /// by sending it as a trailing assistant message, so the model generates only the answer
     /// (<c>NONE</c>, a category list) instead of also spending decode steps on the fixed
     /// <c>DEFECTS:</c> label. Decode time is ~50ms per output token and dominates a detection call,
@@ -182,19 +182,19 @@ public class QualityReviewConfig
     /// <summary>
     /// Runs the validation gate (the same rule check a finished correction must pass before it is
     /// accepted) on every correction/repair candidate inside the verify/repair loop of
-    /// <see cref="Workflow.QualityReviewWorkflow.GetLlmVerdictAsync"/>, before the verification call.
+    /// <see cref="Workflow.QualityControlWorkflow.GetLlmVerdictAsync"/>, before the verification call.
     /// A candidate that fails skips verification and goes straight to a repair call that is told the
     /// gate's concrete failure reason (e.g. "Restore `{3}`..."); repairs count against
     /// <see cref="MaxScoreRepairIterations"/>. Without this, a candidate that drops a placeholder is
     /// verified, repaired against a bare category name (usually returned unchanged), and then rejected
     /// by the gate anyway. The final gate in ReviewColumnAsync still runs either way. On by default;
-    /// see docs/investigations/quality-review-postmortems.md "Correction cost" for the measurement.
+    /// see docs/investigations/quality-control-postmortems.md "Correction cost" for the measurement.
     /// </summary>
     public bool PreVerificationGateEnabled { get; set; } = true;
 
     /// <summary>
-    /// Verifies with BaseQualityReviewVerificationEvidencePrompt instead of
-    /// BaseQualityReviewVerificationPrompt: the verifier must quote, per unresolved/new defect, the
+    /// Verifies with BaseQualityControlVerificationEvidencePrompt instead of
+    /// BaseQualityControlVerificationPrompt: the verifier must quote, per unresolved/new defect, the
     /// SOURCE text the candidate fails to render or the wrong words in the candidate. A claim whose
     /// quote is not actually there is dropped (see
     /// <see cref="Workflow.QcVerificationResponseParser.FilterByEvidence"/>) - aimed at the verifier

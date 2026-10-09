@@ -148,7 +148,7 @@ public static class JsonGameDataWorkflow
         Directory.CreateDirectory(outputPath);
 
         config ??= ConfigurationExtensions.GetConfiguration(workingDirectory);
-        var qualityReview = config.QualityReview;
+        var qualityControl = config.QualityControl;
 
         var outputArray = new JsonArray();
         var counts = new PackagingCounts();
@@ -172,7 +172,7 @@ public static class JsonGameDataWorkflow
                     var fragments = group.OrderBy(s => s.SubIndex).ToList();
                     var template = templatesByPath.GetValueOrDefault(splitPath);
 
-                    var (ok, packagedText) = PackageField(fragments, template, textFile, qualityReview, config);
+                    var (ok, packagedText) = PackageField(fragments, template, textFile, qualityControl, config);
 
                     if (!ok)
                     {
@@ -199,7 +199,7 @@ public static class JsonGameDataWorkflow
     }
 
     private static (bool Ok, string Text) PackageField(
-        List<TranslationSplit> fragments, FieldTemplate? template, TextFileToSplit textFile, QualityReviewConfig qualityReview,
+        List<TranslationSplit> fragments, FieldTemplate? template, TextFileToSplit textFile, QualityControlConfig qualityControl,
         LlmConfig config)
     {
         if (fragments.Count == 0)
@@ -208,7 +208,7 @@ public static class JsonGameDataWorkflow
         // A plain field goes through the same path with no template (its single split is its own
         // anchor), so QC is consulted before its flags. A QcRejected outcome still packages the
         // plain pre-QC translation, so only a missing result is a failure.
-        var resolved = PackagingHelpers.ResolveFragments(fragments, template, textFile, qualityReview, anchorFallsBackToFirst: true);
+        var resolved = PackagingHelpers.ResolveFragments(fragments, template, textFile, qualityControl, anchorFallsBackToFirst: true);
         if (resolved.Text == null)
             return (false, string.Empty);
 
