@@ -23,11 +23,57 @@ public static class TranslationAssessmentWorkflow
         if (settings.ModelNames.Count == 0)
             throw new InvalidOperationException("TranslationAssessment.ModelNames must contain at least one configured model.");
 
+        if (string.Equals(settings.Source, "goldSet", StringComparison.OrdinalIgnoreCase))
+        {
+            var (goldSamples, goldGlossaries) = LoadGoldSetSamples(workingDirectory, settings.GoldSetPath);
+            await RunSamplesAsync(workingDirectory, config, settings, goldSamples, goldSamples.Sum(x => (long)x.Source.Length),
+                [GoldTextFile], goldGlossaries, hooks);
+            return;
+        }
+
         var (samples, totalCorpusCharacters) = LoadSamples(workingDirectory, textFiles, settings.SampleSize,
             settings.FullCellSampleRatio, settings.SampleSeed, settings.PinnedSampleSources);
         if (samples.Count == 0)
             throw new InvalidOperationException("The translation assessment found no translatable samples under Raw/Export.");
 
+        await RunSamplesAsync(workingDirectory, config, settings, samples, totalCorpusCharacters, textFiles, null, hooks);
+    }
+
+    /// <summary>Gold rows have no output file; rule checks and glossary scoping see an empty-path CSV file, as in the QC assessment.</summary>
+    private static readonly TextFileToSplit GoldTextFile = new() { Path = string.Empty, TextFileType = TextFileType.RawCsv };
+
+    /// <summary>
+    /// One sample per gold case (detection items and correction samples), keyed by the case's sample ID,
+    /// plus each case's glossary snapshot (cases without one use the loaded config's glossary).
+    /// </summary>
+    internal static (List<AssessmentSample> Samples, Dictionary<string, List<GlossaryLine>> Glossaries) LoadGoldSetSamples(
+        string workingDirectory, string goldSetPath)
+    {
+        var path = Path.Combine(workingDirectory, goldSetPath.Replace('/', Path.DirectorySeparatorChar));
+        if (!File.Exists(path))
+            throw new FileNotFoundException("Translation assessment gold set was not found.", path);
+
+        var goldSet = QualityControlAssessmentWorkflow.LoadGoldSet(File.ReadAllText(path));
+        var cases = goldSet.Items.Select(x => (x.SampleId, x.Source, x.Glossary))
+            .Concat(goldSet.CorrectionSamples.Select(x => (x.SampleId, x.Source, x.Glossary)))
+            .Where(x => !string.IsNullOrWhiteSpace(x.Source))
+            .ToList();
+
+        var samples = cases.Select(x => new AssessmentSample { SampleId = x.SampleId, FilePath = string.Empty, Source = x.Source }).ToList();
+        var glossaries = cases.Where(x => x.Glossary != null).ToDictionary(x => x.SampleId, x => x.Glossary!);
+        return (samples, glossaries);
+    }
+
+    private static async Task RunSamplesAsync(
+        string workingDirectory,
+        LlmConfig config,
+        TranslationAssessmentConfig settings,
+        List<AssessmentSample> samples,
+        long totalCorpusCharacters,
+        TextFileToSplit[] textFiles,
+        Dictionary<string, List<GlossaryLine>>? caseGlossaries,
+        GameHooks? hooks)
+    {
         var outputDirectory = Path.Combine(workingDirectory, settings.OutputPath.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(outputDirectory);
 
@@ -41,9 +87,9 @@ public static class TranslationAssessmentWorkflow
 
             Console.WriteLine($"Assessment model {modelIndex + 1}/{settings.ModelNames.Count}: {modelName} ({samples.Count} samples)");
             var report = await RunModelAsync(workingDirectory, outputDirectory, config, modelName, model,
-                samples, totalCorpusCharacters, textFiles, hooks);
+                samples, totalCorpusCharacters, textFiles, caseGlossaries, hooks);
             modelReports.Add(report);
-            Console.WriteLine($"Assessment model complete: {modelName} | {report.Completed} completed, {report.Failed} failed | {report.ElapsedMilliseconds}ms");
+            Console.WriteLine($"Assessment model complete: {modelName} | {report.Completed} completed, {report.Failed} failed, {report.DetectorFlagged} detector-flagged | {report.ElapsedMilliseconds}ms");
         }
 
         var comparison = new TranslationAssessmentComparison
@@ -66,6 +112,7 @@ public static class TranslationAssessmentWorkflow
         IReadOnlyList<AssessmentSample> samples,
         long totalCorpusCharacters,
         TextFileToSplit[] textFiles,
+        Dictionary<string, List<GlossaryLine>>? caseGlossaries,
         GameHooks? hooks)
     {
         var modelDirectory = Path.Combine(outputDirectory, SafeName(modelName));
@@ -104,6 +151,9 @@ public static class TranslationAssessmentWorkflow
             Console.WriteLine($"  [{sampleIndex + 1}/{samples.Count}] {modelName} | {sample.FilePath} | {sample.Source[..Math.Min(60, sample.Source.Length)]}");
             var stopwatch = Stopwatch.StartNew();
             ValidationResult result;
+            var runGlossary = config.Runtime.GlossaryLines;
+            if (caseGlossaries != null && caseGlossaries.TryGetValue(sample.SampleId, out var snapshot))
+                config.Runtime.GlossaryLines = snapshot;
             try
             {
                 result = await TranslationService.TranslateSplitAsync(config, sample.Source, client, textFile,
@@ -115,6 +165,11 @@ public static class TranslationAssessmentWorkflow
                 {
                     CorrectionPrompt = exception.Message,
                 };
+            }
+
+            finally
+            {
+                config.Runtime.GlossaryLines = runGlossary;
             }
 
             stopwatch.Stop();
@@ -130,6 +185,7 @@ public static class TranslationAssessmentWorkflow
                 StructuralPass = result.Valid && !LineValidation.ContainsCjk(result.Result),
                 ElapsedMilliseconds = stopwatch.ElapsedMilliseconds,
                 Error = result.Valid ? string.Empty : result.CorrectionPrompt,
+                DetectorFindings = result.Valid ? DetectFindings(sample.Source, result.Result) : [],
             });
             // Keep the resume set in step with report.Results, which now holds only this attempt.
             if (result.Valid)
@@ -158,6 +214,17 @@ public static class TranslationAssessmentWorkflow
         report.P95Milliseconds = Percentile(report.Results.Select(x => x.ElapsedMilliseconds), 0.95);
         WriteYamlAtomically(resultPath, report);
         return report.ToSummary();
+    }
+
+    /// <summary>Deterministic per-case checks on a finished translation (no LLM): the known defect shapes that need no judge.</summary>
+    internal static List<string> DetectFindings(string source, string translation)
+    {
+        var findings = new List<string>();
+        if (LineValidation.ContainsCjk(translation))
+            findings.Add("LeftoverCjk");
+        if (LineValidation.LosesSelfReference(source, translation))
+            findings.Add("SelfReferenceLost");
+        return findings;
     }
 
     private static AssessmentModelResultFile LoadOrCreateReport(string path, string modelName,
@@ -314,7 +381,7 @@ public static class TranslationAssessmentWorkflow
         File.Move(temporaryPath, path, true);
     }
 
-    private sealed class AssessmentSample
+    internal sealed class AssessmentSample
     {
         public string SampleId { get; set; } = string.Empty;
         public string SampleKind { get; set; } = "split";
@@ -346,6 +413,7 @@ public static class TranslationAssessmentWorkflow
             Completed = Results.Count(x => x.Status == "completed"),
             Failed = Results.Count(x => x.Status == "failed"),
             StructuralPassRate = Results.Count == 0 ? 0 : Results.Count(x => x.StructuralPass) / (double)Results.Count,
+            DetectorFlagged = Results.Count(x => x.DetectorFindings.Count > 0),
             ElapsedMilliseconds = ElapsedMilliseconds,
             EstimatedFullCorpusMilliseconds = EstimatedFullCorpusMilliseconds,
             CharactersPerSecond = CharactersPerSecond,
@@ -368,6 +436,9 @@ public static class TranslationAssessmentWorkflow
         public string Error { get; set; } = string.Empty;
         public int? HumanAccuracyScore { get; set; }
         public string HumanReviewNotes { get; set; } = string.Empty;
+
+        /// <summary>Deterministic findings on <see cref="Translation"/> (see <see cref="TranslationAssessmentWorkflow"/>); empty when clean.</summary>
+        public List<string> DetectorFindings { get; set; } = [];
     }
 
     private sealed class TranslationAssessmentComparison
@@ -386,6 +457,7 @@ public static class TranslationAssessmentWorkflow
         public int Completed { get; set; }
         public int Failed { get; set; }
         public double StructuralPassRate { get; set; }
+        public int DetectorFlagged { get; set; }
         public long ElapsedMilliseconds { get; set; }
         public long EstimatedFullCorpusMilliseconds { get; set; }
         public double CharactersPerSecond { get; set; }

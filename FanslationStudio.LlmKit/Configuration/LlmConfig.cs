@@ -124,6 +124,16 @@ public class TranslationAssessmentConfig
     public string OutputPath { get; set; } = "TestResults/ModelAssessment";
 
     /// <summary>
+    /// <c>game</c> (default): sample from the game's Raw/Export. <c>goldSet</c>: translate the QC gold
+    /// set's own sources (<see cref="GoldSetPath"/>) with each case's glossary snapshot, so the run
+    /// needs no game - the regression mode used by the LlmKit assessment host.
+    /// </summary>
+    public string Source { get; set; } = "game";
+
+    /// <summary>Gold set to translate when <see cref="Source"/> is <c>goldSet</c>.</summary>
+    public string GoldSetPath { get; set; } = "GoldSets/ChineseToEnglishWuxia.yaml";
+
+    /// <summary>
     /// Exact source cell/split text (matched verbatim against the Raw/Export candidates built by
     /// <see cref="TranslationAssessmentWorkflow"/>) always included in the sample regardless of
     /// <see cref="SampleSeed"/>/<see cref="SampleSize"/> random selection - e.g. known regression

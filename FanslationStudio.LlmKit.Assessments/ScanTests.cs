@@ -107,6 +107,35 @@ public class ScanTests
         Assert.NotEmpty(games);
     }
 
+    /// <summary>
+    /// Workstream C2: candidate gold cases from each game's flagged and FailedValidation splits (game,
+    /// sourceFile and glossary snapshot filled in; label left empty for a human). Sources already in the
+    /// gold set are skipped. Review with the <c>expand-goldset</c> skill.
+    /// </summary>
+    [ManualFact(DisplayName = "5. Mine gold-set candidates from flagged QC items")]
+    public void MineGoldSetCandidates()
+    {
+        var games = LoadGames();
+        var existing = new HashSet<string>();
+        if (File.Exists(AssessmentPaths.GoldSet))
+        {
+            var goldSet = FanslationStudio.LlmKit.Workflow.QualityControlAssessmentWorkflow.LoadGoldSet(File.ReadAllText(AssessmentPaths.GoldSet));
+            foreach (var source in goldSet.Items.Select(x => x.Source).Concat(goldSet.CorrectionSamples.Select(x => x.Source)))
+                existing.Add(source);
+        }
+
+        var flagged = games.ToDictionary(g => g.Name, g => GoldCaseMining.ReadFlagged(g.Name, g.FilesPath));
+        foreach (var game in games)
+            Console.WriteLine($"{game.Name}: {flagged[game.Name].Count} flagged/failed splits, " +
+                string.Join(", ", flagged[game.Name].GroupBy(f => f.Category).OrderByDescending(g => g.Count()).Select(g => $"{g.Key}={g.Count()}")));
+
+        var candidates = GoldCaseMining.Select(games, g => flagged[g.Name], existing, perGroup: 8);
+        Directory.CreateDirectory(Path.Combine(AssessmentPaths.WorkingDirectory, "TestResults", "Mining"));
+        var path = Path.Combine(AssessmentPaths.WorkingDirectory, "TestResults", "Mining", "candidates.yaml");
+        File.WriteAllText(path, YamlHelper.CreateSerializer().Serialize(candidates), new UTF8Encoding(false));
+        Console.WriteLine($"{candidates.Count} candidates -> {path}");
+    }
+
     /// <summary>The preset-change impact scan: per game, how many existing translations use each old result in <c>Files/PresetChanges.yaml</c>.</summary>
     [ManualFact(DisplayName = "4. Scan: preset change impact")]
     public void PresetChangeImpact()

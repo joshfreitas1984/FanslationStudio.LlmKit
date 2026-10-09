@@ -12,6 +12,12 @@ public class AssessmentTests
         await QualityControlAssessmentWorkflow.RunAsync(AssessmentPaths.WorkingDirectory);
     }
 
+    [ManualFact(DisplayName = "1b. Assess configured translation models (gold set)")]
+    public async Task AssessConfiguredTranslationModels()
+    {
+        await TranslationAssessmentWorkflow.RunAsync(AssessmentPaths.WorkingDirectory, []);
+    }
+
     /// <summary>
     /// One-off upgrade of a game's schema-1 gold set into this host's schema-2 set: stamps each case
     /// with the game and the glossary entries that applied to it (preset + that game's glossary).

@@ -131,6 +131,27 @@ Before importing a large glossary, use `GlossaryWorkflow.AnalyseGlossaryForIssue
 
 These are diagnostics, not automatic corrections. Review the output before changing entries, especially for short terms that naturally occur inside longer names.
 
+## Where a glossary line lives: preset or game
+
+Decide the scope before writing the line. The preset is injected into every game, so it carries only what
+every wuxia game would translate the same way.
+
+| Ask | Preset (LlmKit) | Game glossary |
+| --- | --- | --- |
+| Is it a proper noun (person, place, faction, skill, item, event)? | No (sect and place *types* only) | **Yes** |
+| Would any wuxia game use the same translation? | **Yes** (掌门 "Sect Leader", 少侠 "Young Hero") | No |
+| Is it a game UI or stat label? | Only if two or more games use the same term | **Yes** by default |
+| Does the same source need a different translation in another game? | No (the preset is shared) | **Yes**, as an override, with a comment saying why |
+| Is it a phrase or sentence rather than a term? | **Never** | Only as a `ManualTranslations` override for one exact line |
+| Is it a single character, or likely to sit inside names or idioms? | **Never** | Only with `only:` scoping |
+
+Before adding or changing a **preset** line, run the Assessments host's deterministic scans (the preset
+corpus audit and the preset-change impact, `FanslationStudio.LlmKit.Assessments/ScanTests.cs`, `LLMKIT_ASSESSMENTS=1`)
+and note the per-game counts. A change that alters translations already shipped in a game needs a decision:
+re-translate, or a mechanical swap (see the 真人 "Daoist" change in
+[`investigations/preset-glossary-audit-2026-10.md`](../../investigations/preset-glossary-audit-2026-10.md)). The
+`PresetGlossaryLintTests` in `Tests/Configuration/` enforce the shapes that are never valid in the preset.
+
 ## Recommended glossary workflow
 
 1. Disable preset categories that are not appropriate for the game, if needed.

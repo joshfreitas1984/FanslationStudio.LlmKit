@@ -27,3 +27,12 @@ qualityControlAssessment:
     - Qwen38Qc-IQ4XS
   goldSetPath: GoldSets/ChineseToEnglishWuxia.yaml
   outputPath: TestResults/QcAssessment
+translationAssessment:
+  enabled: true
+  # Translates the gold set's own sources with each case's glossary snapshot (no game needed) and
+  # reports speed, structural validity and deterministic per-case findings.
+  source: goldSet
+  goldSetPath: GoldSets/ChineseToEnglishWuxia.yaml
+  modelNames:
+    - Qwen38Qc-IQ4XS
+  outputPath: TestResults/ModelAssessment
