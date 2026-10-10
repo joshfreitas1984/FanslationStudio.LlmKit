@@ -1,17 +1,17 @@
 # Dates
-- raw: 年
-  result: Year
-  direct: Year
-  literal: Nian
-  badtrans: false
-- raw: 日
-  result: Day
-  direct: Day
-  literal: Ri
-  badtrans: false
-- raw: 秒
-  result: Second
-  direct: Second
-  literal: Miao
-  allowalt:
-    - quick
+# - raw: 年
+#   result: Year
+#   direct: Year
+#   literal: Nian
+#   badtrans: false
+# - raw: 日
+#   result: Day
+#   direct: Day
+#   literal: Ri
+#   badtrans: false
+# - raw: 秒
+#   result: Second
+#   direct: Second
+#   literal: Miao
+#   allowalt:
+#     - quick

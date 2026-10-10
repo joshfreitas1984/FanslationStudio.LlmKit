@@ -4508,7 +4508,7 @@ items:
   sampleKind: split
   source: "今日崔命官......死得其所......"
   candidates:
-    ProductionTranslation: "Today, Cui Minguan... died as he should have..."
+    ProductionTranslation: "Today, Cui Mingguan... died as he should have..."
   labels:
     ProductionTranslation:
       label: Pass
@@ -4522,7 +4522,7 @@ items:
   game: DragonHierOverLlm
   glossary:
   - raw: 崔命官
-    result: Cui Minguan
+    result: Cui Mingguan
 - sampleId: 0c832136063dc3a7
   sampleKind: split
   source: "万一让计心狂探听到风声，肯定会溜之大吉。"
