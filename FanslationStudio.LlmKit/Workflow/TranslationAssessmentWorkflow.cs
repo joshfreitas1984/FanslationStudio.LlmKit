@@ -224,6 +224,8 @@ public static class TranslationAssessmentWorkflow
             findings.Add("LeftoverCjk");
         if (LineValidation.LosesSelfReference(source, translation))
             findings.Add("SelfReferenceLost");
+        if (LineValidation.FindPromptLeak(source, translation) != null)
+            findings.Add("PromptLeak");
         return findings;
     }
 

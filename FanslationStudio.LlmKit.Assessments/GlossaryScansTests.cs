@@ -1,3 +1,4 @@
+using FanslationStudio.LlmKit;
 using FanslationStudio.LlmKit.Support;
 
 namespace FanslationStudio.LlmKit.Assessments;
@@ -36,6 +37,22 @@ public class GlossaryScansTests
     public void ChangeImpactCountsOldResult()
     {
         Assert.Equal((3, 2), GlossaryScans.ChangeImpact(Lines, "掌门", "Sect"));
+    }
+
+    [Fact(DisplayName = "Prompt-leak detector - flags echoed correction-prompt text and nothing else")]
+    public void PromptLeakDetectorFlagsEchoedPrompt()
+    {
+        List<CorpusLine> lines =
+        [
+            new("f", "那小姑娘哭了", "While correcting, also verify: The girl cried"),
+            new("f", "那小姑娘哭了", "The girl cried"),
+            new("f", "他纠正了姿势", "He fixed his stance while correcting the form"),
+            new("f", "好", "Gender‑neutral language only"),
+        ];
+
+        var flagged = GlossaryScans.Flagged(lines, l => LineValidation.FindPromptLeak(l.Source, l.Translated) != null);
+
+        Assert.Equal([0, 3], flagged.Select(l => lines.IndexOf(l)).ToArray());
     }
 
     [Fact(DisplayName = "Glossary scans - detector blast radius returns the flagged lines")]

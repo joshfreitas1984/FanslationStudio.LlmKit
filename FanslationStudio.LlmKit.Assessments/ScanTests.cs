@@ -1,4 +1,5 @@
 using System.Text;
+using FanslationStudio.LlmKit;
 using FanslationStudio.LlmKit.Configuration;
 using FanslationStudio.LlmKit.Utility;
 
@@ -134,6 +135,31 @@ public class ScanTests
         var path = Path.Combine(AssessmentPaths.WorkingDirectory, "TestResults", "Mining", "candidates.yaml");
         File.WriteAllText(path, YamlHelper.CreateSerializer().Serialize(candidates), new UTF8Encoding(false));
         Console.WriteLine($"{candidates.Count} candidates -> {path}");
+    }
+
+    /// <summary>
+    /// Detector blast radius for <see cref="LineValidation.FindPromptLeak"/>: translations that echo the correction
+    /// prompt ("While correcting, also verify: ...") into the English. Per game and phrase, with examples.
+    /// </summary>
+    [ManualFact(DisplayName = "6. Scan: prompt-leak detector")]
+    public void PromptLeakDetector()
+    {
+        var games = LoadGames();
+        var report = new StringBuilder("# Prompt-leak detector\n\nTranslated field (pre-QC) of every split; a phrase the source itself contains is not a leak.\n");
+        foreach (var game in games)
+        {
+            var flagged = GlossaryScans.Flagged(game.Lines, l => LineValidation.FindPromptLeak(l.Source, l.Translated) != null);
+            report.AppendLine($"\n## {game.Name}: {flagged.Count} of {game.Lines.Count} splits\n");
+            foreach (var group in flagged.GroupBy(l => LineValidation.FindPromptLeak(l.Source, l.Translated)).OrderByDescending(g => g.Count()))
+                report.AppendLine($"- `{group.Key}`: {group.Count()}");
+            report.AppendLine("\nBy file: " + string.Join(", ", flagged.GroupBy(l => l.File).OrderByDescending(g => g.Count()).Take(8).Select(g => $"{g.Key} {g.Count()}")));
+            report.AppendLine("\n| Source | Translation |\n| --- | --- |");
+            foreach (var line in flagged.Take(5))
+                report.AppendLine($"| {Escape(line.Source)} | {Escape(line.Translated)} |");
+        }
+        WriteReport("prompt-leak.md", report.ToString());
+
+        static string Escape(string text) => (text.Length > 90 ? text[..90] + "..." : text).Replace("|", "\\|").Replace("\n", " ");
     }
 
     /// <summary>The preset-change impact scan: per game, how many existing translations use each old result in <c>Files/PresetChanges.yaml</c>.</summary>

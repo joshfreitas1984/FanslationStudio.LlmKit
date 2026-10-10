@@ -25,6 +25,41 @@ public static partial class LineValidation
     /// is CJK text (see <see cref="ChinesePlaceholderPattern"/>).</summary>
     public static bool ContainsChinesePlaceholder(string? input) => !string.IsNullOrEmpty(input) && ChinesePlaceholderRegex().IsMatch(input);
 
+    /// <summary>
+    /// Prompt text the model echoes into its output: the retry/correction suffix ("While correcting, also verify:
+    /// ... Output only the fully corrected English translation") and the base prompt's instructions. See
+    /// docs/investigations/translation-retry-escalation-and-fixes.md for the original leak.
+    /// </summary>
+    private static readonly string[] PromptLeakPhrases =
+    [
+        "cultural nuance",
+        "gender-neutral language",
+        "Output only the",
+        "fully corrected English translation",
+        "Translate all Chinese characters",
+        "untranslated Chinese characters",
+    ];
+
+    /// <summary>The correction suffix's opening, matched exactly: "while correcting" is ordinary English mid-sentence.</summary>
+    private const string CorrectionSuffixLeak = "While correcting,";
+
+    /// <summary>
+    /// The leaked prompt phrase in <paramref name="result"/>, or null. A phrase the source itself contains is not a
+    /// leak. A non-breaking hyphen (U+2011, saved by older versions) counts as "-".
+    /// </summary>
+    public static string? FindPromptLeak(string? raw, string? result)
+    {
+        if (string.IsNullOrEmpty(result))
+            return null;
+        var text = result.Replace('\u2011', '-');
+        raw ??= string.Empty;
+        if (text.Contains(CorrectionSuffixLeak, StringComparison.Ordinal) && !raw.Contains(CorrectionSuffixLeak, StringComparison.Ordinal))
+            return CorrectionSuffixLeak;
+        return PromptLeakPhrases.FirstOrDefault(phrase =>
+            text.IndexOf(phrase, StringComparison.OrdinalIgnoreCase) >= 0
+            && raw.IndexOf(phrase, StringComparison.OrdinalIgnoreCase) < 0);
+    }
+
     // LLM meta-commentary/instruction-leak signatures - the model narrating its own
     // translation process instead of just returning the translation   
     private static readonly string[] InvalidPhrases =
@@ -45,17 +80,12 @@ public static partial class LineValidation
         "'''",
         "<p", "</p", "<em", "</em", "<|", "<strong", "</strong",
         "\\U",
-        "cultural nuance",
         "gender‑neutral language",
-        "gender-neutral language",
-        "Output only the",
         "the translation remains",
-        "fully corrected English translation",
-        "Translate all Chinese characters",
-        "untranslated Chinese characters",
         "English equivalent",
         "more natural English",
-        "could be translated"
+        "could be translated",
+        .. PromptLeakPhrases
     ];
 
     private static readonly (string raw, string trans)[] CheckForRemoval = [];
@@ -313,7 +343,8 @@ public static partial class LineValidation
         // A phrase the source itself contains (e.g. "\U" in a "C:\Users\..." path) is not model chatter.
         var invalidPhrase = InvalidPhrases.FirstOrDefault(phrase =>
             result.IndexOf(phrase, StringComparison.OrdinalIgnoreCase) >= 0
-            && raw.IndexOf(phrase, StringComparison.OrdinalIgnoreCase) < 0);
+            && raw.IndexOf(phrase, StringComparison.OrdinalIgnoreCase) < 0)
+            ?? FindPromptLeak(raw, result);
         if (invalidPhrase != null)
         {
             response = false;
