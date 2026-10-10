@@ -69,8 +69,9 @@ Single entry point, called once per workflow invocation. Loads, in order:
 4. Preset Chinese glossary (embedded `BaseFiles/ChineseGlossary/*.yaml`, filterable by
    `ChineseGlossaryTypesToSupress`), then workspace `Glossary/*.yaml` merged on top (workspace
    entries override preset entries matching on `Raw`/`RawSimplified`/`RawTraditional`).
-5. Hyphens in glossary/manual results are rewritten to non-breaking hyphens (Unity line-break
-   workaround).
+5. Hyphens are left as ordinary `-`. Earlier versions rewrote them to non-breaking hyphens (U+2011)
+   as a Unity line-break workaround; that rewrite is gone. Translations saved before then still carry
+   U+2011, so packaging undoes it unconditionally and the glossary/QC comparisons treat it as `-`.
 
 Adding a new preset model = a new `ModelPreset` enum value + its case in
 `GetPresetModelConfig`'s name switch + embedded `BaseFiles/<Name>/Config.yaml` + only the prompt

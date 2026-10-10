@@ -532,8 +532,8 @@ public static class QualityControlWorkflow
     }
 
     /// <summary>
-    /// True when two translations differ only by non-breaking hyphens (U+2011, which the save-time
-    /// cleanup normalises ordinary hyphens to) or whitespace - i.e. a "correction" that is the
+    /// True when two translations differ only by non-breaking hyphens (U+2011, which translations saved
+    /// before the save-time rewrite was removed still carry) or whitespace - i.e. a "correction" that is the
     /// baseline in disguise and would be byte-identical after saving.
     /// </summary>
     internal static bool IsEquivalentText(string a, string b) =>

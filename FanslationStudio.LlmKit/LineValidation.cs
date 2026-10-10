@@ -162,8 +162,7 @@ public static partial class LineValidation
                 .Replace("’", "'")
                 .Replace("‘", "'")
                 .Replace("—", "-")
-                .Replace("-", "\u2011") //Change Hyphens to non breaking hyphens
-                .Replace("{‑1}", "{-1}"); // Change special {-1} non breaking hyphen back to normal hyphen
+                .Replace("\u2011", "-"); // A model-emitted non-breaking hyphen becomes an ordinary one
 
             //Strip .'s
             //if (result.EndsWith('.') && !raw.EndsWith(".") && !result.EndsWith(".."))

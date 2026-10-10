@@ -615,9 +615,8 @@ public static class TranslationWorkflow
 
     /// <summary>
     /// Matches a hyphen-minus immediately before a digit, in either its raw ASCII form ("-5") or the
-    /// non-breaking hyphen (U+2011) <see cref="LineValidation.CleanupLineBeforeSaving"/> normalizes
-    /// ordinary hyphens to on the translated side ("‑5") - both count as "the negative sign is
-    /// still there" for <see cref="IsMissingRequiredNegativeSign"/>.
+    /// non-breaking hyphen (U+2011) that translations saved before hyphens stopped being rewritten
+    /// carry ("‑5") - both count as "the negative sign is still there" for <see cref="IsMissingRequiredNegativeSign"/>.
     /// </summary>
     private static readonly Regex NegativeNumberRegex = new(@"[-‑](?=\d)", RegexOptions.Compiled);
 
@@ -791,6 +790,9 @@ public static class TranslationWorkflow
         if (!textFile.EnableGlossary)
             yield break;
 
+        // Translations saved before hyphens stopped being rewritten still carry U+2011.
+        candidate = candidate.Replace('\u2011', '-');
+
         // A term used only as part of a longer matched term (三七 inside 三七开) is not demanded on its own.
         var shadowed = GlossaryLine.FindShadowedByLongerMatch(rawText, config.Runtime.GlossaryLines, textFile.Path);
 
@@ -838,6 +840,7 @@ public static class TranslationWorkflow
 
     private static bool IsGlossaryHallucination(GlossaryLine item, List<GlossaryLine> allGlossaryLines, string preparedRaw, string translated, TextFileToSplit textFile)
     {
+        translated = translated.Replace('\u2011', '-');
         if (preparedRaw.Contains(item.Raw) || !translated.Contains(item.Result))
             return false;
 

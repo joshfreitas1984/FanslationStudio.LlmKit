@@ -39,7 +39,8 @@ public static class PackagingTextFixups
 
     /// <summary>
     /// The LLM/QC pass occasionally "typographically improves" an ASCII hyphen-minus into a Unicode
-    /// look-alike non-breaking hyphen (U+2011) instead of leaving it as "-". Undone unconditionally
+    /// look-alike non-breaking hyphen (U+2011) instead of leaving it as "-", and translations saved before
+    /// the save-time rewrite was removed carry it throughout. Undone unconditionally
     /// since a genuine U+2011 in raw source text is not a realistic scenario for translated prose.
     /// </summary>
     private static string UndoHyphen(string raw, string result) => result.Replace("‑", "-");

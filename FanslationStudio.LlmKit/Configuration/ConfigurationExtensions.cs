@@ -109,13 +109,6 @@ public static class ConfigurationExtensions
         LoadPresetGlossary(deserializer, response);
         MergeWorkspaceGlossary($"{workingDirectory}/Glossary", deserializer, response.Runtime);
 
-        // Change hyphens to non-breaking hyphens to avoid Unity line-breaking them when rendering
-        foreach (var line in response.Runtime.GlossaryLines)
-            line.Result = line.Result.Replace("-", "\u2011");
-
-        foreach (var line in response.Runtime.ManualTranslations)
-            line.Result = line.Result.Replace("-", "\u2011");
-
         StringTokenReplacer.SetExtraTokens(response.ExtraStringTokenReplacers);
 
         return response;
