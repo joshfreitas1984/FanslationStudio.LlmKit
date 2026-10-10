@@ -223,3 +223,14 @@ repo's own docs for the full candidate list and the scan methodology used to fin
 - When fixing a bug in fragment extraction/reconstruction, add a targeted xUnit test asserting the
   exact `Template`/`Fragments` shape rather than only checking round-trip equality — round-tripping
   alone won't catch "sentence split around an embedded number" style regressions.
+
+### Corpus check, 2026-10-10
+
+`LineValidation.FindPromptLeak` now detects the echo (the exact `While correcting,` opening, plus the other
+instruction phrases) and is used by the production invalid-phrase check, the translation-assessment
+findings (`PromptLeak`) and the Assessments scan "6. Scan: prompt-leak detector". Over the games' pre-QC
+`translated` fields it flags 28 DragonHierOverLlm, 221 LegendOfMortalOverLlm and 19 WanXiangOverLlm splits
+(all `While correcting,`; no other phrase occurs). Most were fixed by QC, but not all: after QC, about 12
+DragonHierOverLlm and 194 LegendOfMortalOverLlm splits still carry the leak, nearly all in rows QC never
+visited (`qcStatus` missing, mostly `Legend_01_zh-cn.csv`), and a handful that QC marked Passed.
+Re-translating them is the owner's call.

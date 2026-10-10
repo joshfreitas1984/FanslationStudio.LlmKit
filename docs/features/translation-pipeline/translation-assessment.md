@@ -52,5 +52,5 @@ game's raw corpus, so no game is needed. `FanslationStudio.LlmKit.Assessments` c
 `Files/Config.yaml` (`goldSetPath`, `modelNames`, `outputPath: TestResults/ModelAssessment`) and runs it as
 manual test "1b. Assess configured translation models (gold set)" with `LLMKIT_ASSESSMENTS=1`. Each gold
 case is translated with its own glossary snapshot, every sample is `split`, and each result carries
-`detectorFindings` (`LeftoverCjk`, `SelfReferenceLost`). `sampleSeed` and `fullCellSampleRatio` do not
+`detectorFindings` (`LeftoverCjk`, `SelfReferenceLost`, `PromptLeak`). `sampleSeed` and `fullCellSampleRatio` do not
 apply. The `compare-translation-models` skill reads this output.
