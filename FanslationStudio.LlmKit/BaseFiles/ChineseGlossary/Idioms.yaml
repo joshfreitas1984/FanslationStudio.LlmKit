@@ -22,13 +22,6 @@
   direct: Weak meat, strong eat.
   literal: Ruò ròu qiáng shí.
   badtrans: false
-- raw: 高手如云
-  rawSimplified: 高手如云
-  rawTraditional: 高手如雲
-  result: Experts are as common as clouds
-  direct: Masters like clouds.
-  literal: Gāo shǒu rú yún.
-  badtrans: false
 - raw: 事半功倍
   result: Half the effort for double the result
   direct: Half work, double the achievement.
@@ -45,15 +38,10 @@
   rawSimplified: 调虎离山
   rawTraditional: 調虎離山
   result: Lure the tiger out of the mountain
+  allowalt:
+  - tiger away from the mountain
   direct: Move the tiger away from the mountain.
   literal: Tiáo hǔ lí shān.
-  badtrans: false
-- raw: 冰清玉洁
-  rawSimplified: 冰清玉洁
-  rawTraditional: 冰清玉潔
-  result: Clear as ice and clean as jade
-  direct: Ice-clear, jade-pure.
-  literal: Bīng qīng yù jié.
   badtrans: false
 - raw: 鲤鱼跳龙门
   rawSimplified: 鲤鱼跳龙门
@@ -93,6 +81,8 @@
   badtrans: false
 - raw: 以毒攻毒
   result: Fight poison with poison
+  allowalt:
+  - fighting poison with poison
   direct: Use poison to attack poison.
   literal: Yǐ dú gōng dú.
   badtrans: false
@@ -103,6 +93,8 @@
   badtrans: false
 - raw: 金盆洗手
   result: Wash one's hands in a Golden Basin
+  allowalt:
+  - hands in a golden basin
   direct: Wash hands in a golden basin.
   literal: Jīn pén xǐ shǒu.
   badtrans: false

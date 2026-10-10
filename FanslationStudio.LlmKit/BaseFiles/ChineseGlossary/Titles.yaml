@@ -133,20 +133,6 @@
   result: Great Hero
   allowalt:
   - Hero
-- raw: 二俠
-  rawSimplified: 二侠
-  rawTraditional: 二俠
-  result: Second Hero
-  allowalt:
-  - Hero
-- raw: 三俠
-  rawSimplified: 三侠
-  rawTraditional: 三俠
-  result: Third Hero
-  allowalt:
-  - Hero
-  direct: three heroes
-  literal: san xia
 - raw: 侠士
   result: "Hero"
   literal: xia shi
@@ -450,8 +436,6 @@
   result: Second Pot Head
 - raw: 寨主
   result: Fort Master
-- raw: 二寨主
-  result: Second Fort Master
 - raw: 禅师
   rawSimplified: 禅师
   rawTraditional: 禪師
@@ -466,14 +450,6 @@
   rawSimplified: 庄主
   rawTraditional: 莊主
   result: Manor Master
-- raw: 三庄主
-  rawSimplified: 三庄主
-  rawTraditional: 三莊主
-  result: Third Manor Master
-- raw: 二庄主
-  rawSimplified: 二庄主
-  rawTraditional: 二莊主
-  result: Second Manor Master
 - raw: 刀客
   result: Blade Master
 - raw: 大娘
@@ -535,13 +511,6 @@
   badtrans: true
   direct: rivers lakes strange person
   literal: jiang hu qi ren
-- raw: 江湖酒客
-  rawSimplified: 江湖酒客
-  rawTraditional: 江湖酒客
-  result: Jianghu Drunkard
-  badtrans: true
-  direct: rivers lakes wine guest
-  literal: jiang hu jiu ke
 
 
 # Disciples

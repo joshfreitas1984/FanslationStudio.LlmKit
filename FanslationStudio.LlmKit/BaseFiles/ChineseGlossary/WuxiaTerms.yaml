@@ -23,18 +23,6 @@
   rawSimplified: 盐帮
   rawTraditional: 鹽幫
   result: Salt Gang
-- raw: 河图
-  rawSimplified: 河图
-  rawTraditional: 河圖
-  result: River Map
-  allowalt:
-  - Hetu
-  context: Hetu is river map but can be part of Hetu Luoshu
-  badtrans: false
-- raw: 河出马图
-  rawSimplified: 河出马图
-  rawTraditional: 河出馬圖
-  result: Hetu Luoshu
 - raw: 八卦
   result: Bagua
   allowalt:
@@ -45,10 +33,9 @@
   rawTraditional: 機關
   result: Mechanism
   allowalt:
-  - Organization
   - Scheme
   - Mechanical
-  direct: Organization
+  direct: mechanism
   literal: Jiguan
   badtrans: false
 - raw: 心法

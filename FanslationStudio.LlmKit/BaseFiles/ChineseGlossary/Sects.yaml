@@ -46,46 +46,10 @@
   direct: Entrust
   literal: Wei tuo
 # 6 Paths clans
-- raw: 六道法王
-  result: Six Paths Dharma King
-  direct: Six Paths Dharma King
-  literal: Liu Dao Fa Wang
-- raw: 人間道
-  rawSimplified: 人间道
-  rawTraditional: 人間道
-  result: Human Path
-  direct: Human Realm Path
-  literal: Ren Jian Dao
-- raw: 餓鬼道
-  rawSimplified: 饿鬼道
-  rawTraditional: 餓鬼道
-  result: Hungry Ghost Path
-  direct: e gui dao
-  literal: hungry ghost path
-- raw: 地獄道
-  rawSimplified: 地狱道
-  rawTraditional: 地獄道
-  result: Hell's Path
-  direct: di yu dao
-  literal: earth prison path / hell path
-- raw: 畜生道
-  result: Beast Path
-  direct: chu sheng dao
-  literal: beast path / animal path
-- raw: 畜牲道
-  result: Beast Path
-  direct: animal beast path
-  literal: Chu Sheng Dao
 - raw: 天道
   result: Heavenly path
   direct: heaven way
   literal: Tiandao
-- raw: 修羅道
-  rawSimplified: 修罗道
-  rawTraditional: 修羅道
-  result: Asura Path
-  direct: Xiu Luo Dao
-  literal: Asura path / path of demonic warriors
 # Ancient Factions
 - raw: 唐門
   rawSimplified: 唐门
@@ -182,12 +146,6 @@
   result: Iron Fist
   direct: Iron Fist
   literal: Tiequan
-- raw: 奪魄
-  rawSimplified: 夺魄
-  rawTraditional: 奪魄
-  result: Soul Stealer
-  direct: Seize Soul
-  literal: Duopo
 - raw: 南宮
   rawSimplified: 南宫
   rawTraditional: 南宮

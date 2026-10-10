@@ -142,7 +142,7 @@ every wuxia game would translate the same way.
 | Would any wuxia game use the same translation? | **Yes** (掌门 "Sect Leader", 少侠 "Young Hero") | No |
 | Is it a game UI or stat label? | Only if two or more games use the same term | **Yes** by default |
 | Does the same source need a different translation in another game? | No (the preset is shared) | **Yes**, as an override, with a comment saying why |
-| Is it a phrase or sentence rather than a term? | **Never** | Only as a `ManualTranslations` override for one exact line |
+| Is it a phrase (idiom, fixed courtesy) every wuxia game would render the same way? | **Yes**, with `allowalt` covering the inflections and paraphrases the corpus actually uses (check the scan's hit rate) | A one-off line is a `ManualTranslations` override |
 | Is it a single character, or likely to sit inside names or idioms? | **Never** | Only with `only:` scoping |
 
 Before adding or changing a **preset** line, run the Assessments host's deterministic scans (the preset

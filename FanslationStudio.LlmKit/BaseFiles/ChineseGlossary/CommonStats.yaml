@@ -62,9 +62,6 @@
   allowalt:
   - Confuse
   badtrans: false
-- raw: 冰封
-  result: Frozen
-  badtrans: false
 
 # Stats
 - raw: 胆识
@@ -114,18 +111,6 @@
   allowalt:
     - Body
   context: refers to the physical body or physique, often implying strength, health, or robustness in terms of physical constitution.
-- raw: 太阴
-  rawSimplified: 太阴
-  rawTraditional: 太陰
-  result: Great Yin
-  badtrans: false
-- raw: 太阳
-  rawSimplified: 太阳
-  rawTraditional: 太陽
-  result: Sun
-  allowalt:
-  - Great Yang
-  - Taiyang
   context: Conflicts with temples
   badtrans: false
 - raw: 生命
@@ -142,13 +127,6 @@
   result: Discipline
   context: refers to the ability to control and guard one's mind, emotions, and inner state. It is often associated with mental discipline, emotional resilience, and maintaining focus in combat
   badtrans: false
-- raw: 诛心
-  rawSimplified: 诛心
-  rawTraditional: 誅心
-  result: Mind Attack
-  allowalt:
-  - heartbreak
-  context: refers to a strategy or technique aimed at breaking an opponent's willpower, confidence, or mental stability rather than physically harming them.
 - raw: 轻功
   rawSimplified: 轻功
   rawTraditional: 輕功

@@ -45,3 +45,12 @@ p95 sample latency, characters per second, estimated full-corpus time, failed sa
   samples reconstruct compound templates from their original source fragments, matching the
   effective raw shape reviewed by the QC workflow.
 
+## Gold-set mode (Assessments host)
+
+`translationAssessment.source: goldSet` translates the QC gold set's own sources instead of sampling a
+game's raw corpus, so no game is needed. `FanslationStudio.LlmKit.Assessments` configures it in
+`Files/Config.yaml` (`goldSetPath`, `modelNames`, `outputPath: TestResults/ModelAssessment`) and runs it as
+manual test "1b. Assess configured translation models (gold set)" with `LLMKIT_ASSESSMENTS=1`. Each gold
+case is translated with its own glossary snapshot, every sample is `split`, and each result carries
+`detectorFindings` (`LeftoverCjk`, `SelfReferenceLost`). `sampleSeed` and `fullCellSampleRatio` do not
+apply. The `compare-translation-models` skill reads this output.

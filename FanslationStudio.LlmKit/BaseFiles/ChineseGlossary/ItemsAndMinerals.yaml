@@ -7,10 +7,6 @@
   - Qian
   - Money
   badtrans: false
-- raw: 铁矿石
-  rawSimplified: 铁矿石
-  rawTraditional: 鐵礦石
-  result: Iron Ore
 - raw: 铜矿石
   rawSimplified: 铜矿石
   rawTraditional: 銅礦石
@@ -27,24 +23,10 @@
   rawSimplified: 玄铁
   rawTraditional: 玄鐵
   result: Dark Steel
-- raw: 黑铁
-  rawSimplified: 黑铁
-  rawTraditional: 黑鐵
-  result: Dark Iron
 - raw: 寒铁
   rawSimplified: 寒铁
   rawTraditional: 寒鐵
   result: Cold Iron
-- raw: 镔铁
-  rawSimplified: 镔铁
-  rawTraditional: 鑌鐵
-  result: Refined Iron
-- raw: 黑金
-  result: Black Gold
-- raw: 乌金
-  rawSimplified: 乌金
-  rawTraditional: 烏金
-  result: Black Gold
 - raw: 熊掌
   result: Bear Paw
 - raw: 豹胎
@@ -57,10 +39,6 @@
   rawSimplified: 槟榔
   rawTraditional: 檳榔
   result: Betel nut
-- raw: 龙珠
-  rawSimplified: 龙珠
-  rawTraditional: 龍珠
-  result: Dragon ball
 - raw: 炼狱
   rawSimplified: 炼狱
   rawTraditional: 煉獄
@@ -110,14 +88,8 @@
   rawSimplified: 软筋散
   rawTraditional: 軟筋散
   result: Soft Muscle Powder
-- raw: 杜康酒
-  result: Dukang Wine
 - raw: 即墨老酒
   result: Jimo Old Wine
-- raw: 竹叶青
-  rawSimplified: 竹叶青
-  rawTraditional: 竹葉青
-  result: Bamboo Leaf Tea
 - raw: 葡萄酒
   result: Grape Wine
 - raw: 猴儿酒

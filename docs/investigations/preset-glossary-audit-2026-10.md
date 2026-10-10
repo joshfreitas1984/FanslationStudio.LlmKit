@@ -36,18 +36,30 @@ Decided by the maintainer after review:
   LegendOfMortal's `GameSpecificGlossary.yaml`, so the preset copies were only dropped. 恶人谷, 酒坊, 盐场
   were added to WanXiang's `Glossary.yaml` and dropped from the preset (`Sects`, `Places`).
 
+Second review pass (maintainer decisions, same day):
+
+- **Single-game proper nouns.** Dropped from the preset because LegendOfMortal already had them (same
+  result): the six path names 人間道, 修羅道, 地獄道, 畜牲道, 畜生道, 餓鬼道, 六道法王, 奪魄, and the curse
+  phrases 戰他娘親, 操你媽 (LegendOfMortal's own entries differ in result, so they are game terms). Moved into the owning game's glossary:
+  DragonHierOverLlm 河图, 内门弟子, 外门弟子, 正式弟子, 杜康酒, 竹叶青, 黑金, 黑铁, 镔铁, 铁矿石;
+  WanXiangOverLlm 乌金, 龙珠, 江湖酒客, 诛心, 二庄主, 三庄主, 二寨主; LegendOfMortalOverLlm 三俠, 二俠.
+- **马帮 "Horse Gang" stays in the preset** (maintainer's call; DragonHier 1/1, LegendOfMortal keeps its own
+  identical entry), so it was not moved to DragonHierOverLlm.
+- **禁军 stays "Imperial Guard".** The preset already said so and DragonHier uses it (36/36); LegendOfMortal's
+  override "Forbidden Army" was removed so it inherits the preset. Its Converted data holds no "Forbidden
+  Army" lines, so nothing needed swapping. Note LegendOfMortal also renders 锦衣卫 as "Imperial Guard".
+- **Idioms.** 以毒攻毒, 金盆洗手 and 调虎离山 kept with the alternatives `fighting poison with poison`,
+  `hands in a golden basin` and `tiger away from the mountain` (hit rates 12/35, 0/40, 6/42 in
+  LegendOfMortal became 30/35, 32/40, 27/42). 冰清玉洁, 高手如云 and 冰封 removed: descriptive, and the
+  model paraphrases them better than a fixed result. They could return with alternatives that cover the
+  paraphrases.
+- **First-read leftovers.** 机关 `direct` corrected to "mechanism" and the `Organization` alternative
+  dropped (the games write "Mechanism Box", "Mechanism Chest"). 河出马图 (result belonged to 河图洛书),
+  海色宝会 and 空军 removed (dead in all three games). 盐帮 and 化神 kept. 承让了 kept (phrases are allowed in the
+  preset when they carry good alternatives): a fixed martial-arts courtesy that all three games render the same way (70 of
+  80 matches use the preset result).
+- The 72 entries unused by all three games stay as generic wuxia vocabulary; revisit only if a fourth game
+  suggests otherwise.
+
 Earlier the same day (static lint): `CommonStats` single characters 阴 阳 刚 柔 毒 removed, bad
 alternatives and the 化境 typo fixed, a dead 两 entry and a stray YAML item in `Phonetics` fixed.
-
-## Open: needs a human decision
-
-- **Remaining single-game proper nouns** (about 44 of the 68): 三俠/二俠, 六道 path names, 奪魄, 內/外門 and
-  other sect ranks, 禁军, 杜康酒, and the Dragon Heir materials. Same rubric as above; move them the same way
-  when someone wants them gone from the preset.
-- **Contested idioms** (以毒攻毒, 冰清玉洁, 调虎离山, 金盆洗手, 高手如云, 冰封): the model paraphrases
-  ("fighting poison with poison" misses "Fight poison with poison"). Candidates for alternatives or
-  removal; the rubric says phrases do not belong in the preset.
-- **72 entries unused by all three games.** Keep as generic wuxia vocabulary unless a fourth game
-  suggests otherwise; do not delete on this evidence alone.
-- **Still from the first read, not yet re-checked against the corpus:** 承让了 (a phrase), 河图 versus
-  河出马图, 机关 `direct: Organization`, 马帮 / 盐帮 / 海色宝会 / 空军 (game-specific), 化神.
