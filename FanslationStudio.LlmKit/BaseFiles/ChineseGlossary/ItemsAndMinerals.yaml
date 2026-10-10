@@ -52,7 +52,7 @@
   rawTraditional: 一條根
   result: One Root
 - raw: 腹皮
-  result: Rhizome Bark
+  result: Areca Husk
 - raw: 金不换
   rawSimplified: 金不换
   rawTraditional: 金不換
@@ -79,7 +79,7 @@
 - raw: 细辛
   rawSimplified: 细辛
   rawTraditional: 細辛
-  result: Fragrant Root
+  result: Asarum
   allowalt:
   - Liu Xixin
   direct: Xi Xin

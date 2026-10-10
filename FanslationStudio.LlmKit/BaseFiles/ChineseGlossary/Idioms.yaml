@@ -105,3 +105,11 @@
   - come what may
   - no matter what
   badtrans: false
+- raw: 秉公主持
+  result: preside impartially
+  allowalt:
+  - impartially
+  - fairly
+  - with fairness
+  - upholding justice
+  badtrans: false

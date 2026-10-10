@@ -38,6 +38,7 @@ public static partial class LineValidation
         "fully corrected English translation",
         "Translate all Chinese characters",
         "untranslated Chinese characters",
+        "Translate the following sentence",
     ];
 
     /// <summary>The correction suffix's opening, matched exactly: "while correcting" is ordinary English mid-sentence.</summary>
