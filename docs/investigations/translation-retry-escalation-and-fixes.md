@@ -116,8 +116,9 @@ non-restatable line: `"Output only the corrected English translation. Do not rep
 reference any part of these instructions, and do not include explanations, notes, or any Chinese
 text."` — this keeps the original intent (no explanations/notes/Chinese leakage) while removing the
 specific checklist-shaped text the model was echoing, and explicitly tells it not to restate
-instructions. `InvalidPhrases` in `LineValidation.cs` is left untouched as a safety net (still
-catches `"Output only the"` etc. if a leak recurs in some other form) — this was a prompt-wording
+instructions. `InvalidPhrases` in `LineValidation.cs` is left in place as a safety net (still
+catches `"Output only the"` etc. if a leak recurs in some other form; those phrases now live in
+`LineValidation.PromptLeakPhrases`, shared with `FindPromptLeak`) — this was a prompt-wording
 fix, not a validation-logic fix. If leaks of this shape reappear after this change, suspect a
 *different* prompt file (e.g. `BaseSystemPrompt.txt` itself, or `BaseGlossaryPrompt`/
 `BaseSystemSuffixPrompt`) rather than assuming the same root cause.

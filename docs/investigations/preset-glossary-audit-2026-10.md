@@ -1,7 +1,8 @@
 # Preset glossary audit (2026-10-09)
 
 Corpus audit of the 373 shipped preset entries (`BaseFiles/ChineseGlossary/`) against the translated
-splits of DragonHierOverLlm (95k), LegendOfMortalOverLlm (152k) and WanXiangOverLlm (75k). Part of
+splits of DragonHierOverLlm (95k), LegendOfMortalOverLlm (81k; it was 152k before `StringTable` was removed from
+its `Converted/` on 2026-10-10) and WanXiangOverLlm (75k). Part of
 [`plans/qc-goldset-regression-migration.md`](../plans/qc-goldset-regression-migration.md) workstream E.
 Regenerate the data with the manual test "3. Scan: preset glossary corpus audit" in
 `FanslationStudio.LlmKit.Assessments` (report: `Files/TestResults/Scans/preset-audit.md`, gitignored).
@@ -11,6 +12,9 @@ Method and limits: an entry "matches" a split when it survives the production se
 contains the result or an allowed alternative (case-insensitive). A game's own glossary can override a
 preset result, so the hit rate measures what the games actually shipped, not preset compliance alone.
 Only three games are registered, so "dead" means "unused by these three", not unused everywhere.
+
+Status: **settled**. Every open item from the first pass was decided on 2026-10-09 and applied; the second
+review pass is recorded below. Re-run the scan after adding a game or changing preset entries.
 
 ## Applied
 

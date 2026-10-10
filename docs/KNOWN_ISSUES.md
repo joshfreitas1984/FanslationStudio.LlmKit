@@ -20,4 +20,9 @@
   since `CompoundFieldSplitter` decomposes these raw strings before any single split sees the whole
   template) before landing on the actual fix: a whole-raw/whole-result override in the consuming
   repo's existing packaging-time override mechanism (fixed 2026-09-17).
-
+- [`investigations/preset-glossary-audit-2026-10.md`](investigations/preset-glossary-audit-2026-10.md)
+  — corpus audit of the preset glossary against three games: what was removed, corrected or moved to a game
+  (settled 2026-10-09).
+- Prompt-leak corpus check (2026-10-10): legacy `While correcting,` echoes still in some games' translations, see
+  the addendum in
+  [`investigations/translation-retry-escalation-and-fixes.md`](investigations/translation-retry-escalation-and-fixes.md).

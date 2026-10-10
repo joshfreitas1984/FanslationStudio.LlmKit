@@ -173,7 +173,8 @@ JSON-field entry with no column context.
 `Apply` runs two standard, game-agnostic fixups in order:
 
 1. **Hyphen undo** — the LLM/QC pass occasionally "typographically improves" an ASCII hyphen-minus
-   into the Unicode look-alike non-breaking hyphen U+2011. Undone unconditionally; a genuine U+2011
+   into the Unicode look-alike non-breaking hyphen U+2011 (LlmKit no longer writes U+2011 itself, and the games'
+   `Converted/` was swapped back to `-` on 2026-10-10, so this is now a safety net). Undone unconditionally; a genuine U+2011
    in source text isn't a realistic scenario for translated prose.
 2. **Literal-newline undo** — the LLM/QC pass occasionally emits a literal backslash-n (`\n` as the
    two characters `\` and `n`) in a translated result instead of preserving the raw text's own
