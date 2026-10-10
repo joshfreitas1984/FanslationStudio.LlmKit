@@ -450,6 +450,8 @@
   rawSimplified: 庄主
   rawTraditional: 莊主
   result: Manor Master
+  allowalt:
+    - Master
 - raw: 刀客
   result: Blade Master
 - raw: 大娘
