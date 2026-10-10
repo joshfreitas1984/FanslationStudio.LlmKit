@@ -90,8 +90,12 @@ public static class ReleasePublisher
                 args.Add("--generate-notes");
             args.AddRange(assets);
 
-            var (exit, _, err) = Run("gh", args, token.Trim());
-            return exit == 0 ? null : $"gh release create failed: {err.Trim()}";
+            var (exit, output, err) = Run("gh", args, token.Trim());
+            if (exit != 0)
+                return $"gh release create failed: {err.Trim()}";
+
+            WriteReleaseUrl(output);
+            return null;
         }
         catch (Exception ex)
         {
@@ -118,13 +122,28 @@ public static class ReleasePublisher
                 : new List<string> { "release", "create", tag, "--repo", ownerAndRepo, "--title", title, "--prerelease", "--notes", title };
             args.AddRange(assets);
 
-            var (exit, _, err) = Run("gh", args, token.Trim());
-            return exit == 0 ? null : $"gh release {(exists ? "upload" : "create")} failed: {err.Trim()}";
+            var (exit, output, err) = Run("gh", args, token.Trim());
+            if (exit != 0)
+                return $"gh release {(exists ? "upload" : "create")} failed: {err.Trim()}";
+
+            if (!exists)
+                WriteReleaseUrl(output);
+            return null;
         }
         catch (Exception ex)
         {
             return $"gh unavailable: {ex.Message}";
         }
+    }
+
+    // `gh release create` prints the new release's URL as the last stdout line.
+    static void WriteReleaseUrl(string ghOutput)
+    {
+        var url = ghOutput
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .LastOrDefault(l => l.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
+        if (url != null)
+            Console.WriteLine($"Release created: {url}");
     }
 
     static (int ExitCode, string Output, string Error) Run(string exe, IEnumerable<string> args, string? ghToken)
