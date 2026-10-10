@@ -3,7 +3,7 @@
 Corpus audit of the 373 shipped preset entries (`BaseFiles/ChineseGlossary/`) against the translated
 splits of DragonHierOverLlm (95k), LegendOfMortalOverLlm (81k; it was 152k before `StringTable` was removed from
 its `Converted/` on 2026-10-10) and WanXiangOverLlm (75k). Part of
-[`plans/qc-goldset-regression-migration.md`](../plans/qc-goldset-regression-migration.md) workstream E.
+workstream E of the QC gold-set migration plan (completed 2026-10-10; see git history for `docs/plans/qc-goldset-regression-migration.md`).
 Regenerate the data with the manual test "3. Scan: preset glossary corpus audit" in
 `FanslationStudio.LlmKit.Assessments` (report: `Files/TestResults/Scans/preset-audit.md`, gitignored).
 

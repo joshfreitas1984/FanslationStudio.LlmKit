@@ -19,7 +19,6 @@ public class QcVocabularyLintTests
     private static readonly string[] AllowedPaths =
     [
         "docs/architecture/decisions/",
-        "docs/plans/qc-goldset-regression-migration.md",
         "FanslationStudio.LlmKit.Assessments/Files/GoldSets/", // human review notes keep the names of the day
         "docs/features/translation-pipeline/quality-control-pass.md", // Terminology section names the banned terms
         "Tests/Utility/QcVocabularyLintTests.cs",

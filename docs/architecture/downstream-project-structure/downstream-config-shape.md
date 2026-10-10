@@ -84,7 +84,7 @@ qualityControl:
 Model and QC assessments run from LlmKit's `FanslationStudio.LlmKit.Assessments` host, against a self-contained gold
 set. A game's `Config.yaml` carries no `translationAssessment`, `qualityControlAssessment` or pinned sample sources, and
 the game has no `Goldset/` folder or assessment test (retired from DragonHierOverLlm on 2026-10-09; see
-[`plans/qc-goldset-regression-migration.md`](../../plans/qc-goldset-regression-migration.md)). The keys still exist on
+the QC gold-set migration plan (completed 2026-10-10; see git history for `docs/plans/qc-goldset-regression-migration.md`)). The keys still exist on
 `LlmConfig` for the host's own config.
 
 ## Required vs. game-specific, summarized

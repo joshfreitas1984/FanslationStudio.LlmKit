@@ -54,3 +54,28 @@ manual test "1b. Assess configured translation models (gold set)" with `LLMKIT_A
 case is translated with its own glossary snapshot, every sample is `split`, and each result carries
 `detectorFindings` (`LeftoverCjk`, `SelfReferenceLost`, `PromptLeak`). `sampleSeed` and `fullCellSampleRatio` do not
 apply. The `compare-translation-models` skill reads this output.
+
+## Regression gate and gold-set upkeep
+
+Run the matching check before merging a change. Record the run in the commit message or a short entry under
+`docs/investigations/`, not in auto-loaded files.
+
+| If a change touches... | Run |
+| --- | --- |
+| a QC prompt or the QC engine | the QC evaluator on the full gold set; compare with the last archived `Comparison.yaml` |
+| the translator prompt | the translation assessment (gold mode) and its `detectorFindings`; spot-read changed cases |
+| a preset glossary entry | the preset-change impact and corpus audit scans across all games; the QC evaluator |
+| a detector or validator | the detector blast-radius scan across all games (for example "6. Scan: prompt-leak detector") |
+| the glossary engine | the overlap scans and the LlmKit unit suite |
+
+- **Run-to-run noise.** The QC evaluator varies by about 1-2 items between identical runs. Compare with the archived
+  run within that tolerance, not exactly.
+- **Gold-set drift.** A case snapshots the glossary it was judged with. When a preset entry is later corrected,
+  re-snapshot the affected cases deliberately and bump `labelVersion`, so a correct preset fix never shows up as a
+  regression.
+- **Cross-game prompt tuning.** One QC model and prompt serves every game. If a fix helps one game and hurts another,
+  the gold set (with cases from both) is the arbiter; a game-specific prompt override is the rare fallback.
+- **Detector coverage.** Detector findings only cover known defect shapes (`LeftoverCjk`, `SelfReferenceLost`,
+  `PromptLeak`); they say nothing about meaning. Running QC detection over assessment outputs is an open option.
+- **Sibling checkouts.** The scans read the games listed in `Files/Games.yaml`; a missing game is skipped with a
+  warning, never a failure.

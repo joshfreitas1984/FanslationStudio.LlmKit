@@ -1,6 +1,6 @@
 # QC: System One / "Jev"-style decision models (watchlist)
 
-> Moved from DragonHierOverLlm on 2026-10-09 (workstream B4 of [`plans/qc-goldset-regression-migration.md`](../plans/qc-goldset-regression-migration.md)). The gold set and the QC and translation assessments now run from `FanslationStudio.LlmKit.Assessments`; the text below is the record as written, so `Files/Config.yaml` assessment keys and `Files/TestResults/` paths refer to the old Dragon Heir layout.
+> Moved from DragonHierOverLlm on 2026-10-09 (workstream B4 of the QC gold-set migration plan (completed 2026-10-10; see git history for `docs/plans/qc-goldset-regression-migration.md`)). The gold set and the QC and translation assessments now run from `FanslationStudio.LlmKit.Assessments`; the text below is the record as written, so `Files/Config.yaml` assessment keys and `Files/TestResults/` paths refer to the old Dragon Heir layout.
 
 Status: **watching, no action planned.** Recorded 2026-10-04. Revisit when the Decision Index
 space stabilizes (see [Revisit triggers](#revisit-triggers)).
