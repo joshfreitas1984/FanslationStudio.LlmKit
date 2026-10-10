@@ -47,7 +47,11 @@ public static class PronounDefectWorkflow
 
         if (known == null)
         {
-            var category = LineValidation.InventsGender(split.Text, split.Translated, skipWhenNamesSomeone, tokens) ? "InventedGender"
+            // A context that says the gender is unknown (the game's own "use they, never he or she" hint) has already
+            // forbidden a gendered pronoun, so one there is invented whatever the line's shape.
+            var unknownContext = context is { GenderKnown: false };
+            var category = LineValidation.InventsGender(split.Text, split.Translated, skipWhenNamesSomeone, tokens)
+                || (unknownContext && LineValidation.UsesGenderedPronounForUnknown(split.Text, split.Translated)) ? "InventedGender"
                 : LineValidation.NarratesAsFirstPerson(split.Text, split.Translated) ? "NarratedAsFirstPerson"
                 : LineValidation.LosesSelfReference(split.Text, split.Translated) ? "SelfReferenceLost"
                 : null;

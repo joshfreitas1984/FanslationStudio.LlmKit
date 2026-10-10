@@ -39,6 +39,9 @@ public static partial class LineValidation
         "Translate all Chinese characters",
         "untranslated Chinese characters",
         "Translate the following sentence",
+        // The base prompt's bracket example ("（无趣）哎，……" becomes "(Bored) Ah, ..."), echoed after the real translation.
+        // Matched with its ", ..." tail so a real translation that begins "(Bored) Ah, ..." is not a leak.
+        "(Bored) Ah, ...",
     ];
 
     /// <summary>The correction suffix's opening, matched exactly: "while correcting" is ordinary English mid-sentence.</summary>
@@ -562,7 +565,9 @@ public static partial class LineValidation
         if (result.Contains('(') && !raw.Contains('(') && !raw.Contains('（'))
         {
             response = false;
-            correctionPrompts.AddPromptWithValues(config, "CorrectExplainationPrompt");
+            // Say what is wrong. The generic "explanation was provided" message did not tell the model that the added
+            // parentheses were the problem, so it returned the same parenthesised line on every retry.
+            correctionPrompts.AddPromptWithValues(config, config.Prompts.ContainsKey("CorrectAddedBracketsPrompt") ? "CorrectAddedBracketsPrompt" : "CorrectExplainationPrompt");
         }
 
         // Wide brackets dropped from the translation. Each family lists what counts as "kept":
@@ -662,6 +667,44 @@ public static partial class LineValidation
     public static bool NamesSomeone(string translated) =>
         CapitalisedWordRegex().Matches(translated).Any(match => !StartsSentence(translated, match.Index));
 
+    /// <summary>
+    /// True when <paramref name="translated"/> names two or more different people: distinct capitalised name sequences
+    /// ("Zhu You", "Old Zhou"), where a lone capitalised word that opens a sentence ("Before", "Watching") is not a name.
+    /// A he/she in such a line may belong to any of them, so it cannot be judged against one character's gender.
+    /// Places and sects ("Hengshan Sect") count too, which errs towards skipping rather than flagging.
+    /// </summary>
+    public static bool NamesSeveralPeople(string translated)
+    {
+        // Placeholder tokens (#PlayerName#) are people the game fills in later, not names in the text.
+        translated = PlaceholderTokenRegex().Replace(translated, " ");
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (Match match in NameSequenceRegex().Matches(translated))
+        {
+            var name = match.Value;
+            if (!name.Contains(' ') && StartsSentence(translated, match.Index))
+                continue;
+
+            names.Add(name);
+        }
+
+        return names.Count >= 2;
+    }
+
+    /// <summary>
+    /// True when a line the game marked "gender unknown" (a <see cref="LineContext"/> with <see cref="LineContext.GenderKnown"/>
+    /// false, whose prompt tells the translator to use "they" or "you") still uses he/she/his/her. The prompt has already
+    /// forbidden it, so no narrow line-shape test is needed. Skipped, like <see cref="ContradictsGender"/>, when the source
+    /// states a gender, when it names an unnamed person (此人, 乞丐) or when the translation names two or more people, because
+    /// the pronoun may then belong to someone else.
+    /// </summary>
+    public static bool UsesGenderedPronounForUnknown(string raw, string translated)
+    {
+        if (GenderedSourceRegex().IsMatch(raw) || RoleReferentRegex().IsMatch(raw) || NamesSeveralPeople(translated))
+            return false;
+
+        return GenderedPronounRegex().IsMatch(WithoutNameTails(translated));
+    }
+
     private static bool StartsSentence(string text, int index)
     {
         var i = index - 1;
@@ -682,6 +725,11 @@ public static partial class LineValidation
         // A source that states a gender itself (他/她, a kinship term or title) can name a second person of either
         // gender, so a pronoun that differs from the speaker's is expected there.
         if (GenderedSourceRegex().IsMatch(raw) || RoleReferentRegex().IsMatch(raw))
+            return false;
+
+        // Two people named in the line: the pronoun may be for the other one (whose gender is not known), so it is not
+        // a contradiction of this character's gender. The prompt still tells the translator to use "they" for anyone else.
+        if (NamesSeveralPeople(translated))
             return false;
 
         var male = MalePronounRegex().IsMatch(WithoutNameTails(translated));
@@ -1048,7 +1096,10 @@ public static partial class LineValidation
             var words = input.TrimEnd(fullStop).
                 Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
-            if (words.Length <= 7)
+            // A result that is only the full stop (a manual translation for a fragment such as "一带将其截住。" whose
+            // sentence is already complete in the previous fragment) must stay: stripping it leaves an empty translation,
+            // which is then treated as untranslated and falls back to the Chinese.
+            if (words.Length is > 0 and <= 7)
             {
                 return input.Replace(fullStop.ToString(), string.Empty); // Remove full stop leaving spaces
             }
@@ -1079,6 +1130,14 @@ public static partial class LineValidation
     [GeneratedRegex(@"\b([A-Z][a-z]+) He\b")]
     private static partial Regex NameEndingInHeRegex();
 
+    // A run of capitalised words ("Xiang Qishuang", "Old Zhou").
+    [GeneratedRegex(@"\b[A-Z][a-z]+(?: [A-Z][a-z]+)*")]
+    private static partial Regex NameSequenceRegex();
+
+    // A game placeholder token such as #PlayerName# or #$PlayerName#.
+    [GeneratedRegex("#[^# ]+#")]
+    private static partial Regex PlaceholderTokenRegex();
+
     [GeneratedRegex(@"\b(?:he|she|his|her|him|himself|herself)\b", RegexOptions.IgnoreCase)]
     private static partial Regex GenderedPronounRegex();
 
@@ -1104,10 +1163,10 @@ public static partial class LineValidation
 
     // A person other than the context character who is named only by a role or an insult (乞丐, 老兵, 大侠, 老朽...):
     // a he/she in such a line may belong to them, so it cannot be judged against the context character's gender.
-    [GeneratedRegex("此人|这人|那人|对方|乞丐|隐者|路人|店小二|小二|老兵|大侠|老朽|老夫|老家伙|登徒子")]
+    [GeneratedRegex("此人|这人|那人|对方|乞丐|隐者|路人|店小二|小二|老兵|大侠|老朽|老夫|老家伙|登徒子|年轻人")]
     private static partial Regex RoleReferentRegex();
 
-    [GeneratedRegex(@"^[\s(\[""“]*(?:he|she)", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"^[\s(\[""“]*(?:he|she)\b", RegexOptions.IgnoreCase)]
     private static partial Regex PronounSubjectOpenerRegex();
 
     [GeneratedRegex("[他哥弟父爹兄郎男叔爷翁]|公子|少爷|先生|丈夫|夫君|儿子|好汉|大汉|汉子|青年|少年|老头|老汉|和尚")]

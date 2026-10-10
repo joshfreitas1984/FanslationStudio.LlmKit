@@ -1,0 +1,1 @@
+The translation put text in parentheses, but the original has no parentheses there. Remove the parentheses you added and write that text plainly in the sentence, e.g. "Little Brother is brave" and not "(Little Brother) is brave".

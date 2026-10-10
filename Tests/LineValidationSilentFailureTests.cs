@@ -44,6 +44,30 @@ public class LineValidationSilentFailureTests
         Assert.Empty(validation.SilentFailures);
     }
 
+    [Fact(DisplayName = "Parentheses added where the source has none are rejected with the added-brackets correction when the model has one")]
+    public void AddedParentheses_UseSpecificCorrection()
+    {
+        const string raw = "小兄弟英雄侠义，他日成就不可限量。";
+        const string result = "(Little Brother) is brave and chivalrous, his future achievements are boundless.";
+
+        var config = BuildConfig();
+        var generic = LineValidation.CheckTransalationSuccessful(config, raw, result, new TextFileToSplit { Path = "Test.txt", TextFileType = TextFileType.RawCsv });
+        Assert.False(generic.Valid);
+        Assert.Contains("explain", generic.CorrectionPrompt);
+
+        config.Prompts["CorrectAddedBracketsPrompt"] = "remove the added parentheses";
+        var specific = LineValidation.CheckTransalationSuccessful(config, raw, result, new TextFileToSplit { Path = "Test.txt", TextFileType = TextFileType.RawCsv });
+        Assert.False(specific.Valid);
+        Assert.Contains("remove the added parentheses", specific.CorrectionPrompt);
+        Assert.DoesNotContain("explain", specific.CorrectionPrompt);
+    }
+
+    [Theory(DisplayName = "RemoveFullStop strips a lone trailing full stop from a short result but never leaves nothing")]
+    [InlineData("你好吗。", "How are you.", "How are you")]
+    [InlineData("一带将其截住。", ".", ".")]
+    public void RemoveFullStop_NeverEmpties(string raw, string input, string expected) =>
+        Assert.Equal(expected, LineValidation.RemoveFullStop(raw, input));
+
     [Fact(DisplayName = "An invalid phrase the source lacks still fails, with a reason")]
     public void InvalidPhrase_FailsWithReason()
     {
@@ -195,6 +219,15 @@ public class LineValidationSilentFailureTests
     [InlineData("（那老乞丐颤颤巍巍把那铁碗举到面前，林云裳定睛一看，", "(The old beggar raised the iron bowl to his face. Lin Yunshang took a closer look,", "female", false)]
     [InlineData("这老兵武功出神入化，眼看就要将上官凤斩于枪下。", "This old veteran was about to cut Shangguan Feng down with his spear.", "female", false)]
     [InlineData("（白云天话说到一半，面色突变，", "(Bai Yuntian's words were cut off as his expression changed,", "female", true)]
+    // A second named person (of unknown gender) can own the he/his, so a line naming two people is not judged against one character.
+    [InlineData("章太歧还未说完，便被沈蓉蓉一剑刺死。", "Before Zhang Taiqi could finish speaking, he was killed by a sword thrust from Shen Rongrong.", "female", false)]
+    [InlineData("施全性还未笑完，伤心至极的钟离雪便一刀划破了喉咙，而后向着远处跑去。", "Shi Quanxing had not yet finished laughing when Zhongli Xue slashed his throat with a blade.", "female", false)]
+    [InlineData("项欺霜并不多言，将大枪砸向朱尤，朱尤架剑相隔向后连退数步。", "Xiang Qishuang hurled a large spear at Zhu You. Zhu You raised his sword to block.", "female", false)]
+    // An unnamed 年轻人 can own the pronoun too.
+    [InlineData("夏侯珺顺着方向看去，只见一个衣着略显落魄的年轻人正在赌摊前徘徊，面色焦急。", "Xiahou Jun saw a young man lingering around a gambling booth, his expression anxious.", "female", false)]
+    // One named character and a pronoun that contradicts their known gender is still flagged.
+    [InlineData("茶楼里，夏侯珺掂量着丰厚的钱袋，嘴角含着一丝笑意。", "In the tea house, Xiahou Jun weighed his ample money bag, a faint smile on his lips.", "female", true)]
+    [InlineData("展青锋面上一红，将抓住你的左手松开。", "Zhan Qingfeng's face turned red and he loosened his grip on your left hand.", "female", true)]
     public void ContradictsGender_Cases(string raw, string translated, string gender, bool expected) =>
         Assert.Equal(expected, LineValidation.ContradictsGender(raw, translated, gender));
 
@@ -259,6 +292,27 @@ public class LineValidationSilentFailureTests
     [InlineData("#PlayerForceName#手脚挺快，", "#PlayerForceName# is quick on his feet", false)]
     public void InventsGender_UnknownGenderTokens(string raw, string result, bool expected) =>
         Assert.Equal(expected, LineValidation.InventsGender(raw, result, false, ["#PlayerName#", "#$PlayerName#"]));
+
+    [Theory(DisplayName = "UsesGenderedPronounForUnknown flags he/she on a line whose context says the gender is unknown")]
+    [InlineData("竟也拔剑在手，冲上前去。）", "He had drawn his sword and charged forward.)", true)]
+    [InlineData("但看到铁掌帮不断叫嚣的狂妄模样，一时气血上涌，", "But seeing the Iron Palm Gang's arrogant demeanor, his lifeforce surged for a moment.", true)]
+    [InlineData("#$PlayerName#凭借着此番功业，在江湖史册中留下了浓墨重彩的一笔。", "#$PlayerName# achieved such feats that he left a vivid chapter in the annals of Jianghu.", true)]
+    [InlineData("竟也拔剑在手，冲上前去。）", "They had drawn their sword and charged forward.)", false)]
+    [InlineData("竟也拔剑在手，冲上前去。）", "You drew your sword and charged forward.)", false)]
+    // The source states a gender, names an unnamed person, or the translation names two people: the pronoun may be theirs.
+    [InlineData("他竟也拔剑在手，冲上前去。", "He drew his sword and charged forward.", false)]
+    [InlineData("那乞丐竟也拔剑在手，冲上前去。", "The beggar drew his sword and charged forward.", false)]
+    [InlineData("张三见李四拔剑在手，冲上前去。", "Zhang San saw Li Si draw his sword and charge forward.", false)]
+    public void UsesGenderedPronounForUnknown_Cases(string raw, string translated, bool expected) =>
+        Assert.Equal(expected, LineValidation.UsesGenderedPronounForUnknown(raw, translated));
+
+    [Theory(DisplayName = "OpensWithPronounSubject matches a translation that starts with he or she")]
+    [InlineData("He drew his sword.", true)]
+    [InlineData("(She smiled)", true)]
+    [InlineData("Hector drew his sword.", false)]
+    [InlineData("The man drew his sword.", false)]
+    public void OpensWithPronounSubject_Cases(string translated, bool expected) =>
+        Assert.Equal(expected, LineValidation.OpensWithPronounSubject(translated));
 
     [Fact(DisplayName = "InventsGender without a token list does not treat a plain token line as invented")]
     public void InventsGender_NoTokenList_NoTrigger() =>

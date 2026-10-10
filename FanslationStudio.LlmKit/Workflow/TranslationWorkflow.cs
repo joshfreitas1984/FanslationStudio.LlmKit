@@ -363,7 +363,8 @@ public static class TranslationWorkflow
             if (preparedRaw.Contains(glossary))
             {
                 logLines.Add($"New Glossary {textFile.Path} Replaces: \n{split.Translated}");
-                split.FlaggedForRetranslation = true;             
+                split.FlaggedForRetranslation = true;
+                split.FlaggedMistranslation = $"New glossary term {glossary}";
                 return true;
             }
         }
@@ -383,6 +384,7 @@ public static class TranslationWorkflow
             {
                 logLines.Add($"Bad Regex {textFile.Path} Replaces: \n{split.Translated}");
                 split.FlaggedForRetranslation = true;
+                split.FlaggedMistranslation = "Bad regex";
                 return true;
             }
         }
@@ -467,6 +469,7 @@ public static class TranslationWorkflow
         if (IsMissingRequiredEllipsis(preparedRaw, split.Translated))
         {
             logLines.Add($"Missing ... {textFile.Path} Replaces: \n{split.Translated}");
+            AddFlagReason(split, "Missing ellipsis");
             split.FlaggedForRetranslation = true;
             modified = true;
         }
@@ -545,6 +548,7 @@ public static class TranslationWorkflow
         if (ruleResult.BadWordsReason != null)
         {
             logLines.Add($"Matches Bad words ... {textFile.Path} Replaces: \n{split.Translated}");
+            AddFlagReason(split, "Bad words");
             split.FlaggedForRetranslation = true;
             modified = true;
         }
@@ -552,6 +556,7 @@ public static class TranslationWorkflow
         if (ruleResult.EllipsisReason != null)
         {
             logLines.Add($"Missing ... {textFile.Path} Replaces: \n{split.Translated}");
+            AddFlagReason(split, "Missing ellipsis");
             split.FlaggedForRetranslation = true;
             modified = true;
         }
@@ -559,6 +564,7 @@ public static class TranslationWorkflow
         if (ruleResult.NegativeSignReason != null)
         {
             logLines.Add($"Missing negative sign {textFile.Path} Replaces: \n{split.Translated}");
+            AddFlagReason(split, "Missing negative sign");
             split.FlaggedForRetranslation = true;
             modified = true;
         }
@@ -566,6 +572,7 @@ public static class TranslationWorkflow
         if (ruleResult.MissingTokenReason != null)
         {
             logLines.Add($"Invalid {textFile.Path} Failures:{ruleResult.MissingTokenReason}\n{split.Translated}");
+            AddFlagReason(split, ruleResult.MissingTokenReason);
             split.FlaggedForRetranslation = true;
             modified = true;
         }
@@ -573,6 +580,7 @@ public static class TranslationWorkflow
         if (ruleResult.CustomValidatorReason != null)
         {
             logLines.Add($"Invalid {textFile.Path} Failures:{ruleResult.CustomValidatorReason}\n{split.Translated}");
+            AddFlagReason(split, ruleResult.CustomValidatorReason);
             split.FlaggedForRetranslation = true;
             modified = true;
         }
@@ -580,11 +588,26 @@ public static class TranslationWorkflow
         if (ruleResult.StructuralReason != null)
         {
             logLines.Add($"Invalid {textFile.Path} Failures:{ruleResult.StructuralReason}\n{split.Translated}");
+            AddFlagReason(split, ruleResult.StructuralReason);
             split.FlaggedForRetranslation = true;
             modified = true;
         }
 
         return modified;
+    }
+
+    /// <summary>
+    /// Records why a split was flagged in <see cref="TranslationSplit.FlaggedMistranslation"/> (the glossary rule has its own
+    /// "result,raw," form), so a flagged line in Converted can be diagnosed without finding the log it came from.
+    /// A reason already recorded is kept and the new one appended.
+    /// </summary>
+    private static void AddFlagReason(TranslationSplit split, string reason)
+    {
+        var singleLine = reason.ReplaceLineEndings(" ").Trim();
+        if (singleLine.Length == 0 || split.FlaggedMistranslation.Contains(singleLine, StringComparison.Ordinal))
+            return;
+
+        split.FlaggedMistranslation = split.FlaggedMistranslation.Length == 0 ? singleLine : $"{split.FlaggedMistranslation}; {singleLine}";
     }
 
     /// <summary>

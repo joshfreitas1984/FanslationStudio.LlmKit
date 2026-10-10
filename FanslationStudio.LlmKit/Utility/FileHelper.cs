@@ -16,16 +16,34 @@ public static class FileHelper
     private static readonly TimeSpan[] RetryDelays = [TimeSpan.FromMilliseconds(100), TimeSpan.FromMilliseconds(300)];
 
     public static void WriteAllTextWithRetry(string path, string contents) =>
-        WithRetry(path, () => File.WriteAllText(path, contents));
+        WithRetry(path, () => AtomicWrite(path, temp => File.WriteAllText(temp, contents)));
 
     public static Task WriteAllTextWithRetryAsync(string path, string contents) =>
-        WithRetryAsync(path, () => File.WriteAllTextAsync(path, contents));
+        WithRetryAsync(path, () => AtomicWriteAsync(path, temp => File.WriteAllTextAsync(temp, contents)));
 
     public static void WriteAllLinesWithRetry(string path, IEnumerable<string> contents) =>
         WithRetry(path, () => File.WriteAllLines(path, contents));
 
     public static Task WriteAllLinesWithRetryAsync(string path, IEnumerable<string> contents) =>
         WithRetryAsync(path, () => File.WriteAllLinesAsync(path, contents));
+
+    /// <summary>
+    /// Writes to a temp file beside <paramref name="path"/> and swaps it in, so a run killed or crashing mid-write leaves
+    /// the previous complete file instead of a truncated one (a half-written Converted yaml cannot be deserialised).
+    /// </summary>
+    private static void AtomicWrite(string path, Action<string> write)
+    {
+        var temp = path + ".tmp";
+        write(temp);
+        File.Move(temp, path, overwrite: true);
+    }
+
+    private static async Task AtomicWriteAsync(string path, Func<string, Task> write)
+    {
+        var temp = path + ".tmp";
+        await write(temp);
+        File.Move(temp, path, overwrite: true);
+    }
 
     private static void WithRetry(string path, Action write)
     {
