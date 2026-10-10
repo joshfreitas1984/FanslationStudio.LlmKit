@@ -93,7 +93,9 @@ pin.
      embedded into the plugin DLL (BepInEx's IL2CPP SDK sets
      `CopyLocalLockFileAssemblies=false` project-wide), add `Costura.Fody`/`Fody` like
      DragonHierOverLlm does — skip this unless a real dependency turns out to need it.
-   Add a `PostBuild` target that `XCOPY`s the built DLL into `<GameDir>\BepInEx\plugins`. Write a
+   Add a `PostBuild` target that copies the built DLL into `<GameDir>\BepInEx\plugins` with the
+   MSBuild `Copy` task (`ContinueOnError="true"`), not `XCOPY` via `Exec` (it exited with code 2 and
+   copied nothing under `dotnet build`, and `Copy` also creates the folder). Write a
    minimal `Plugin.cs`: `[BepInPlugin(guid, name, version)]` class deriving from `BasePlugin`
    (IL2CPP) or `BaseUnityPlugin` (Mono), empty `Load()`/`Awake()` — no dump/patch logic, that's
    game-specific work for later.
@@ -154,6 +156,21 @@ pin.
      loads the game's older MonoMod and dies in the preloader (`MethodAccessException` in
      `preloader_*.log`). Leave it out when there is no MonoMod. Do not add console or
      UnityLogListening settings.
+   - **Install the pinned BepInEx into the game folder** (local dev install, after the
+     `installer.json` pin): download the pinned `url` to a scratch folder, verify its SHA256 equals
+     the pinned `sha256` and **stop on a mismatch**, then extract it over the game folder (next to
+     the exe) and confirm `winhttp.dll`, `doorstop_config.ini` and `BepInEx/` exist. Do not launch
+     the game; tell the user to start it once so BepInEx generates `BepInEx/config`. Ask before
+     installing if the game folder already has a BepInEx.
+   - **Add the game to `FanslationStudio.Plugins`**: append an entry to
+     `../FanslationStudio.Plugins/config.yaml` (`name`, `gamePath` = the install folder,
+     `managedPath` = `\<exe>_Data\Managed`, `pluginPath` `\BepInEx\plugins`, `releasePath`
+     `\ReleaseFolder\Files`, `export: true`, `version` 5 / 6 / 6.IL2CPP per the runtime). The file
+     may lack a trailing newline, so make sure the new entry starts on its own line. Then
+     `dotnet build` the matching project (`FanslationStudio.Plugins.BepInEx5`, `.BepInEx6` or
+     `.BepInEx6.IL2CPP`) so its post-build script copies `FanslationStudio.Plugins.dll` into the
+     game's `BepInEx\plugins` and `ReleaseFolder`; "7. Package Release" needs it there. Leave the
+     change uncommitted unless asked.
    - **`Files/Packaging/`** (not `Release/`, which `.gitignore` ignores): `GameVersion.txt` (one
      line, the current game version; ask the user) and `BepInEx.cfg`, a copy of the tailored
      `BepInEx.cfg` from a working local install after the game has been launched once (or a
@@ -172,6 +189,25 @@ pin.
      DLLs exist). Adjust the plugin DLL names and the mod folder mapping for the game.
      Never run 7 or 7b as a smoke test on a dev machine: they rewrite the real `ReleaseFolder` and
      open a browser. Use a throwaway probe project instead.
+   - **Resizer, layout and sprite folders**: create `Files/Resizers`, `Files/Layouts` and
+     `Files/Sprites` (with a `.gitkeep`) and a `Tests/TextResizerTests.cs` (copy from
+     `DragonHierOverLlm`, using `GameFileHandling.WorkingDirectory`/`GameFolder`) holding the
+     `Move*IntoPathBasedFiles` tests (`EditorFileSplitter`) plus `CreateSymlinkToResizer`,
+     `CreateSymlinkToLayouts` and `CreateSymlinkToSprites`, which call LlmKit's
+     `SymlinkWorkflow.CreateSymlink`. The links go from the game's `BepInEx
+esizers`,
+     `BepInEx\layouts` and `BepInEx\sprites2` (note: `sprites2`, the folder
+     `FanslationStudio.Plugins` reads) to those repo folders, so editor output lands in the working
+     tree. Create them for real after the BepInEx install: BepInEx's first run creates these as real
+     folders, so **look first** and only replace them when empty (otherwise move the files into the
+     repo folder), then `New-Item -ItemType SymbolicLink` (worked without elevation with Developer
+     Mode on; otherwise run elevated). Step "6. Package to Game Files" calls the `Move*` tests, so
+     the file is required, and "7. Package Release" maps the split output.
+   - **`Files/TestResults/OldFiles/`**: create it empty. `TranslationCorpus.OldFileLines` enumerates every file in it as
+     YAML, so a missing folder throws `DirectoryNotFoundException` and a `.gitkeep` inside throws
+     `ArgumentNullException` on the first translation run. Also add `Tests/FileInputWorkflowTests.cs` (export, merge,
+     line-match) and `Tests/TranslationWorkflowTests.cs`; the scaffold has neither, and `TranslationExport` must use
+     LlmKit's default `Raw/Dumped/GameData` source folder when the dumper writes there.
    - **In-game update prompt**: comes from `FanslationStudio.Plugins` (`UpdateHost` in
      `UnityShared`), wired into the host for the runtime (IL2CPP, BepInEx 5 Mono or BepInEx 6
      Mono). The plugin reads `BepInEx/release-manifest.json`, so there is no per-game plugin config.
@@ -189,7 +225,7 @@ pin.
    layout, starter `Config.yaml`/`ManualTranslations.yaml`, the plugin project scaffold (compiles,
    loads, does nothing yet), installer host and packaging workflows, `AGENTS.md`/`CLAUDE.md`/
    `docs/README.md`, copied skills. Still
-   game-specific and manual: writing the actual dumper (extracting the game's real data files into
+   game-specific and manual: building the glossary and gender table (skill `build-game-glossary`), writing the actual dumper (extracting the game's real data files into
    `Raw/Dumped`), IL2CPP interop generation against the real game install if applicable, populating
    `GameTextFiles.cs`'s `TextFilesToSplit` list against real dumped files, the first real
    translation run, the `SkillSyncTests.cs` edit from step 8, filling in `Files/Packaging/`
