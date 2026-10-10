@@ -94,6 +94,13 @@ additionalSourceAssessments:
   sampleSeed: 'n/a'
   selection: >-
     Self-reference by title or name: 4 Defect items QC marked Passed (师傅我 / 师姐我 turned into a third party, 我#$PlayerName# rendered "I #$PlayerName# is") plus 2 Pass controls where 掌门我 is already correct, and 5 correctionSamples (3 safe fixes, 1 harmful person shift, 1 over-application control). The 4 Defect sources are also pinned in Config.yaml pinnedSampleSources.
+- name: FlaggedQcMining-20261010
+  path: Files/Converted
+  sampleFingerprint: n/a - not a TranslationAssessmentWorkflow run
+  sampleSize: n/a
+  sampleSeed: n/a
+  selection: >-
+    83 detection items from the "Mine gold-set candidates" scan (flagged and FailedValidation QC items across the registered games, lowest QC score first, plus a few Pass rows), labelled by hand from the source and pre-QC translation alone. The game's own QC verdict was context only and was not copied into any label. Clean Pass cases are included on purpose.
 models:
 - Qwen25-Standard
 - HyMT2-7B
@@ -4728,6 +4735,1955 @@ items:
     - Leader
     direct: zhang men
     literal: palm/leader of the sect
+- sampleId: 2712a6fe602c57ee
+  sampleKind: split
+  source: "40%探索奖励"
+  candidates:
+    ProductionTranslation: "40% exploration reward"
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "Plain UI string; \"40%\" and the reward noun are carried over faithfully."
+  provenance: >-
+    Real production translation mined from DragonHierOverLlm Files/Converted/dynamicStrings.txt.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: DragonHierOverLlm
+  sourceFile: dynamicStrings.txt.yaml
+  glossary: []
+- sampleId: 85e3b70368237c08
+  sampleKind: split
+  source: "哈哈哈哈，原来如此，吴兄这算盘打得不错。"
+  candidates:
+    ProductionTranslation: "Hahaha, so that's how it is. Brother Wu, you've calculated this quite well."
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "Laughter, 原来如此 and the 吴兄 address are all rendered naturally; 算盘打得不错 as \"calculated this quite well\" keeps the scheming sense."
+  provenance: >-
+    Real production translation mined from DragonHierOverLlm Files/Converted/PlotData.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: DragonHierOverLlm
+  sourceFile: PlotData.csv.yaml
+  glossary: []
+- sampleId: 70169e09c2025507
+  sampleKind: split
+  source: "还好有#PlayerName#和万仞山二位掌门鼎力相救，方能撑到此刻。"
+  candidates:
+    ProductionTranslation: "Fortunately, it was thanks to #PlayerName# and Sect Leaders Wan Renshan that we were able to hold on until now."
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "Meaning intact. \"Sect Leaders Wan Renshan\" is slightly ambiguous next to #PlayerName# but not wrong enough to correct."
+  provenance: >-
+    Real production translation mined from DragonHierOverLlm Files/Converted/PlotData.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: DragonHierOverLlm
+  sourceFile: PlotData.csv.yaml
+  glossary:
+  - raw: 掌門
+    rawSimplified: 掌门
+    rawTraditional: 掌門
+    result: Sect Leader
+    allowalt:
+    - Palm Leader
+    - Palm Master
+    - Sect Master
+    - Master
+    - Leader
+    direct: zhang men
+    literal: palm/leader of the sect
+  - raw: 万仞山
+    result: Wan Renshan
+- sampleId: c92d7fdd6071e47a
+  sampleKind: split
+  source: "攻击时与对方"
+  candidates:
+    ProductionTranslation: "Attack when the opponent"
+  labels:
+    ProductionTranslation:
+      label: Abstain
+      defectCategories: []
+      correctionSafety: unnecessary
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "Fragment cut mid-sentence (攻击时与对方, \"when attacking, with the opponent...\"). The imperative-looking \"Attack when the opponent\" cannot be judged without the continuing seam."
+  provenance: >-
+    Real production translation mined from DragonHierOverLlm Files/Converted/dynamicStrings.txt.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: DragonHierOverLlm
+  sourceFile: dynamicStrings.txt.yaml
+  glossary: []
+- sampleId: 257be60f91cddc51
+  sampleKind: split
+  source: "获得100%门派加成效果"
+  candidates:
+    ProductionTranslation: "Gain 100% sect bonus effect"
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "门派加成效果 -> \"sect bonus effect\" with the glossary term; the percentage is preserved."
+  provenance: >-
+    Real production translation mined from DragonHierOverLlm Files/Converted/dynamicStrings.txt.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: DragonHierOverLlm
+  sourceFile: dynamicStrings.txt.yaml
+  glossary:
+  - raw: 门派
+    rawSimplified: 门派
+    rawTraditional: 門派
+    result: Sect
+    context: Refers to a school or faction, especially in martial arts or cultivation settings, often with a specific philosophy or technique.
+    badtrans: false
+- sampleId: a4b359e54c6185f9
+  sampleKind: split
+  source: "若是维持现在门派割据之局面，乱世难平，"
+  candidates:
+    ProductionTranslation: "If the current sect‑dominated situation is maintained, the age of chaos will be hard to pacify."
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "Faithful. 割据 is softened to \"sect-dominated\" and the model emitted a U+2011 non-breaking hyphen, which is not a defect in meaning."
+  provenance: >-
+    Real production translation mined from DragonHierOverLlm Files/Converted/PlotData.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: DragonHierOverLlm
+  sourceFile: PlotData.csv.yaml
+  glossary:
+  - raw: 门派
+    rawSimplified: 门派
+    rawTraditional: 門派
+    result: Sect
+    context: Refers to a school or faction, especially in martial arts or cultivation settings, often with a specific philosophy or technique.
+    badtrans: false
+- sampleId: 707ba99111dce3ac
+  sampleKind: split
+  source: "思迟？杨思迟？……"
+  candidates:
+    ProductionTranslation: "Sichi... Yang Sichi..."
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "Name echo kept, ellipsis kept; 杨思迟 matches the glossary."
+  provenance: >-
+    Real production translation mined from DragonHierOverLlm Files/Converted/PlotData.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: DragonHierOverLlm
+  sourceFile: PlotData.csv.yaml
+  glossary:
+  - raw: 杨思迟
+    result: Yang Sichi
+  - raw: 思迟
+    result: Sichi
+- sampleId: 6982e4aba66a6ec7
+  sampleKind: split
+  source: "哦？思阁主你明明此前罹患怪病，不时头痛欲裂，"
+  candidates:
+    ProductionTranslation: "Oh? Pavilion Master Si, you were clearly suffering from a strange illness beforehand, often with splitting headaches,"
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "思阁主 -> \"Pavilion Master Si\" per glossary; 罹患怪病 and 头痛欲裂 are carried over."
+  provenance: >-
+    Real production translation mined from DragonHierOverLlm Files/Converted/PlotData.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: DragonHierOverLlm
+  sourceFile: PlotData.csv.yaml
+  glossary:
+  - raw: 思阁主
+    result: Pavilion Master Si
+- sampleId: c10c6c328ede6e18
+  sampleKind: split
+  source: "思阁主贵人多忘事啊！"
+  candidates:
+    ProductionTranslation: "Pavilion Master Si, you have a poor memory for important people!"
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "The sarcastic 贵人多忘事 is conveyed as \"poor memory for important people\"; glossary form for 思阁主 used."
+  provenance: >-
+    Real production translation mined from DragonHierOverLlm Files/Converted/PlotData.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: DragonHierOverLlm
+  sourceFile: PlotData.csv.yaml
+  glossary:
+  - raw: 思阁主
+    result: Pavilion Master Si
+- sampleId: 25ef56221e14c273
+  sampleKind: split
+  source: "四师兄知道了自己的生世，得知父母健在，家有兄弟姊妹十人，都在温饱环境下长大，既感妒忌，又觉不甘，可心头的大石始终放了下来。"
+  candidates:
+    ProductionTranslation: "Fourth Senior Brother learned about his origins and discovered that his parents were alive and that he had ten brothers and sisters who had grown up in comfortable conditions. While this filled him with both envy and resentment, he finally felt a heavy burden lifted from his mind."
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "Long sentence rendered completely: 生世, 父母健在, ten siblings, 妒忌/不甘 and the lifted burden are all present."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/CharacterIntro_zh-cn.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: CharacterIntro_zh-cn.csv.yaml
+  glossary:
+  - raw: 兄弟
+    result: Brother
+    allowalt:
+    - fellow
+    - young men
+    literal: Xiong Di
+    context: A term that can refer to literal brothers by birth or metaphorically to close friends or comrades who share a bond similar to familial ties.
+  - raw: 四師兄
+    rawSimplified: 四师兄
+    rawTraditional: 四師兄
+    result: Fourth Senior Brother
+- sampleId: a3180ddee145adcf
+  sampleKind: split
+  source: "她的芳名叫做「樊咲嫣」，是她母亲学了汉语后，希望她生活无忧，能够巧笑嫣然。"
+  candidates:
+    ProductionTranslation: "Her graceful name is Fan Xiaoyan, which her mother chose after learning Chinese, hoping that she would live a carefree life filled with smiling grace."
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "Name explanation is faithful: 芳名, mother learned Chinese, 巧笑嫣然 as smiling grace."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/CharacterIntro_zh-cn.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: CharacterIntro_zh-cn.csv.yaml
+  glossary: []
+- sampleId: d02204e0da0064ef
+  sampleKind: split
+  source: "全真弟子众"
+  candidates:
+    ProductionTranslation: "Quanzhen Disciples multitude"
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - unnatural-phrasing
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "\"Quanzhen Disciples multitude\" is a broken noun phrase for 全真弟子众 (a horde of Quanzhen disciples); the glossary term is right but the head noun is misplaced."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/CombatEffects_zh-cn.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: CombatEffects_zh-cn.csv.yaml
+  glossary:
+  - raw: 全真
+    result: Quanzhen
+    direct: Complete Truth
+    literal: Quanzhen
+- sampleId: 24bc1a1d7e59eaf5
+  sampleKind: split
+  source: "一趾神通"
+  candidates:
+    ProductionTranslation: "One Toe Divine Skill"
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "一趾神通 -> \"One Toe Divine Skill\" mirrors 一指禅-style names; acceptable for a skill name."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/CombatEffects_zh-cn.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: CombatEffects_zh-cn.csv.yaml
+  glossary: []
+- sampleId: dae7d9a84922cbc8
+  sampleKind: split
+  source: "为师不需要你着紧，放马过来便是。"
+  candidates:
+    ProductionTranslation: "My disciple, you don't need to worry so much. Just come at me."
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "Adds \"My disciple,\" where the source only has 为师 (the master referring to themself); this is implied by the self-reference and not a meaning change."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/CombatTalking_zh-cn.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: CombatTalking_zh-cn.csv.yaml
+  glossary: []
+- sampleId: 5bd32de92898714f
+  sampleKind: split
+  source: "锦香宫的娟索功，和离奇点穴绳有异曲同工之妙。"
+  candidates:
+    ProductionTranslation: "While using the Palace of Jinxiang's Juan Sao Gong technique, it shares a similar effect to the bizarre point‑pressure ropes."
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - fluency
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "\"While using the Palace of Jinxiang's Juan Sao Gong technique, it shares a similar effect\" is a dangling construction; the source simply says 娟索功 and the acupoint rope are equally effective in different ways (异曲同工)."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/CombatTalking_zh-cn.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: CombatTalking_zh-cn.csv.yaml
+  glossary:
+  - raw: 錦香
+    rawSimplified: 锦香
+    rawTraditional: 錦香
+    result: Jinxiang
+    direct: Brocade Fragrance
+    literal: Jin Xiang
+- sampleId: bab23c49994641b6
+  sampleKind: split
+  source: "点苍派高深剑诀，剑光奔若流星，一泻千里。"
+  candidates:
+    ProductionTranslation: "The Diancang Sword Sect's profound sword techniques produce a sword light that races like a meteor, streaming for thousands of miles."
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - terminology
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "点苍派 is rendered \"Diancang Sword Sect\": the glossary result is \"Diancang\" and \"Sword\" is invented (the sword art is the following word 剑诀)."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/ItemBook_zh-cn.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: ItemBook_zh-cn.csv.yaml
+  glossary:
+  - raw: 點蒼
+    rawSimplified: 点苍
+    rawTraditional: 點蒼
+    result: Diancang
+    direct: Spot Cyan
+    literal: Diancang
+  - raw: 剑
+    rawSimplified: 剑
+    rawTraditional: 劍
+    result: Sword
+    allowalt:
+    - Jian
+    - scabbard
+    - sharp
+    context: Sometimes gets translated inccorectly
+- sampleId: e89344aa8d976117
+  sampleKind: split
+  source: "太古道人郝大通于华山创设全真华山派时携去的原始全真剑法，此书由王喆亲笔写就，丹阳子马钰抄录成七册分予师弟留作纪念，以缅怀师尊。"
+  candidates:
+    ProductionTranslation: "The original Quanzhen Sword Art brought by Daoist Master Hao Dacheng when he founded the Quanzhen Huashan Sect on Mount Hua. This book was personally written by Wang Che, and Danyangzi Ma Yu copied it into seven volumes to give to his junior disciples as a keepsake to honor their master."
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - mistranslation
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "郝大通 is rendered \"Hao Dacheng\"; the name is Hao Datong (通 is tong). Remaining names and the seven volumes are correct."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/ItemBook_zh-cn.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: ItemBook_zh-cn.csv.yaml
+  glossary:
+  - raw: 師弟
+    rawSimplified: 师弟
+    rawTraditional: 師弟
+    result: Junior Disciple
+    allowalt:
+    - Younger Brother
+    - Brother
+    - Junior Brother
+    - Disciple
+    - Junior
+    direct: shi di
+    literal: teacher younger brother
+  - raw: 剑法
+    rawSimplified: 剑法
+    rawTraditional: 劍法
+    result: Sword Art
+    allowalt:
+    - Sword Technique
+    - Swordsmanship
+    badtrans: false
+  - raw: 全真
+    result: Quanzhen
+    direct: Complete Truth
+    literal: Quanzhen
+- sampleId: 77abde6a812031a0
+  sampleKind: split
+  source: "从前毒打八袋长老的那件事，是有原因的。"
+  candidates:
+    ProductionTranslation: "There was a reason for the incident where they beat the Eighth Bag Elder with poison."
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - mistranslation
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "毒打 means to beat severely; the translation reads it as beating with poison (\"beat the Eighth Bag Elder with poison\")."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/CharacterIntro_zh-cn.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: CharacterIntro_zh-cn.csv.yaml
+  glossary:
+  - raw: 长老
+    rawSimplified: 长老
+    rawTraditional: 長老
+    result: Elder
+    allowalt:
+    - Senior
+    - Master
+    direct: Long Old
+    literal: Chang Lao
+- sampleId: 2d5d50901448f36e
+  sampleKind: split
+  source: "有感于楚霸王烏江自刎，引以为惕，认为光凭武勇不能成事，试问古来哪位开国君王是自己武功高强？逞匹夫之勇者，枉送性命而已。"
+  candidates:
+    ProductionTranslation: "Reflecting on the fall of the Western Chu Overlord at the Wu River, I take it as a warning. I believe that relying solely on martial prowess cannot lead to success. Throughout history, can any founding emperor claim to have become powerful through their own martial skills? Those who indulge in the strength of a lone warrior only waste their lives."
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "自刎 is softened to \"the fall of\" and 西楚 is added, but the argument (martial courage alone cannot win a dynasty) is carried through intact."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/CharacterIntro_zh-cn.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: CharacterIntro_zh-cn.csv.yaml
+  glossary: []
+- sampleId: 001110c4ba19aa1c
+  sampleKind: split
+  source: "你不若认输，我让你不至于太过出丑也就是了。"
+  candidates:
+    ProductionTranslation: "If you don't want to admit defeat, I'll make sure you don't embarrass yourself too much."
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - mistranslation
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "Logic reversed: 你不若认输 is \"you had better concede\", not the conditional \"If you don't want to admit defeat\"."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/CombatTalking_zh-cn.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: CombatTalking_zh-cn.csv.yaml
+  glossary: []
+- sampleId: cf3bcc952d2540f0
+  sampleKind: split
+  source: "兀那人！莫来搅和，否则我剑下绝不容情，将你一并斩了！"
+  candidates:
+    ProductionTranslation: "Hey there! Don't come meddling, otherwise I'll show no mercy with my sword and cut you down along with you!"
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - fluency
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "\"cut you down along with you\" is garbled; 一并 means together with others (\"cut you down too\"). The threat is otherwise intact."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/CombatTalking_zh-cn.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: CombatTalking_zh-cn.csv.yaml
+  glossary:
+  - raw: 剑
+    rawSimplified: 剑
+    rawTraditional: 劍
+    result: Sword
+    allowalt:
+    - Jian
+    - scabbard
+    - sharp
+    context: Sometimes gets translated inccorectly
+- sampleId: 186c188defb97759
+  sampleKind: split
+  source: "青衫有缺，蓝衣来补。"
+  candidates:
+    ProductionTranslation: "A tattered blue robe is mended by a blue‑clad savior."
+  labels:
+    ProductionTranslation:
+      label: Abstain
+      defectCategories: []
+      correctionSafety: unnecessary
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "青衫有缺，蓝衣来补 reads like paired item flavour text. \"tattered blue robe ... blue-clad savior\" invents \"tattered\" and \"savior\", but without the items' context the intended meaning cannot be verified."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/Equipment_zh-cn.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: Equipment_zh-cn.csv.yaml
+  glossary: []
+- sampleId: 5fc4aae1c1481a7c
+  sampleKind: split
+  source: "江行长欠钟家的货物失而复得，又不必面对沧帮刁难，真不知有多感谢你。"
+  candidates:
+    ProductionTranslation: "Jiang Xingzhang truly doesn't know how much he owes you. Not only have the goods lost to Zhong Family been recovered, but he also won't have to deal with Cang Gang's difficulties."
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - mistranslation
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "Speaker and goods are mangled: the source says 江行 long owed Zhong Family goods that are now recovered and the speaker thanks you; the translation makes Jiang the one who owes the listener and says the goods were \"lost to Zhong Family\"."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/Legend_01_zh-cn.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: Legend_01_zh-cn.csv.yaml
+  glossary:
+  - raw: 滄幫
+    rawSimplified: 沧帮
+    rawTraditional: 滄幫
+    result: Cang Gang
+    direct: blue/ancient gang
+    literal: cang bang
+- sampleId: b1c6d98a27dcd77a
+  sampleKind: split
+  source: "因为生父滥赌而被卖到崆峒，身价五贯钱，那还是看她天生美人胚子、又是完璧之身的份上，才有这价。还道前途可期，怎料不知何时起，这丫头就长不高了，令铁拳门人大失所望。"
+  candidates:
+    ProductionTranslation: "Sold to Kongtong because her biological father was a gambler who had squandered their fortune, she was valued at five coins, which was high due to her natural beauty and her intact virtue. They said her future looked promising, but it was not long before she stopped growing, disappointing the Iron Fist followers."
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "Meaning preserved. 五贯钱 becomes \"five coins\" via the glossary 钱=Coin and the timing 不知何时起 is slightly firmed, both minor."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/CharacterIntro_zh-cn.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: CharacterIntro_zh-cn.csv.yaml
+  glossary:
+  - raw: 钱
+    rawSimplified: 钱
+    rawTraditional: 錢
+    result: Coin
+    allowalt:
+    - Qian
+    - Money
+    badtrans: false
+  - raw: 鐵拳
+    rawSimplified: 铁拳
+    rawTraditional: 鐵拳
+    result: Iron Fist
+    direct: Iron Fist
+    literal: Tiequan
+  - raw: 崆峒
+    result: Kongtong
+    direct: Lofty Peak
+    literal: Kongtong
+- sampleId: 0437949dbe54da83
+  sampleKind: split
+  source: "喂招"
+  candidates:
+    ProductionTranslation: "Feeding Technique"
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - mistranslation
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "喂招 is a sparring practice where one partner feeds moves to the other; \"Feeding Technique\" is a literal misreading."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/CombatEffects_zh-cn.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: CombatEffects_zh-cn.csv.yaml
+  glossary: []
+- sampleId: 7d376f117523a916
+  sampleKind: split
+  source: "麻痹"
+  candidates:
+    ProductionTranslation: "Paralysis"
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "麻痹 -> \"Paralysis\" is the standard status term."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/CombatEffects_zh-cn.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: CombatEffects_zh-cn.csv.yaml
+  glossary: []
+- sampleId: 0c816088d1e88abd
+  sampleKind: split
+  source: "嘴攻"
+  candidates:
+    ProductionTranslation: "Verbal Attack"
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "嘴攻 -> \"Verbal Attack\" fits the status effect."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/CombatInfo_zh-cn.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: CombatInfo_zh-cn.csv.yaml
+  glossary: []
+- sampleId: a8f5e3f272fe7510
+  sampleKind: split
+  source: "虽然效果强大、流传亦广，却没人要练的气功。这是因为此功乃是一门童子的缘故，殊为可惜。"
+  candidates:
+    ProductionTranslation: "Although its effects are powerful and it is widely known, no one practices this qi‑gong. This is because it is a practice meant for a virgin, which is a great pity."
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "童子功 as \"a practice meant for a virgin\" is a reasonable rendering; the U+2011 in \"qi-gong\" is cosmetic."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/ItemBook_zh-cn.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: ItemBook_zh-cn.csv.yaml
+  glossary: []
+- sampleId: efe5cf5bb8c4ceb0
+  sampleKind: split
+  source: "小梅爱用的匕首，乃是铁拳前掌门手把手带着小竹，为小梅打造的兵器。"
+  candidates:
+    ProductionTranslation: "Little May's favorite dagger was crafted by the former Sect Leader of Iron Fist, who personally guided Little Bamboo in creating the weapon for Little May."
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "Dagger, 前掌门, 手把手 and who made it for whom are all rendered correctly; names Little May and Little Bamboo are consistent."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/ItemSpecial_zh-cn.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: ItemSpecial_zh-cn.csv.yaml
+  glossary:
+  - raw: 鐵拳
+    rawSimplified: 铁拳
+    rawTraditional: 鐵拳
+    result: Iron Fist
+    direct: Iron Fist
+    literal: Tiequan
+  - raw: 掌門
+    rawSimplified: 掌门
+    rawTraditional: 掌門
+    result: Sect Leader
+    allowalt:
+    - Palm Leader
+    - Palm Master
+    - Sect Master
+    - Master
+    - Leader
+    direct: zhang men
+    literal: palm/leader of the sect
+- sampleId: eee4be6ca716cab5
+  sampleKind: split
+  source: "咦？不必了吧，我区区的外姓弟子，三天两头就累晕一次，从来没敢劳烦掌门担忧啊。"
+  candidates:
+    ProductionTranslation: "Hey? Really? I'm just a humble outsider disciple, and I get dizzy almost every other day. I've never dared to trouble the_master before."
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - garbage-output
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "\"the_master\" is an underscore glue token left in the English where the glossary term 掌门 should have been rendered normally."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/Story_1.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: Story_1.csv.yaml
+  glossary:
+  - raw: 掌門
+    rawSimplified: 掌门
+    rawTraditional: 掌門
+    result: Sect Leader
+    allowalt:
+    - Palm Leader
+    - Palm Master
+    - Sect Master
+    - Master
+    - Leader
+    direct: zhang men
+    literal: palm/leader of the sect
+- sampleId: ce076cc558c86129
+  sampleKind: split
+  source: "打工"
+  candidates:
+    ProductionTranslation: "Working part‑time"
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "打工 -> \"Working part-time\" is acceptable for a short job label."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/Story_1.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: Story_1.csv.yaml
+  glossary: []
+- sampleId: 9770c58279f7ebfe
+  sampleKind: split
+  source: "留力不发"
+  candidates:
+    ProductionTranslation: "Conserve energy and not act"
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - unnatural-phrasing
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "留力不发 (hold back power, do not release) is rendered \"Conserve energy and not act\", which is clunky for a status label and shifts the meaning toward inaction."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/CombatEffects_zh-cn.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: CombatEffects_zh-cn.csv.yaml
+  glossary: []
+- sampleId: 6ad4a1a1e8c487b3
+  sampleKind: split
+  source: "个子虽矮，似乎也不像看上去年幼的样子。有种不容小觑的气势，猛盯着我，可我不认识她呀？"
+  candidates:
+    ProductionTranslation: "Although they are short, they don't seem to look as young as they are. There is a kind of imposing presence that cannot be underestimated, staring intently at me, but I don't know them, do I?"
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - pronoun-attribution
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "The source uses 她 (she) for a stranger and the translation renders her as \"they\" and \"them\" throughout."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/Story_10.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: Story_10.csv.yaml
+  glossary:
+  - raw: 气势
+    rawSimplified: 气势
+    rawTraditional: 氣勢
+    result: Momentum
+    direct: Qi force
+    literal: Qishi
+    badtrans: false
+  - raw: 年
+    result: Year
+    direct: Year
+    literal: Nian
+    badtrans: false
+- sampleId: 8739af97d62a6d74
+  sampleKind: split
+  source: "你不是说订单排到下个月去了，怎么这别派来的丑八怪一到，你就肯让这人插队？这不是胳膊向外弯吗！不公平！你这没良心的矮子！"
+  candidates:
+    ProductionTranslation: "Didn't you say the order was pushed to next month? How come as soon as this ugly person arrives, you let them cut in line? Isn't this bending the rules? It's unfair! You heartless little person!"
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - lost-idiom
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "胳膊向外弯 (favouring outsiders) is rendered \"bending the rules\", losing the idiom; 矮子 is softened to \"little person\"."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/Story_10.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: Story_10.csv.yaml
+  glossary: []
+- sampleId: cb5a8d332b88c463
+  sampleKind: split
+  source: "我是武林盟主，你也得代表西武林盟。到时我们生活双侠颠峰对决，眉山论剑。"
+  candidates:
+    ProductionTranslation: "I am the Alliance Leader of the Wulin, and you must represent the Western Wulin Alliance as well. At that time, we shall have our dual peak confrontation on Meishan for swordsmanship deliberation."
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "The source contains a stray 生活 (probably a typo) that the translation sensibly drops; the Alliance Leader, Wulin Alliance and 眉山论剑 are all rendered."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/Story_11.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: Story_11.csv.yaml
+  glossary:
+  - raw: 盟主
+    result: Alliance Leader
+    allowalt:
+    - Leader
+    direct: Alliance Master
+    literal: Meng Zhu
+  - raw: 武林盟
+    result: Wulin Alliance
+    allowalt:
+    - Alliance
+    direct: martial forest alliance
+    literal: wulin meng
+  - raw: 剑
+    rawSimplified: 剑
+    rawTraditional: 劍
+    result: Sword
+    allowalt:
+    - Jian
+    - scabbard
+    - sharp
+    context: Sometimes gets translated inccorectly
+- sampleId: b58ea35ca4918d93
+  sampleKind: split
+  source: "啰唆，本宫只助武林盟开门，即算是尽了义务。"
+  candidates:
+    ProductionTranslation: "Loquacious, this palace only assists the Wulin Alliance in opening the door, and that is considered fulfilling my duty."
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - fluency
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "\"Loquacious,\" as a stand-alone interjection for 啰唆 is stilted; \"Enough chatter\" or similar is expected. The rest is fine."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/Story_12.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: Story_12.csv.yaml
+  glossary:
+  - raw: 武林盟
+    result: Wulin Alliance
+    allowalt:
+    - Alliance
+    direct: martial forest alliance
+    literal: wulin meng
+- sampleId: 18c19026bfd4d997
+  sampleKind: split
+  source: "最好是！那个瞎眼的能看得上你这浑人。"
+  candidates:
+    ProductionTranslation: "Best if! That blind one could look upon you this fool."
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - mistranslation
+      - fluency
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "最好是 is sarcastic \"as if!\"; the translation \"Best if!\" and \"That blind one could look upon you this fool\" is a garbled word-for-word reading."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/Story_12.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: Story_12.csv.yaml
+  glossary: []
+- sampleId: 1eb960e3193899b6
+  sampleKind: split
+  source: "我最近经常在附近找体力活干，想早日将外堡打打打打砸的事物赔上。种田、搬货、护卫行商，要是你你你有什么来钱快的好头路，拜托帮我介绍一下。"
+  candidates:
+    ProductionTranslation: "I've been frequently looking for physical labor nearby recently, hoping to soon compensate for the damages done to the outer fortress. Farming, moving goods, guarding merchants‑should you, you, you have any quick money opportunities, please help me introduce some."
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - dropped-stutter
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "打打打打砸 is flattened to \"damages done\" while 你你你 is kept; the rest of the paragraph is faithful."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/Story_13.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: Story_13.csv.yaml
+  glossary:
+  - raw: 护卫
+    rawSimplified: 护卫
+    rawTraditional: 護衛
+    result: Guard
+    direct: protect defend
+    literal: hu wei
+    badtrans: false
+  - raw: 钱
+    rawSimplified: 钱
+    rawTraditional: 錢
+    result: Coin
+    allowalt:
+    - Qian
+    - Money
+    badtrans: false
+  - raw: 日
+    result: Day
+    direct: Day
+    literal: Ri
+    badtrans: false
+- sampleId: ff8f1e7993040e1a
+  sampleKind: split
+  source: "揍狗拳"
+  candidates:
+    ProductionTranslation: "Dog Punch"
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "揍狗拳 -> \"Dog Punch\" is a reasonable skill name; not untranslated pinyin."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/CombatEffects_zh-cn.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: CombatEffects_zh-cn.csv.yaml
+  glossary: []
+- sampleId: e7d0879d4c541b2a
+  sampleKind: split
+  source: "唯女子与小人难养也！"
+  candidates:
+    ProductionTranslation: "Only women and children are hard to deal with!"
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - mistranslation
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "唯女子与小人难养也 is the Analects line, where 小人 are petty persons, not children (\"Only women and children are hard to deal with\")."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/CombatTalking_zh-cn.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: CombatTalking_zh-cn.csv.yaml
+  glossary: []
+- sampleId: d458900028890223
+  sampleKind: split
+  source: "注意啦，金钱镖要打你坛中穴——！"
+  candidates:
+    ProductionTranslation: "Watch out, I'm throwing a money dart at your tan zhong point!"
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "金钱镖 -> \"money dart\" and the acupoint (坛中 for 膻中) are handled sensibly; romanising an acupoint name is normal."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/CombatTalking_zh-cn.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: CombatTalking_zh-cn.csv.yaml
+  glossary:
+  - raw: 钱
+    rawSimplified: 钱
+    rawTraditional: 錢
+    result: Coin
+    allowalt:
+    - Qian
+    - Money
+    badtrans: false
+- sampleId: 7ae95c709ac38dd5
+  sampleKind: split
+  source: "沥泉小剑"
+  candidates:
+    ProductionTranslation: "Liquor Spring Small Sword"
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - mistranslation
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "沥泉 is rendered \"Liquor Spring\", inventing liquor; 沥 is to drip or strain and the name should be romanised or rendered as a spring."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/Equipment_zh-cn.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: Equipment_zh-cn.csv.yaml
+  glossary:
+  - raw: 剑
+    rawSimplified: 剑
+    rawTraditional: 劍
+    result: Sword
+    allowalt:
+    - Jian
+    - scabbard
+    - sharp
+    context: Sometimes gets translated inccorectly
+- sampleId: 556765296cda1cb3
+  sampleKind: split
+  source: "一本古老的指谱，由梵文写成，深藏于藏经阁之下，若非地震，恐怕永世不见天日。"
+  candidates:
+    ProductionTranslation: "An ancient score, written in Sanskrit, was buried deep beneath the scripture repository. Were it not for an earthquake, it might have remained hidden forever."
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "指谱 as \"score\", the Sanskrit text, the 藏经阁 and the earthquake conditional are all carried over."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/ItemBook_zh-cn.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: ItemBook_zh-cn.csv.yaml
+  glossary:
+  - raw: 日
+    result: Day
+    direct: Day
+    literal: Ri
+    badtrans: false
+- sampleId: cf1fa1f3163f0c66
+  sampleKind: split
+  source: "又名紫檀香，道士开坛请神、作醮、科仪皆用此香。"
+  candidates:
+    ProductionTranslation: "Also known as Purple Sandalwood Incense, Daoist priests use this incense when they consecrate altars to invite spirits, perform rituals, and conduct ceremonial rites."
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "Faithful: 紫檀香, Daoist priests, 开坛请神, 作醮 and 科仪 are covered."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/ItemMisc_zh-cn.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: ItemMisc_zh-cn.csv.yaml
+  glossary: []
+- sampleId: 086f28b8c3467c9a
+  sampleKind: split
+  source: "50文拿去"
+  candidates:
+    ProductionTranslation: "Pass 50's document to them"
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - mistranslation
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "文 is the coin unit (wen); \"Pass 50's document to them\" reads it as a document."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/Story_1.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: Story_1.csv.yaml
+  glossary: []
+- sampleId: 29483255885dde81
+  sampleKind: split
+  source: "使用《苏合香酒》"
+  candidates:
+    ProductionTranslation: "Use the 'burning blade.'"
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - mistranslation
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "《苏合香酒》 (Storax wine) is rendered \"Use the 'burning blade.'\", which is the rendering of 烧刀子; the wrong item name has bled in."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/Story_10.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: Story_10.csv.yaml
+  glossary: []
+- sampleId: b6ed251d524ca3f9
+  sampleKind: split
+  source: "铁琵琶功"
+  candidates:
+    ProductionTranslation: "Iron Pipa Skill"
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "铁琵琶功 -> \"Iron Pipa Skill\" is a correct skill name."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/CombatEffects_zh-cn.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: CombatEffects_zh-cn.csv.yaml
+  glossary: []
+- sampleId: 27ea0d11f706ce30
+  sampleKind: split
+  source: "产于四川泸县的名茶。"
+  candidates:
+    ProductionTranslation: "A famous tea produced in Luzhou County, Sichuan."
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - mistranslation
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "泸县 is Lu County; \"Luzhou County\" is not a place (Luzhou is the city and Lu County sits inside it)."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/ItemMisc_zh-cn.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: ItemMisc_zh-cn.csv.yaml
+  glossary: []
+- sampleId: 448d7c07653eec28
+  sampleKind: split
+  source: "你剪得未免太少了些，远不如预期，本来以为要挨骂了，没承想，抬头反见二师兄和颜悦色。"
+  candidates:
+    ProductionTranslation: "You didn't cut enough at all; it's far from what I expected. I thought I was going to get scolded, but instead, Second Senior Brother looks quite pleasant."
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "The scolding that did not happen and the senior brother's pleasant manner are preserved; tense of \"looks\" is slightly off but harmless."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/Legend_01_zh-cn.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: Legend_01_zh-cn.csv.yaml
+  glossary:
+  - raw: 二師兄
+    rawSimplified: 二师兄
+    rawTraditional: 二師兄
+    result: Second Senior Brother
+- sampleId: fb76d993f28a5d71
+  sampleKind: split
+  source: "一度潦倒的唐门，多亏当代弟子的活跃，颇有起死回生的迹象。"
+  candidates:
+    ProductionTranslation: "The once‑declining Tang Clan has shown signs of revival thanks to the current generation of disciples, much like coming back from the dead."
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "Faithful: 一度潦倒, 当代弟子, 起死回生 all present."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/PlayerInfo_zh-cn.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: PlayerInfo_zh-cn.csv.yaml
+  glossary:
+  - raw: 唐門
+    rawSimplified: 唐门
+    rawTraditional: 唐門
+    result: Tang Clan
+    direct: Tang gate
+    literal: Tangmen
+- sampleId: b1eb39bb34868dcf
+  sampleKind: split
+  source: "掌门一发话，你满腔不情愿顿时化作千百个愿意了。"
+  candidates:
+    ProductionTranslation: "Once the Sect Leader speaks, your reluctance instantly transforms into a hundred willing hearts."
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "Idiom 千百个愿意 rendered as \"a hundred willing hearts\"; sense preserved."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/Story_1.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: Story_1.csv.yaml
+  glossary:
+  - raw: 掌門
+    rawSimplified: 掌门
+    rawTraditional: 掌門
+    result: Sect Leader
+    allowalt:
+    - Palm Leader
+    - Palm Master
+    - Sect Master
+    - Master
+    - Leader
+    direct: zhang men
+    literal: palm/leader of the sect
+- sampleId: dd7f776a8ded17a3
+  sampleKind: split
+  source: "我今日交上什么好运，能有拍拍？"
+  candidates:
+    ProductionTranslation: "I must have had some good Day today to get two pats."
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - terminology
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "Glossary 日=Day leaks into 今日: \"some good Day today\". The 拍拍 reduplication also becomes \"two pats\"."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/Story_10.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: Story_10.csv.yaml
+  glossary:
+  - raw: 拍拍
+    result: Pat
+    allowalt:
+    - slap
+    - flap
+    direct: pat pat
+    literal: Pai Pai
+  - raw: 日
+    result: Day
+    direct: Day
+    literal: Ri
+    badtrans: false
+- sampleId: eae3a9a4911c4c1e
+  sampleKind: split
+  source: "如今我们最占上风的，就是地利。此处不比风雨山，山中草木有谁比我们更熟？唐门除了暗器、毒药，也善机关巧术，此时不设陷阱，更待何时！"
+  candidates:
+    ProductionTranslation: "Now our greatest advantage lies in the terrain. Unlike Fengyu Mountain, who among the plants and trees here knows them better than we do? The Tang Clan excels not only in hidden weapons and poison but also in mechanisms and trickery. If we do not set a trap now, when should we wait for!"
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - lost-idiom
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "更待何时 (\"if not now, when?\") is rendered \"when should we wait for!\", losing the idiom; the rest (地利, 机关, trap) is fine."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/Story_12.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: Story_12.csv.yaml
+  glossary:
+  - raw: 唐門
+    rawSimplified: 唐门
+    rawTraditional: 唐門
+    result: Tang Clan
+    direct: Tang gate
+    literal: Tangmen
+  - raw: 暗器
+    result: Hidden Weapon
+  - raw: 机关
+    rawSimplified: 机关
+    rawTraditional: 機關
+    result: Mechanism
+    allowalt:
+    - Organization
+    - Scheme
+    - Mechanical
+    direct: Organization
+    literal: Jiguan
+    badtrans: false
+  - raw: 風雨山
+    rawSimplified: 风雨山
+    rawTraditional: 風雨山
+    result: Fengyu Mountain
+    direct: wind rain mountain
+    literal: Fengyu Shan
+- sampleId: 0a2ca1218a42ab46
+  sampleKind: split
+  source: "大师兄，这醍醐软筋散是加味的，你纵有抗毒体质，也别沾到了。下入酒水时，记得以布遮掩脸面，当心反被麻倒。"
+  candidates:
+    ProductionTranslation: "Big Senior Brother, this Tiger Eye Soft Muscle Powder is enhanced with additional ingredients. Even if you have an anti‑poison constitution, don't come into contact with it. When it's added to alcohol or water, cover your face with a cloth to avoid being paralyzed."
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - mistranslation
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "醍醐 (clarified butter, a Buddhist term) is rendered \"Tiger Eye\"; the powder name is invented."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/Story_1.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: Story_1.csv.yaml
+  glossary:
+  - raw: 软筋散
+    rawSimplified: 软筋散
+    rawTraditional: 軟筋散
+    result: Soft Muscle Powder
+  - raw: 大师兄
+    rawSimplified: 大师兄
+    rawTraditional: 大師兄
+    result: Big Senior Brother
+    allowalt:
+    - Senior Brother
+    - Big Brother
+    direct: Big Senior Brother
+    literal: Da Shixiong
+- sampleId: 1549b1515c42ca88
+  sampleKind: split
+  source: "鸽子有此一劫是因果循环，牠命中的难。法师所言那位国王一诺干涉因果，却将业力转嫁他人，自己坐享其成，不智且不德，所以那国王才成不了萨波达王，只是个无德暴君！伪君子！"
+  candidates:
+    ProductionTranslation: "The pigeon faces this calamity due to the cycle of cause and effect; its hit rate is difficult. What the master said about that king intervening in cause and effect, shifting the karma onto others while enjoying the benefits himself, is both unwise and immoral. That is why the king could not become King Sabodah, merely a tyrant without virtue! A false gentleman!"
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - mistranslation
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "命中的难 means \"the tribulation written in its fate\"; the translation reads 命中 as \"hit rate\". The glossary snapshot is empty because the 命中 preset entry has since been removed."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/Story_12.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: Story_12.csv.yaml
+  glossary: []
+- sampleId: b9c4824a083fab74
+  sampleKind: split
+  source: "推测是俗称的「屎缺」，吃力不讨好那种。"
+  candidates:
+    ProductionTranslation: "Speculation is commonly known as shit deficiency, that kind of thing where you put in effort but don't get appreciation."
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - fluency
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "\"Speculation is commonly known as shit deficiency\" misparses the sentence; it should read like \"I guess it is what is commonly called a 'shit job'\"."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/Story_14.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: Story_14.csv.yaml
+  glossary: []
+- sampleId: 310af8a747f840c1
+  sampleKind: split
+  source: "怎么一下无量寿、一下无量光，一下又无量福？你们问候人用语真多，不知差别在哪儿？"
+  candidates:
+    ProductionTranslation: "How can it be Amituofo, Amoghasiddhi, and Amrtasundara all at once? You have so many greetings; I wonder where the differences lie?"
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - mistranslation
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "无量寿 / 无量光 / 无量福 are Infinite Life / Infinite Light / Infinite Fortune greetings; the translation substitutes Amoghasiddhi and Amrtasundara, which are not in the source."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/Story_15.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: Story_15.csv.yaml
+  glossary: []
+- sampleId: 0e72228618e2c880
+  sampleKind: split
+  source: "会，他会！你没看他手兆机吞吐，那是准备要打我屁股的预兆！"
+  candidates:
+    ProductionTranslation: "Yes, he will! You didn't see his hand signal machine inhale and exhale, that's a sign he's about to hit my butt!"
+  labels:
+    ProductionTranslation:
+      label: Abstain
+      defectCategories: []
+      correctionSafety: unnecessary
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "The source itself looks garbled (手兆机吞吐), so neither \"hand signal machine\" nor any alternative can be judged."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/Story_16.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: Story_16.csv.yaml
+  glossary: []
+- sampleId: f0956632f5539cb1
+  sampleKind: split
+  source: "且慢，要赌可以，但这回要玩点新花样，加上点投壶的要素。"
+  candidates:
+    ProductionTranslation: "Hold on, betting is fine, but this time let's try something new, incorporating some elements of bowling."
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - mistranslation
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "投壶 is pitch-pot (arrow-throwing into a vase); \"bowling\" is wrong."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/Story_5.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: Story_5.csv.yaml
+  glossary: []
+- sampleId: 391d471671a0f935
+  sampleKind: split
+  source: "传奇一般的前任武林盟主龙渊的成名功夫，其实并不是一套武功，而是龙渊曾使过的七种绝技。"
+  candidates:
+    ProductionTranslation: "The legendary former Alliance Leader Long Yuan's renowned martial arts skills were not actually a single set of martial techniques, but rather seven unique and unparalleled skills that Long Yuan had once used."
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "Faithful: former Alliance Leader Long Yuan, seven signature skills rather than one set."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/ItemBook_zh-cn.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: ItemBook_zh-cn.csv.yaml
+  glossary:
+  - raw: 盟主
+    result: Alliance Leader
+    allowalt:
+    - Leader
+    direct: Alliance Master
+    literal: Meng Zhu
+  - raw: 武林盟
+    result: Wulin Alliance
+    allowalt:
+    - Alliance
+    direct: martial forest alliance
+    literal: wulin meng
+  - raw: 龍淵
+    rawSimplified: 龙渊
+    rawTraditional: 龍淵
+    result: Long Yuan
+- sampleId: 797d6d72ed27a844
+  sampleKind: split
+  source: "烧刀子"
+  candidates:
+    ProductionTranslation: "Burning the blade"
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - mistranslation
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "烧刀子 is strong liquor; \"Burning the blade\" translates the characters."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/ItemMisc_zh-cn.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: ItemMisc_zh-cn.csv.yaml
+  glossary:
+  - raw: 刀
+    result: Blade
+    allowalt:
+    - Knife
+    - Knives
+    - Cleaver
+    - Scissor
+    - Saber
+    - Dao
+    - Scabbard
+    context: Dao is Blade or Cleaver or Knife
+    badtrans: false
+- sampleId: 7d5d152bd74236ff
+  sampleKind: split
+  source: "我曾听人说过三师兄专门绑架六旬以上的阿婆，关在房里，合修旧魔教遗传的邪恶魔功，害人家梅开二度。"
+  candidates:
+    ProductionTranslation: "I once heard people say that Third Senior Brother specializes in kidnapping grandmothers over sixty, locking them in a room to practice together the evil demonic arts inherited from the old Demon Sect, causing those families to bloom a second time."
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - lost-idiom
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "梅开二度 (a second spring / second marriage) is half literalised as \"causing those families to bloom a second time\" and the subject (the old women) is lost."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/Story_1.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: Story_1.csv.yaml
+  glossary:
+  - raw: 魔教
+    result: Demon Sect
+    direct: mo jiao
+    literal: demon sect
+  - raw: 三師兄
+    rawSimplified: 三师兄
+    rawTraditional: 三師兄
+    result: Third Senior Brother
+- sampleId: 86623b4de542c69b
+  sampleKind: split
+  source: "身外之物，留之无用。我倒庆幸书到用时不恨少，书中真有黄金屋。为了师门的名声，这印花用得义无反顾。"
+  candidates:
+    ProductionTranslation: "Material possessions are of no use. I am rather glad that when the time comes, I do not regret having too few books; within the books, there truly exists a house of gold. For the sake of the reputation of the sect, I will use this stamp without hesitation."
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "The altered 书到用时不恨少 proverb and the golden-house allusion are rendered literally but correctly."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/Story_1.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: Story_1.csv.yaml
+  glossary: []
+- sampleId: ac9cd5910e1722af
+  sampleKind: split
+  source: "哈哈哈，临阵磨枪，不亮也光，乱指挥本就是末将拿手好戏。走着瞧吧！"
+  candidates:
+    ProductionTranslation: "Hahaha, sharpening the spear at the last moment, it may not shine, but it still has its luster. Chaos in command is precisely the specialty of this general. Just wait and see!"
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "Literal rendering of 临阵磨枪，不亮也光; the image survives and the speaker's boast is clear. Borderline but acceptable."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/Story_11.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: Story_11.csv.yaml
+  glossary:
+  - raw: 枪
+    rawSimplified: 枪
+    rawTraditional: 槍
+    result: Spear
+    allowalt:
+    - Sharp
+    - Qiang
+    badtrans: false
+- sampleId: 738fda1bba311795
+  sampleKind: split
+  source: "可唐门有我、有你，兵来将挡，水来土掩便是。"
+  candidates:
+    ProductionTranslation: "With the Tang Clan, with you and me, we will block soldiers when they come and cover with earth when water arrives."
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "Literal 兵来将挡，水来土掩 still reads as handle-each-threat-as-it-comes in context."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/Story_12.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: Story_12.csv.yaml
+  glossary:
+  - raw: 唐門
+    rawSimplified: 唐门
+    rawTraditional: 唐門
+    result: Tang Clan
+    direct: Tang gate
+    literal: Tangmen
+- sampleId: 724c8da43f2b04f9
+  sampleKind: split
+  source: "我再怎么说也是官宦之家的千金。为上官世家劳碌十几年，该让我狐假虎威一回。"
+  candidates:
+    ProductionTranslation: "I may be the daughter of a noble family. After working for the Shangguan clan for over a decade, it's time for me to rely on their authority and prestige for once."
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "狐假虎威 is handled by meaning (\"rely on their authority\"); \"I may be\" softens 再怎么说也是 but the stance is clear."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/Story_12.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: Story_12.csv.yaml
+  glossary:
+  - raw: 虎
+    result: Tiger
+    allowalt:
+    - Hu
+    - Gecko
+    context: Sometimes used as literal names
+    badtrans: false
+  - raw: 年
+    result: Year
+    direct: Year
+    literal: Nian
+    badtrans: false
+  - raw: 上官
+    result: Shangguan
+    direct: upper official
+    literal: shang guan
+- sampleId: 0830ea47d8086f19
+  sampleKind: split
+  source: "当了乞丐还不能不择手段，当个屁乞丐？你干嘛不去做工讨生活？"
+  candidates:
+    ProductionTranslation: "Once you become a beggar, you can't avoid using any means. Why be a beggar who's just a fart? Why don't you go work to make a living?"
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - lost-idiom
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "当个屁乞丐 is an intensifier (\"what kind of beggar\"); the translation renders \"a beggar who's just a fart\"."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/Story_13.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: Story_13.csv.yaml
+  glossary: []
+- sampleId: 57f4ad2a93b8d162
+  sampleKind: split
+  source: "你要是懂得感恩，就滚远一点。光是你在面前游晃，我就天人交战，想将你杀之而后快。"
+  candidates:
+    ProductionTranslation: "If you know gratitude, get far away. Just having you loitering in front of me makes me torn between heaven and earth, wanting to kill you and be relieved."
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - lost-idiom
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "天人交战 (inner conflict) is rendered \"torn between heaven and earth\"."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/Story_13.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: Story_13.csv.yaml
+  glossary: []
+- sampleId: 2c0928ab998ce487
+  sampleKind: split
+  source: "哦……我、我也就是说说……大侠、别放心上。帮、帮主他老人家……在楼上，请二位大侠移步楼上请。"
+  candidates:
+    ProductionTranslation: "Oh... I, I just meant to say... Hero, please don't take it to heart. The leader... is upstairs. Please, the two heroes, move upstairs."
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - dropped-stutter
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "The stutter 帮、帮主 is flattened to \"The leader...\" while 我、我 is kept."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/Story_1.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: Story_1.csv.yaml
+  glossary:
+  - raw: 大侠
+    rawSimplified: 大侠
+    rawTraditional: 大俠
+    result: Great Hero
+    allowalt:
+    - Hero
+  - raw: 幫主
+    rawSimplified: 帮主
+    rawTraditional: 幫主
+    result: Gang Leader
+    allowalt:
+    - Sect Leader
+    - Sect Master
+    - Gang Master
+    - Leader
+    direct: bang zhu
+    literal: gang/master
+- sampleId: d16898bb2ce17d3b
+  sampleKind: split
+  source: "过、过奖了，哈哈。我不过是个外姓弟子罢了，不过说我资历深、劳碌命倒是说对了。"
+  candidates:
+    ProductionTranslation: "You've overpraised me, haha. I'm just an outsider disciple, but saying I have deep experience and a hard life is quite accurate."
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - dropped-stutter
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "过、过奖了 becomes \"You've overpraised me\", dropping the stutter."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/Story_1.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: Story_1.csv.yaml
+  glossary: []
+- sampleId: ece4c7e74c449ea0
+  sampleKind: split
+  source: "唐掌门，要要要要比人数，丐帮也不见得会输！让，让让让～新旧派再斗会儿，泥沙沉淀下去，水就干净了。到时我丐丐～丐帮的弟兄，也来帮忙！大义分舵的弟兄，最讲义气！"
+  candidates:
+    ProductionTranslation: "Master of the Beggar Sect, we must have a numbers comparison, and the Beggar Sect may not lose! Let, let let～let the new and old factions fight for a while more. After the mud settles, the water will become cleaner. At that time, our Beggar brothers will also come to help! The brothers from the Great Righteousness Sub‑division are most honorable!"
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - mistranslation
+      - dropped-stutter
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "唐掌门 is the leader of the Tang Clan but is rendered \"Master of the Beggar Sect\"; the stutters 要要要要 and 丐丐 are also dropped."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/Story_11.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: Story_11.csv.yaml
+  glossary:
+  - raw: 丐幫
+    rawSimplified: 丐帮
+    rawTraditional: 丐幫
+    result: Beggar Sect
+    direct: Beggar Gang
+    literal: Gaibang
+  - raw: 掌門
+    rawSimplified: 掌门
+    rawTraditional: 掌門
+    result: Sect Leader
+    allowalt:
+    - Palm Leader
+    - Palm Master
+    - Sect Master
+    - Master
+    - Leader
+    direct: zhang men
+    literal: palm/leader of the sect
+- sampleId: 8c054dd26e89d478
+  sampleKind: split
+  source: "我来唐门正是要闹失踪，让野心勃勃的家伙觉得有有有机可趁，新派不被逼到走投无路，怎会来投靠西西西武林盟呢？"
+  candidates:
+    ProductionTranslation: "I came to the Tang Clan precisely to create a disappearance, so that the ambitious fellows would feel there was an opportunity. The new generation will not seek refuge with the Western Wulin Alliance unless they are pushed to a dead end, right?"
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - dropped-stutter
+      - terminology
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "Stutters 有有有 and 西西西 are dropped, and 新派 becomes \"new generation\" instead of the new faction used elsewhere in this file."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/Story_11.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: Story_11.csv.yaml
+  glossary:
+  - raw: 武林盟
+    result: Wulin Alliance
+    allowalt:
+    - Alliance
+    direct: martial forest alliance
+    literal: wulin meng
+  - raw: 唐門
+    rawSimplified: 唐门
+    rawTraditional: 唐門
+    result: Tang Clan
+    direct: Tang gate
+    literal: Tangmen
+- sampleId: d93fe3092e57e383
+  sampleKind: split
+  source: "禀、禀报代掌门，有人来了。弟子报完了信，这回真的要走了！你们……自己保重！"
+  candidates:
+    ProductionTranslation: "Respectfully, I report to the acting leader that someone has arrived. The disciple has delivered the message, and this time, I really must take my leave! You all... take care of yourselves!"
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - dropped-stutter
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "禀、禀报 becomes \"Respectfully, I report\", replacing the stutter."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/Story_12.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: Story_12.csv.yaml
+  glossary:
+  - raw: 掌門
+    rawSimplified: 掌门
+    rawTraditional: 掌門
+    result: Sect Leader
+    allowalt:
+    - Palm Leader
+    - Palm Master
+    - Sect Master
+    - Master
+    - Leader
+    direct: zhang men
+    literal: palm/leader of the sect
+- sampleId: 196ec58da376369b
+  sampleKind: split
+  source: "唐掌门、赵兄弟，我我我按约定来了。李某集结了新派弟子，在唐门外堡布布布阵，我是说布阵。自请为第一防线，武林盟要是打来，我们先先先丢他大粪！"
+  candidates:
+    ProductionTranslation: "Tang Sect Master, Brother Zhao, I have come as per our agreement. Li gathered new sect disciples and set up an array outside Tang Clan's outer fortress; I mean, he arranged the formations. I volunteered to be on the front line. If the Wulin Alliance attacks, we will let them taste some of our feces first!"
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - dropped-stutter
+      - pronoun-attribution
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "Stutters 我我我, 布布布, 先先先 are dropped, and \"I mean, he arranged the formations\" switches the speaker 我是说 to a third person."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/Story_12.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: Story_12.csv.yaml
+  glossary:
+  - raw: 武林盟
+    result: Wulin Alliance
+    allowalt:
+    - Alliance
+    direct: martial forest alliance
+    literal: wulin meng
+  - raw: 唐門
+    rawSimplified: 唐门
+    rawTraditional: 唐門
+    result: Tang Clan
+    direct: Tang gate
+    literal: Tangmen
+  - raw: 掌門
+    rawSimplified: 掌门
+    rawTraditional: 掌門
+    result: Sect Leader
+    allowalt:
+    - Palm Leader
+    - Palm Master
+    - Sect Master
+    - Master
+    - Leader
+    direct: zhang men
+    literal: palm/leader of the sect
+  - raw: 兄弟
+    result: Brother
+    allowalt:
+    - fellow
+    - young men
+    literal: Xiong Di
+    context: A term that can refer to literal brothers by birth or metaphorically to close friends or comrades who share a bond similar to familial ties.
+- sampleId: b3c15c68db712c0c
+  sampleKind: split
+  source: "赵兄弟，你会会会下棋吗？棋力高吗？会弹弹弹琴吗？懂书画吗？"
+  candidates:
+    ProductionTranslation: "Brother Zhao, can you play chess? Are you skilled in chess? Can you play the piano? Do you understand calligraphy and painting?"
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - dropped-stutter
+      - mistranslation
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "Stutters 会会会 and 弹弹弹 are dropped and 琴 (qin) is rendered \"piano\"."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/Story_13.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: Story_13.csv.yaml
+  glossary:
+  - raw: 兄弟
+    result: Brother
+    allowalt:
+    - fellow
+    - young men
+    literal: Xiong Di
+    context: A term that can refer to literal brothers by birth or metaphorically to close friends or comrades who share a bond similar to familial ties.
+- sampleId: ff7f60fd3ce37b1e
+  sampleKind: split
+  source: "万万不可！万万不可！算、算本官求你了！"
+  candidates:
+    ProductionTranslation: "Absolutely not! Absolutely not! Alright, alright, I beg you!"
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "The repeated 万万不可 and the stutter 算、算 are kept (\"Alright, alright\"); the self-reference 本官 is dropped but not harmful."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/Story_13.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: Story_13.csv.yaml
+  glossary: []
+- sampleId: 6e61562f7321fa16
+  sampleKind: split
+  source: "我又没说不是？『金国的』天下第一人。"
+  candidates:
+    ProductionTranslation: "I didn't say that's not? The number one person in the world of the Jin state."
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - fluency
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "\"I didn't say that's not?\" is ungrammatical and 『金国的』 is scoped as \"in the world of the Jin state\" instead of Jin's number one under heaven."
+  provenance: >-
+    Real production translation mined from LegendOfMortalOverLlm Files/Converted/Story_6.csv.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: LegendOfMortalOverLlm
+  sourceFile: Story_6.csv.yaml
+  glossary: []
+- sampleId: ef28e059fc906cd2
+  sampleKind: split
+  source: "成就"
+  candidates:
+    ProductionTranslation: "Achievement"
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "成就 -> \"Achievement\" is the standard UI label."
+  provenance: >-
+    Real production translation mined from WanXiangOverLlm Files/Converted/Condition.json.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: WanXiangOverLlm
+  sourceFile: Condition.json.yaml
+  glossary: []
+- sampleId: 2aaeb5ddd6e64e2c
+  sampleKind: split
+  source: "基"
+  candidates:
+    ProductionTranslation: "Base"
+  labels:
+    ProductionTranslation:
+      label: Abstain
+      defectCategories: []
+      correctionSafety: unnecessary
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "A lone character 基 with no surrounding context; \"Base\" may be correct or may be the first character of a longer term."
+  provenance: >-
+    Real production translation mined from WanXiangOverLlm Files/Converted/Condition.json.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: WanXiangOverLlm
+  sourceFile: Condition.json.yaml
+  glossary: []
+- sampleId: ecddd442a2bc5ad9
+  sampleKind: split
+  source: "武侯祠"
+  candidates:
+    ProductionTranslation: "Martial Hall Shrine"
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - mistranslation
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "武侯祠 is the Wuhou (Marquis Wu) Shrine; \"Martial Hall Shrine\" mistakes 侯 (marquis) for hall."
+  provenance: >-
+    Real production translation mined from WanXiangOverLlm Files/Converted/Dictionary.json.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: WanXiangOverLlm
+  sourceFile: Dictionary.json.yaml
+  glossary: []
+- sampleId: 52a13abc52ad3d8c
+  sampleKind: split
+  source: "获得诸葛慧红颜后解锁"
+  candidates:
+    ProductionTranslation: "After obtaining Zhu Ge Hui's Red Beauty, unlock..."
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - fluency
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "An ellipsis is invented after \"unlock\" so the English ends mid-sentence, and 诸葛 is split into \"Zhu Ge\"; the source is a complete condition."
+  provenance: >-
+    Real production translation mined from WanXiangOverLlm Files/Converted/Ending.json.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: WanXiangOverLlm
+  sourceFile: Ending.json.yaml
+  glossary: []
+- sampleId: e2723657edb23962
+  sampleKind: split
+  source: "夜游神"
+  candidates:
+    ProductionTranslation: "Goddess of Night Wanderers"
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - mistranslation
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "夜游神 is a night-wandering deity; \"Goddess of Night Wanderers\" invents a gender and flips the relationship."
+  provenance: >-
+    Real production translation mined from WanXiangOverLlm Files/Converted/EventDialog.json.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: WanXiangOverLlm
+  sourceFile: EventDialog.json.yaml
+  glossary: []
+- sampleId: de1c8f77960f8b8b
+  sampleKind: split
+  source: "腊味之法传承已久，可追溯于汉代，因入腊月时少雨干燥最适制作而得名，中土各地例如荆湘、岭南、川蜀等地皆有制作腊味的习惯，而腊味的做法却又各有不同。"
+  candidates:
+    ProductionTranslation: "The art of preserving meats has a long‑standing tradition dating back to the Han Dynasty. It got its name due to the ideal conditions for preservation during the month of January, when there is less rain and the air is dry. This practice is prevalent in many regions across China, such as Jingxiang, Lingnan, and Chuan Shu, among others. However, the methods of making these preserved meats vary significantly from place to place."
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - mistranslation
+      correctionSafety: safe
+  sampleRun: FlaggedQcMining-20261010
+  reviewNote: "腊月 is the twelfth lunar month, not \"January\"; the regional names are also inconsistently romanised (Jingxiang vs Chuan Shu)."
+  provenance: >-
+    Real production translation mined from WanXiangOverLlm Files/Converted/EventDialog.json.yaml (pre-QC 'translated' field), judged by hand independently of the game's own qcStatus/qcQualityScore; ProductionTranslation is a single-candidate label, not a configured model.
+  game: WanXiangOverLlm
+  sourceFile: EventDialog.json.yaml
+  glossary:
+  - raw: 嶺南
+    rawSimplified: 岭南
+    rawTraditional: 嶺南
+    result: Lingnan
+    direct: South of Mountains
+    literal: Lingnan
+    badtrans: false
 correctionSamples:
 - sampleId: 5b03cbee1d695c74
   sampleKind: fullCell
