@@ -42,6 +42,7 @@ public static class JsonGameDataWorkflow
         string workingDirectory, TextFileToSplit textFile, CompoundFieldSplitterOptions? options = null,
         string rawSubfolder = "Raw/Dumped")
     {
+        ExportHelpers.EnsureTokensConfigured(workingDirectory);
         var dumpedPath = $"{workingDirectory}/{rawSubfolder}/{textFile.Path}";
 
         using var jsonDoc = JsonDocument.Parse(File.ReadAllText(dumpedPath));
@@ -110,20 +111,20 @@ public static class JsonGameDataWorkflow
         if (string.IsNullOrEmpty(text))
             return;
 
-        var (template, fragments) = CompoundFieldSplitter.Decompose(text, options, enableSizeShrink);
+        var (template, fragments, tokens, templateTokens) = CompoundFieldSplitter.DecomposeSlotted(text, options, enableSizeShrink);
         if (fragments.Count == 0)
             return;
 
         if (CompoundFieldSplitter.IsTrivialTemplate(template, fragments.Count))
         {
-            line.Splits.Add(new TranslationSplit(0, 0, fragments[0]) { SplitPath = splitPath });
+            line.Splits.Add(new TranslationSplit(0, 0, fragments[0]) { SplitPath = splitPath, Tokens = tokens[0] });
             return;
         }
 
-        line.Templates.Add(new FieldTemplate(0, template) { SplitPath = splitPath });
+        line.Templates.Add(new FieldTemplate(0, template) { SplitPath = splitPath, Tokens = templateTokens });
 
         for (int f = 0; f < fragments.Count; f++)
-            line.Splits.Add(new TranslationSplit(0, f, fragments[f]) { SplitPath = splitPath });
+            line.Splits.Add(new TranslationSplit(0, f, fragments[f]) { SplitPath = splitPath, Tokens = tokens[f] });
     }
 
     /// <summary>
@@ -212,7 +213,7 @@ public static class JsonGameDataWorkflow
         if (resolved.Text == null)
             return (false, string.Empty);
 
-        var rawText = resolved.QcAnchor?.Text ?? string.Concat(fragments.Select(f => f.Text));
+        var rawText = resolved.QcAnchor is { } qcAnchor ? PackagingHelpers.SourceText(qcAnchor) : string.Concat(fragments.Select(PackagingHelpers.SourceText));
         return (true, PackagingTextFixups.Apply(config, textFile, null, rawText, resolved.Text));
     }
 

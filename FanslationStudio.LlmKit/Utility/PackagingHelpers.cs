@@ -7,13 +7,15 @@ namespace FanslationStudio.LlmKit.Utility;
 /// Outcome of resolving one field's packaged text. <see cref="Text"/> is null when nothing usable
 /// can be packaged. <see cref="QcAnchor"/> is set only when the field packaged its anchor's fresh,
 /// score-gate-passing <see cref="TranslationSplit.QcTranslated"/>; <see cref="TranslatedFragments"/>
-/// only when it was rebuilt from per-fragment translations.
+/// only when it was rebuilt from per-fragment translations. <see cref="Detail"/> says why a field
+/// failed when it is more than the reason alone (a slot whose value cannot be restored).
 /// </summary>
 internal readonly record struct FieldResolution(
     string? Text,
     PackagingFailureReason Reason,
     TranslationSplit? QcAnchor = null,
-    List<string>? TranslatedFragments = null);
+    List<string>? TranslatedFragments = null,
+    string? Detail = null);
 
 /// <summary>
 /// The Converted -&gt; Mod field resolution shared by every packaging workflow
@@ -24,6 +26,59 @@ internal readonly record struct FieldResolution(
 /// </summary>
 internal static class PackagingHelpers
 {
+    /// <summary>
+    /// The split's source text as the game has it: its slots (<c>{npcName}</c>) replaced by the tokens they stood for. What
+    /// packaging hands to game hooks and callbacks as the raw text; the same string as <see cref="TranslationSplit.Text"/> when
+    /// the split has no tokens.
+    /// </summary>
+    public static string SourceText(TranslationSplit split) => TokenSlotter.RestoreSource(split.Text, split.Tokens);
+
+    /// <summary>
+    /// Puts the game's own form back for every slot of <paramref name="slotted"/>, the one place values are restored. Null, with the
+    /// reason in <paramref name="detail"/>, when a slot cannot be resolved (no tokens entry, a glossary token with no glossary
+    /// entry, an unconfigured name) so the caller can fall back instead of packaging a literal <c>{slot}</c>.
+    /// </summary>
+    public static string? RestoreSlots(string slotted, IReadOnlyDictionary<string, TokenValue> tokens, out string? detail)
+    {
+        detail = null;
+        var slotter = StringTokenReplacer.Slotter;
+        if (!slotter.HasTokens && tokens.Count == 0)
+            return slotted;
+
+        var restored = slotter.Restore(slotted, tokens);
+        if (!restored.Ok)
+        {
+            detail = $"cannot restore {string.Join(", ", restored.Unresolved.Select(name => $"{{{name}}}"))} ({tokens.Count} token(s) stored)";
+            return null;
+        }
+
+        if (slotter.HasTokens && slotter.FindUnrestoredSlot(restored.Text) is string left)
+        {
+            detail = $"{left} has no tokens entry";
+            return null;
+        }
+
+        return restored.Text;
+    }
+
+    private static FieldResolution Failed(TranslationSplit split, string? detail)
+    {
+        Console.WriteLine($"Packaging: {detail} in \"{split.Text}\"");
+        return new FieldResolution(null, PackagingFailureReason.RawFallback, Detail: detail);
+    }
+
+    /// <summary>Every fragment's slot values, and the template's own, as one map: slot names are numbered across a whole cell.</summary>
+    public static IReadOnlyDictionary<string, TokenValue> UnionTokens(IReadOnlyList<TranslationSplit> fragments, FieldTemplate? template = null)
+    {
+        if (fragments.All(f => f.Tokens.Count == 0) && template is not { Tokens.Count: > 0 })
+            return fragments[0].Tokens;
+
+        var union = new Dictionary<string, TokenValue>();
+        foreach (var token in fragments.SelectMany(f => f.Tokens).Concat(template?.Tokens ?? []))
+            union.TryAdd(token.Key, token.Value);
+        return union;
+    }
+
     /// <summary>
     /// Resolves a field made of <paramref name="fragments"/> (ordered by SubIndex). A fresh,
     /// score-gate-passing whole-cell QC correction on the anchor wins outright; otherwise every
@@ -48,8 +103,10 @@ internal static class PackagingHelpers
         var qcFresh = anchor != null && QualityControlHelpers.IsQcReviewFresh(anchor, template, fragments, qualityControl);
         var qcRejected = qcFresh && !QualityControlHelpers.PassesQcScoreGate(anchor!.QcQualityScore, anchor.QcDefectCategory, qualityControl);
 
-        if (qcFresh && !qcRejected && !string.IsNullOrEmpty(anchor!.QcTranslated))
-            return new FieldResolution(anchor.QcTranslated, PackagingFailureReason.None, QcAnchor: anchor);
+        // A whole-cell QC correction is in slot space too; if a slot in it cannot be restored the plain fragments below are tried instead.
+        if (qcFresh && !qcRejected && !string.IsNullOrEmpty(anchor!.QcTranslated)
+            && RestoreSlots(anchor.QcTranslated, UnionTokens(fragments, template), out _) is string restoredQc)
+            return new FieldResolution(restoredQc, PackagingFailureReason.None, QcAnchor: anchor);
 
         var translatedFragments = new List<string>(fragments.Count);
 
@@ -59,15 +116,29 @@ internal static class PackagingHelpers
                 return new FieldResolution(null, PackagingFailureReason.RawFallback);
 
             if (!string.IsNullOrEmpty(fragment.Translated))
-                translatedFragments.Add(transform == null ? fragment.Translated : transform(fragment.Text, fragment.Translated));
+            {
+                var restored = RestoreSlots(fragment.Translated, fragment.Tokens, out var detail);
+                if (restored == null)
+                    return Failed(fragment, detail);
+
+                translatedFragments.Add(transform == null ? restored : transform(SourceText(fragment), restored));
+            }
             else if (!string.IsNullOrEmpty(fragment.Text))
                 return new FieldResolution(null, PackagingFailureReason.RawFallback);
             else
                 translatedFragments.Add(fragment.Text);
         }
 
+        var templateText = template?.Template;
+        if (template != null)
+        {
+            templateText = RestoreSlots(template.Template, template.Tokens, out var templateDetail);
+            if (templateText == null)
+                return Failed(fragments[0], templateDetail);
+        }
+
         var text = template != null
-            ? CompoundFieldSplitter.Reconstruct(template.Template, translatedFragments)
+            ? CompoundFieldSplitter.Reconstruct(templateText!, translatedFragments)
             : translatedFragments[0];
 
         return new FieldResolution(text, qcRejected ? PackagingFailureReason.QcRejected : PackagingFailureReason.None,
@@ -90,8 +161,12 @@ internal static class PackagingHelpers
         if (string.IsNullOrEmpty(effectiveTranslated) || split.FlaggedForRetranslation || !split.SafeToTranslate)
             return new FieldResolution(null, PackagingFailureReason.RawFallback);
 
+        var restored = RestoreSlots(effectiveTranslated, split.Tokens, out var detail);
+        if (restored == null)
+            return Failed(split, detail);
+
         return new FieldResolution(
-            transform == null ? effectiveTranslated : transform(split.Text, effectiveTranslated),
+            transform == null ? restored : transform(SourceText(split), restored),
             qcRejected ? PackagingFailureReason.QcRejected : PackagingFailureReason.None,
             QcAnchor: useQc ? split : null);
     }

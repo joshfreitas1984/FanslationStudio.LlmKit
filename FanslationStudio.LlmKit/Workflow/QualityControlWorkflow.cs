@@ -61,6 +61,14 @@ public static class QualityControlWorkflow
 
         public FieldTemplate? Template { get; init; }
 
+        private IReadOnlyDictionary<string, TokenValue>? _tokens;
+
+        /// <summary>
+        /// The slot values of every fragment together: slot names are numbered across a whole cell, so one name means one thing in
+        /// the cell's reconstructed text, which is what a rule check on the column sees.
+        /// </summary>
+        public IReadOnlyDictionary<string, TokenValue> Tokens => _tokens ??= PackagingHelpers.UnionTokens(Fragments, Template);
+
         /// <summary>The whole source cell - reconstructed from every fragment's Text for a templated
         /// column (cached; QC never changes Text).</summary>
         public string RawText => _rawText ??= Template != null
@@ -517,7 +525,8 @@ public static class QualityControlWorkflow
         string effectiveTranslated,
         StringTokenReplacer tokenReplacer,
         TextFileToSplit textFile,
-        int split)
+        int split,
+        IReadOnlyDictionary<string, TokenValue>? tokens = null)
     {
         if (!config.QualityControl.PreVerificationGateEnabled)
             return null;
@@ -527,7 +536,7 @@ public static class QualityControlWorkflow
             var restored = LineValidation.PrepareResult(rawText, tokenReplacer.Restore(maskedCandidate), config.Hooks, textFile, split);
             return IsEquivalentText(restored, effectiveTranslated)
                 ? null
-                : EvaluateQcCandidate(config, modelConfig, rawText, restored, effectiveTranslated, textFile, split)?.Trim();
+                : EvaluateQcCandidate(config, modelConfig, rawText, restored, effectiveTranslated, textFile, split, tokens)?.Trim();
         };
     }
 
@@ -560,10 +569,11 @@ public static class QualityControlWorkflow
         string candidate,
         string baselineTranslated,
         TextFileToSplit textFile,
-        int split)
+        int split,
+        IReadOnlyDictionary<string, TokenValue>? tokens = null)
     {
         var preparedRaw = LineValidation.PrepareRaw(rawText, null);
-        var ruleResult = TranslationWorkflow.EvaluateRules(config, modelConfig, preparedRaw, rawText, candidate, textFile, split);
+        var ruleResult = TranslationWorkflow.EvaluateRules(config, modelConfig, preparedRaw, rawText, candidate, textFile, split, tokens);
         var capsFailureReason = CheckCapitalizationRegression(baselineTranslated, candidate);
 
         return capsFailureReason ?? CheckRunawayRepetition(baselineTranslated, candidate) ?? CheckInventedStutter(rawText, baselineTranslated, candidate) ?? CheckInvalidPinyin(baselineTranslated, candidate) ?? CheckSelfReferenceRegression(rawText, baselineTranslated, candidate) ?? ruleResult.AllReasons.FirstOrDefault();
@@ -1048,7 +1058,7 @@ public static class QualityControlWorkflow
         // ReviewLlmCache's doc comment for the Lazy dedup).
         // A cached verdict shared by another column used that column's validator; the final gate
         // below is still this column's own.
-        var candidateValidator = BuildCandidateValidator(config, modelConfig, rawText, effectiveTranslated, tokenReplacer, item.File.TextFile, anchor.Split);
+        var candidateValidator = BuildCandidateValidator(config, modelConfig, rawText, effectiveTranslated, tokenReplacer, item.File.TextFile, anchor.Split, item.Column.Tokens);
 
         var verdict = await reviewCache.GetOrAdd(cacheKey, _ => new Lazy<Task<LlmVerdict>>(
             () => GetLlmVerdictAsync(config, modelConfig, client, rawText, maskedRaw, maskedTranslated, glossaryPrompt, timing, candidateValidator))).Value;
@@ -1113,7 +1123,7 @@ public static class QualityControlWorkflow
 
         // Validation gate - see EvaluateQcCandidate. The same gate ApplyRulesToCurrentQcTranslated
         // re-runs against an already-accepted QcTranslated, against the same QC model config.
-        var failureReason = EvaluateQcCandidate(config, modelConfig, rawText, correctedResult, effectiveTranslated, item.File.TextFile, anchor.Split);
+        var failureReason = EvaluateQcCandidate(config, modelConfig, rawText, correctedResult, effectiveTranslated, item.File.TextFile, anchor.Split, item.Column.Tokens);
 
         if (failureReason != null)
             return RecordRejectedCorrection(config, anchor, effectiveTranslated, correctedResult, failureReason);
@@ -2028,7 +2038,7 @@ public static class QualityControlWorkflow
                 if (anchor.QcStatus == QcStatus.Corrected && string.IsNullOrEmpty(anchor.QcTranslated))
                     continue;
 
-                var (changed, needsRetry, gaveUp) = ApplyRulesToQcColumn(config, qcModelConfig, anchor, textFile, column.RawText, column.ComputeEffectiveTranslated());
+                var (changed, needsRetry, gaveUp) = ApplyRulesToQcColumn(config, qcModelConfig, anchor, textFile, column.RawText, column.ComputeEffectiveTranslated(), column.Tokens);
                 if (changed)
                     fileModified = true;
                 if (needsRetry)
@@ -2057,7 +2067,8 @@ public static class QualityControlWorkflow
         TranslationSplit anchor,
         TextFileToSplit textFile,
         string rawText,
-        string priorTranslated)
+        string priorTranslated,
+        IReadOnlyDictionary<string, TokenValue>? tokens = null)
     {
         // A Passed column has no QcTranslated of its own to repair/rule-check - the only thing left
         // to potentially wake up is a low score.
@@ -2078,7 +2089,7 @@ public static class QualityControlWorkflow
         // Tier 2: the exact same validation gate ReviewColumnAsync runs against a freshly proposed
         // correction (see EvaluateQcCandidate) - anything that fails here can't be fixed
         // deterministically, so the column is reset for a fresh LLM review instead.
-        var failureReason = EvaluateQcCandidate(config, RuleCheckModelConfig(config, qcModelConfig, rawText), rawText, current, priorTranslated, textFile, anchor.Split);
+        var failureReason = EvaluateQcCandidate(config, RuleCheckModelConfig(config, qcModelConfig, rawText), rawText, current, priorTranslated, textFile, anchor.Split, tokens);
 
         if (failureReason == null)
         {

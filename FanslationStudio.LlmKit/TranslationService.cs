@@ -141,7 +141,21 @@ public static partial class TranslationService
         var isFragment = IsCompoundFragment(line, split);
         // Identical text only shares a translation when it also shares a context (e.g. the same speaker).
         var context = contexts != null && contexts.TryGetValue(split, out var lineContext) ? lineContext.Prompt : string.Empty;
-        return (isFragment, isFragment ? ColumnIdentity(split) : string.Empty, split.Text, context);
+        // Likewise two lines whose slots stand for different phrases the model is told about (showValue) are different prompts.
+        return (isFragment, isFragment ? ColumnIdentity(split) : string.Empty, split.Text, context + ShownValuesSignature(split));
+    }
+
+    /// <summary>
+    /// The slot values this split's prompt tells the model about (<see cref="NamedTokenReplacer.ShowValue"/>), as a key; empty when
+    /// there are none. A translation that depends on them is shared only with a split showing the same values.
+    /// </summary>
+    private static string ShownValuesSignature(TranslationSplit split)
+    {
+        if (split.Tokens.Count == 0)
+            return string.Empty;
+
+        var shown = StringTokenReplacer.Slotter.ShownValues(split.Text, split.Tokens);
+        return shown.Count == 0 ? string.Empty : "\u0001" + string.Join("|", shown.Select(s => $"{s.Slot}={s.Value}"));
     }
 
     /// <summary>
@@ -253,7 +267,7 @@ public static partial class TranslationService
             {
                 // Skip splits whose text matches a file-restricted glossary/manual entry -
                 // see IsFileRestrictedText.
-                if (IsFileRestrictedText(split.Text, config))
+                if (IsFileRestrictedText(split.Text, config) || ShownValuesSignature(split).Length > 0)
                     continue;
 
                 // A compound-field fragment's bare text must never seed (or be satisfied by)
@@ -278,7 +292,7 @@ public static partial class TranslationService
 
                     // Skip splits whose text matches a file-restricted glossary/manual entry -
                     // see IsFileRestrictedText.
-                    if (IsFileRestrictedText(split.Text, config))
+                    if (IsFileRestrictedText(split.Text, config) || ShownValuesSignature(split).Length > 0)
                         continue;
 
                     if (split.Text.Length > charsToCache)
@@ -341,6 +355,7 @@ public static partial class TranslationService
         public required HashSet<string> OverrideKeys { get; init; }
         public required HttpClient Client { get; init; }
         public required bool ForceRetranslation { get; init; }
+        public required TokenValueTranslator TokenValues { get; init; }
 
         public void Dispose() => Client.Dispose();
     }
@@ -367,15 +382,42 @@ public static partial class TranslationService
         FillTranslationCache(corpus, TranslationCacheMaxChars, translationCache, config, fragmentCache, overrideKeys);
         LineContexts.Build(config, corpus.WorkingDirectory, corpus.Files.Select(file => (file.TextFile, (IReadOnlyList<TranslationLine>)file.Lines)));
 
+        client ??= new HttpClient { Timeout = TimeSpan.FromSeconds(300) };
+
         return new TranslationRun
         {
             Config = config,
             Cache = translationCache,
             FragmentCache = fragmentCache,
             OverrideKeys = overrideKeys,
-            Client = client ?? new HttpClient { Timeout = TimeSpan.FromSeconds(300) },
+            Client = client,
             ForceRetranslation = forceRetranslation,
+            TokenValues = new TokenValueTranslator(config, client),
         };
+    }
+
+    /// <summary>
+    /// Translates the value of every <c>translate</c>-kind token in the corpus that has none yet (a phrase once, however many lines
+    /// repeat it) before any line is translated, so a line's prompt and its packaged text have the value. Files that gained values
+    /// are written straight away. Does nothing without a translate token configured.
+    /// </summary>
+    private static async Task FillTokenValuesAsync(TranslationRun run, TranslationCorpus corpus)
+    {
+        if (!StringTokenReplacer.Slotter.HasTranslatedTokens)
+            return;
+
+        var maxConcurrency = run.Config.MaxConcurrency ?? run.Config.BatchSize ?? 20;
+        var serializer = YamlHelper.CreateSerializer();
+
+        foreach (var file in corpus.Files)
+        {
+            var filled = await run.TokenValues.EnsureAsync(file.TextFile, file.Lines, maxConcurrency);
+            if (filled == 0)
+                continue;
+
+            Console.WriteLine($"Token values translated: {filled} in {file.TextFile.Path}");
+            FileHelper.WriteAllTextWithRetry(file.OutputFile, serializer.Serialize(file.Lines));
+        }
     }
 
     /// <summary>
@@ -422,6 +464,7 @@ public static partial class TranslationService
     private static async Task TranslateBatchedAsync(LlmConfig config, TranslationCorpus corpus, bool forceRetranslation, HttpClient? client = null)
     {
         using var run = PrepareTranslationRun(config, corpus, forceRetranslation, client);
+        await FillTokenValuesAsync(run, corpus);
 
         int incorrectLineCount = 0;
         int totalRecordsProcessed = 0;
@@ -550,6 +593,11 @@ public static partial class TranslationService
         // elsewhere, so it neither reads from nor writes to the shared cache.
         var hasContext = run.Config.Runtime.LineContexts.TryGetValue(split, out var lineContext);
 
+        // Slots whose value the model is told (showValue) make the translation depend on them, like a context does.
+        var shownValues = StringTokenReplacer.Slotter.DescribeValues(split.Text, split.Tokens);
+        if (shownValues.Length > 0)
+            hasContext = true;
+
         var cachedTranslation = string.Empty;
         var cacheHit = !isFileRestricted
             && !hasContext
@@ -571,7 +619,8 @@ public static partial class TranslationService
                 split.Translated = directResult;
             else
             {
-                var result = await TranslateSplitAsync(config, split.Text, run.Client, textFile, lineContext?.Prompt ?? string.Empty, split.Split, lineContext?.GenderKnown ?? false);
+                var additionalPrompts = string.Join("\n", new[] { lineContext?.Prompt, shownValues }.Where(p => !string.IsNullOrEmpty(p)));
+                var result = await TranslateSplitAsync(config, split.Text, run.Client, textFile, additionalPrompts, split.Split, lineContext?.GenderKnown ?? false);
                 split.Translated = result.Valid ? result.Result : string.Empty;
 
                 if (!result.Valid)
@@ -634,6 +683,7 @@ public static partial class TranslationService
     private static async Task TranslatePooledAsync(LlmConfig config, TranslationCorpus corpus, bool forceRetranslation, HttpClient? client = null)
     {
         using var run = PrepareTranslationRun(config, corpus, forceRetranslation, client);
+        await FillTokenValuesAsync(run, corpus);
 
         var maxConcurrency = config.MaxConcurrency ?? config.BatchSize ?? 20;
 
@@ -1398,7 +1448,13 @@ public static partial class TranslationService
             }
 
             if (raw.Contains('{'))
+            {
                 basePrompt.AppendLine(config.Prompts["DynamicPlaceholderPrompt"]);
+
+                var namedTokenPrompt = StringTokenReplacer.DescribeNamedTokensIn(raw);
+                if (namedTokenPrompt.Length > 0)
+                    basePrompt.AppendLine(namedTokenPrompt);
+            }
         }
 
         if (!string.IsNullOrEmpty(splitFile.AdditionalPromptName))

@@ -24,6 +24,7 @@ public static class ConfigurationExtensions
         response.SplitRegexPatterns ??= new List<string>();
         response.SplitCharactersList ??= new List<string>();
         response.ExtraStringTokenReplacers ??= new List<string>();
+        response.NamedTokenReplacers ??= new List<NamedTokenReplacer>();
         // Same guard as above for a `qualityControl:` key present with no content underneath it
         // (e.g. every field commented out) - the property initializer only covers a fully absent
         // key, not one present but empty.
@@ -110,6 +111,7 @@ public static class ConfigurationExtensions
         MergeWorkspaceGlossary($"{workingDirectory}/Glossary", deserializer, response.Runtime);
 
         StringTokenReplacer.SetExtraTokens(response.ExtraStringTokenReplacers);
+        StringTokenReplacer.SetNamedTokens(response.NamedTokenReplacers, response.Runtime.GlossaryLines);
 
         return response;
     }

@@ -47,8 +47,10 @@ public static class TranslationDiagnostics
                 continue;
             }
 
+            AppendSlots(report, split);
+
             config.Runtime.LineContexts.TryGetValue(split, out var context);
-            var contextPrompt = context?.Prompt ?? string.Empty;
+            var contextPrompt = string.Join(Environment.NewLine, new[]{ context?.Prompt, StringTokenReplacer.Slotter.DescribeValues(split.Text, split.Tokens) }.Where(p => !string.IsNullOrEmpty(p)));
             report.AppendLine($"Flags: flaggedForRetranslation={split.FlaggedForRetranslation} flaggedMistranslation={split.FlaggedMistranslation}");
             report.AppendLine($"Line context: {(contextPrompt.Length > 0 ? contextPrompt : "(none)")} GenderKnown={context?.GenderKnown}");
 
@@ -65,6 +67,15 @@ public static class TranslationDiagnostics
 
                 report.AppendLine($"##### attempt {attempt}/{attempts}: Valid={result.Valid}");
                 report.AppendLine($"RESULT: {Truncate(result.Result)}");
+                if (split.Tokens.Count > 0)
+                {
+                    var restored = StringTokenReplacer.Slotter.Restore(result.Result, split.Tokens);
+                    report.AppendLine(restored.Ok
+                        ? $"RESULT in the game's form: {Truncate(restored.Text)}"
+                        : $"RESULT cannot be restored: no value for {string.Join(", ", restored.Unresolved.Select(n => $"{{{n}}}"))}");
+                    if (StringTokenReplacer.Slotter.FindSlotProblem(split.Text, result.Result) is string slotProblem)
+                        report.AppendLine($"SLOT PROBLEM (the model's doing, not the data's): {slotProblem}");
+                }
                 if (!result.Valid)
                     report.AppendLine($"REJECTED BECAUSE: {Truncate(result.CorrectionPrompt)}");
                 report.AppendLine($"HTTP traffic (system prompt omitted, model output truncated):\n{traffic}");
@@ -75,6 +86,26 @@ public static class TranslationDiagnostics
         if (reportPath != null)
             File.WriteAllText(reportPath, text);
         return text;
+    }
+
+    /// <summary>
+    /// The split's slotted text next to its text in the game's form, and each slot's source, what it restores to and the description
+    /// the model is given, so a failure that is only a slot problem (dropped, invented or renamed) can be told from a model problem.
+    /// </summary>
+    private static void AppendSlots(StringBuilder report, TranslationSplit split)
+    {
+        if (split.Tokens.Count == 0)
+            return;
+
+        var slotter = StringTokenReplacer.Slotter;
+        report.AppendLine($"Slotted text (what the model is sent): {split.Text}");
+        report.AppendLine($"Text in the game's form: {split.TextInGameForm()}");
+        foreach (var (name, token) in split.Tokens)
+            report.AppendLine($"Slot {{{name}}}: source \"{token.Source}\" restores to \"{slotter.RestoredValue(name, token) ?? "(cannot be resolved)"}\"");
+
+        var described = slotter.Describe(split.Text);
+        if (described.Length > 0)
+            report.AppendLine($"Slot descriptions in the prompt:\n{described}");
     }
 
     private static string Truncate(string text) =>

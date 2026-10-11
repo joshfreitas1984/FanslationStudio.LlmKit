@@ -5,6 +5,53 @@ using YamlDotNet.Serialization;
 namespace FanslationStudio.LlmKit.Configuration;
 
 
+/// <summary>
+/// One <see cref="LlmConfig.NamedTokenReplacers"/> entry. The text matched by <see cref="Literal"/> or
+/// <see cref="Pattern"/> is replaced by <c>{Name}</c> before the model sees it and put back afterwards, so the
+/// model reads e.g. <c>{firstName}</c> rather than <c>&lt;fName&gt;</c> or an anonymous <c>{0}</c>.
+/// </summary>
+public class NamedTokenReplacer
+{
+    /// <summary>Exact text to mask. Set this or <see cref="Pattern"/>.</summary>
+    public string Literal { get; set; } = string.Empty;
+
+    /// <summary>Regex for the text to mask. Set this or <see cref="Literal"/>.</summary>
+    public string Pattern { get; set; } = string.Empty;
+
+    /// <summary>Letters and digits only, starting with a letter (e.g. <c>firstName</c>); appears as <c>{firstName}</c>.</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>One line added to the prompt whenever the token appears, saying what it stands for.</summary>
+    public string Description { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Put the matched text's glossary Result back instead of the matched text itself (the model never writes it, so it
+    /// cannot be reworded). A match with no glossary entry is left unmasked.
+    /// </summary>
+    public bool RestoreFromGlossary { get; set; }
+
+    /// <summary>
+    /// Put this text back instead of the matched text, for a token the game wants written differently in the translated
+    /// data than in the source (e.g. a bare <c>gangName</c> that the English data must hold as <c>///gangName///</c>).
+    /// Empty = the matched text. Not combinable with <see cref="RestoreFromGlossary"/>.
+    /// </summary>
+    public string RestoreAs { get; set; } = string.Empty;
+
+    /// <summary>
+    /// How the slot's value is resolved: <c>copy</c> (the source text, the default), <c>fixed</c> (<see cref="RestoreAs"/>),
+    /// <c>glossary</c> (the glossary Result for the source) or <c>translate</c> (the source translated once, glossary first and
+    /// then the model, and stored with the split). Empty = derived from <see cref="RestoreAs"/> and
+    /// <see cref="RestoreFromGlossary"/>, which stay as aliases for <c>fixed</c> and <c>glossary</c>.
+    /// </summary>
+    public string Kind { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Also tell the model what the slot stands for: its value (the translation, for <c>translate</c>), so it has the meaning
+    /// without being able to rewrite it. Leave off for a slot whose value must not influence the wording (a gender alternative).
+    /// </summary>
+    public bool ShowValue { get; set; }
+}
+
 public class LlmConfig
 {
     ///// <summary>
@@ -101,6 +148,12 @@ public class LlmConfig
     public List<string> SplitRegexPatterns { get; set; } = new();
     public List<string> SplitCharactersList { get; set; } = new();
     public List<string> ExtraStringTokenReplacers { get; set; } = new();
+
+    /// <summary>
+    /// Runtime tokens the model sees under a descriptive name instead of a numbered <c>{0}</c> slot (see
+    /// <see cref="NamedTokenReplacer"/>). Empty = none.
+    /// </summary>
+    public List<NamedTokenReplacer> NamedTokenReplacers { get; set; } = new();
 
     [YamlIgnore]
     public RuntimeValues Runtime { get; set; } = new();

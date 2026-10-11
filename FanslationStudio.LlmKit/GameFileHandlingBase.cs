@@ -81,6 +81,7 @@ public static class GameFileHandlingBase
                         {
                             split.Translated = found2.Translated;
                             CopyQcState(found2, split);
+                            CopyTokenValues(found2, split);
                         }
                     }
                 }
@@ -95,6 +96,7 @@ public static class GameFileHandlingBase
                         {
                             split.Translated = found2.Translated;
                             CopyQcState(found2, split);
+                            CopyTokenValues(found2, split);
                         }
                         else
                             newCount++;
@@ -228,6 +230,23 @@ public static class GameFileHandlingBase
         // after every merge. Its baseline check still invalidates it on any upstream change.
         to.QcRuleCheckFailureCount = from.QcRuleCheckFailureCount;
         to.QcRuleCheckFailureBaseline = from.QcRuleCheckFailureBaseline;
+    }
+
+    /// <summary>
+    /// A re-export takes every token's source from the export, but a value already translated for the same source is kept (found by
+    /// source, since the slot name may be numbered differently now), so a phrase is not translated again after every merge.
+    /// </summary>
+    private static void CopyTokenValues(TranslationSplit from, TranslationSplit to)
+    {
+        if (from.Tokens.Count == 0)
+            return;
+
+        foreach (var token in to.Tokens.Values.Where(t => t.Translated.Length == 0))
+        {
+            var known = from.Tokens.Values.FirstOrDefault(t => t.Source == token.Source && t.Translated.Length > 0);
+            if (known != null)
+                token.Translated = known.Translated;
+        }
     }
 
     public static List<string> CheckFileLinesMatch(string workingDirectory, TextFileToSplit[] textFiles)

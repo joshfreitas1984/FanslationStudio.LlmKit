@@ -223,16 +223,20 @@ public static class QualityControlAssessmentWorkflow
     }
 
     /// <summary>
-    /// One gold row's text masked for a QC prompt, the way production masks a column
-    /// (<see cref="StringTokenReplacer"/>), plus its glossary block. Gold-set items have no
+    /// One gold row's text masked for a QC prompt, the way production masks a column: slotted first
+    /// (<see cref="TokenSlotter.Slot"/>; gold rows hold the game's own tokens, where Converted holds
+    /// slots), then <see cref="StringTokenReplacer"/>, plus its glossary block. The slotted source,
+    /// translation and token values are what the rule check reads. Gold-set items have no
     /// output-file identity, so the glossary is scoped to string.Empty - this only affects glossary
     /// lines with "only"/"exclude" file restrictions, which are skipped here the same way they'd be
     /// skipped for any file not in an "only" list. Further text (a correction) must go through
     /// <see cref="Mask"/> after the source/translation, on the same replacer.
     /// </summary>
-    private sealed record MaskedSample(StringTokenReplacer TokenReplacer, string GlossaryPrompt, string MaskedRaw, string MaskedTranslated)
+    private sealed record MaskedSample(
+        StringTokenReplacer TokenReplacer, string GlossaryPrompt, string MaskedRaw, string MaskedTranslated,
+        string SlottedSource, string SlottedTranslation, IReadOnlyDictionary<string, TokenValue> Tokens)
     {
-        public string Mask(string text) => TokenReplacer.Replace(text);
+        public string Mask(string text) => TokenReplacer.Replace(StringTokenReplacer.Slotter.MaskRestored(text, Tokens));
     }
 
     /// <summary>Per-case glossary snapshots of the gold set being run, by sample ID (schema v2; cases without one use the loaded config's glossary).</summary>
@@ -265,10 +269,12 @@ public static class QualityControlAssessmentWorkflow
     private static MaskedSample MaskSample(LlmConfig config, string source, string translation)
     {
         var tokenReplacer = new StringTokenReplacer();
-        var glossaryPrompt = GlossaryLine.AppendPromptsFor(source, config.Runtime.GlossaryLines, string.Empty);
-        var maskedRaw = tokenReplacer.Replace(source);
-        var maskedTranslated = tokenReplacer.Replace(translation);
-        return new MaskedSample(tokenReplacer, glossaryPrompt, maskedRaw, maskedTranslated);
+        var (slottedSource, tokens) = StringTokenReplacer.Slotter.Slot(source);
+        var slottedTranslation = StringTokenReplacer.Slotter.MaskRestored(translation, tokens);
+        var glossaryPrompt = GlossaryLine.AppendPromptsFor(slottedSource, config.Runtime.GlossaryLines, string.Empty);
+        var maskedRaw = tokenReplacer.Replace(slottedSource);
+        var maskedTranslated = tokenReplacer.Replace(slottedTranslation);
+        return new MaskedSample(tokenReplacer, glossaryPrompt, maskedRaw, maskedTranslated, slottedSource, slottedTranslation, tokens);
     }
 
     /// <summary>The judge's call 4 on <paramref name="result"/>'s current draft, against its full confirmed set.</summary>
@@ -326,7 +332,7 @@ public static class QualityControlAssessmentWorkflow
         using var caseGlossary = UseCaseGlossary(config, result.SampleId);
         var sample = MaskSample(config, result.Source, result.CurrentTranslation);
         var validator = QualityControlWorkflow.BuildCandidateValidator(
-            config, model, result.Source, result.CurrentTranslation, sample.TokenReplacer, GoldTextFile, 0);
+            config, model, sample.SlottedSource, sample.SlottedTranslation, sample.TokenReplacer, GoldTextFile, 0, sample.Tokens);
         return validator?.Invoke(sample.Mask(result.ProposedCorrection!));
     }
 

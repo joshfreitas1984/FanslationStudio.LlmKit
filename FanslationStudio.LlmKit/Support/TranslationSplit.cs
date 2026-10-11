@@ -28,6 +28,13 @@ public class TranslationSplit
     [YamlMember(ScalarStyle = ScalarStyle.DoubleQuoted)]
     public string Translated { get; set; } = string.Empty;
 
+    /// <summary>
+    /// What each named slot (<c>{npcName}</c>) in <see cref="Text"/> and <see cref="Translated"/> stands for, keyed by slot name; see
+    /// <c>Config.yaml: namedTokenReplacers</c>. Empty (and not written) for text with no runtime tokens. Refreshed from the export on
+    /// every merge, never carried over from older data, and resolved only when the game text is packaged.
+    /// </summary>
+    public Dictionary<string, TokenValue> Tokens { get; set; } = new();
+
     public bool SafeToTranslate { get; set; } = true;
 
     public bool FlaggedForRetranslation { get; set; } = false;

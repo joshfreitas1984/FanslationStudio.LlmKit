@@ -225,7 +225,9 @@ esizers`,
    layout, starter `Config.yaml`/`ManualTranslations.yaml`, the plugin project scaffold (compiles,
    loads, does nothing yet), installer host and packaging workflows, `AGENTS.md`/`CLAUDE.md`/
    `docs/README.md`, copied skills. Still
-   game-specific and manual: building the glossary and gender table (skill `build-game-glossary`), writing the actual dumper (extracting the game's real data files into
+   game-specific and manual: building the glossary and gender table (skill `build-game-glossary`), once the first dump exists
+   running the `find-runtime-tokens` skill to wire `namedTokenReplacers` into the starter `Config.yaml` (and its patterns into
+   the splitter's `PlaceholderPatterns`; Converted then holds `{slots}` plus a `tokens` map, so export before translating), writing the actual dumper (extracting the game's real data files into
    `Raw/Dumped`), IL2CPP interop generation against the real game install if applicable, populating
    `GameTextFiles.cs`'s `TextFilesToSplit` list against real dumped files, the first real
    translation run, the `SkillSyncTests.cs` edit from step 8, filling in `Files/Packaging/`

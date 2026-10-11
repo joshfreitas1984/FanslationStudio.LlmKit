@@ -10,6 +10,7 @@ namespace Tests;
 /// populated, so it never ran regardless of configuration - meaning literal tokens were sent to the
 /// LLM as-is instead of being swapped out for a "{n}" placeholder first.
 /// </summary>
+[Collection("StringTokenReplacerStatics")]
 public class StringTokenReplacerTests
 {
     public StringTokenReplacerTests()

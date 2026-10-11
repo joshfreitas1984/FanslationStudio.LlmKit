@@ -45,30 +45,34 @@ public static class PronounDefectWorkflow
         var tokens = hooks?.UnknownGenderPersonTokens;
         var known = context is { GenderKnown: true } ? context : null;
 
+        // The game's tokens (UnknownGenderPersonTokens) are what the checks look for, so judge the restored text, not the slots.
+        var text = split.TextInGameForm();
+        var translated = split.TranslatedInGameForm();
+
         if (known == null)
         {
             // A context that says the gender is unknown (the game's own "use they, never he or she" hint) has already
             // forbidden a gendered pronoun, so one there is invented whatever the line's shape.
             var unknownContext = context is { GenderKnown: false };
-            var category = LineValidation.InventsGender(split.Text, split.Translated, skipWhenNamesSomeone, tokens)
-                || (unknownContext && LineValidation.UsesGenderedPronounForUnknown(split.Text, split.Translated)) ? "InventedGender"
-                : LineValidation.NarratesAsFirstPerson(split.Text, split.Translated) ? "NarratedAsFirstPerson"
-                : LineValidation.LosesSelfReference(split.Text, split.Translated) ? "SelfReferenceLost"
+            var category = LineValidation.InventsGender(text, translated, skipWhenNamesSomeone, tokens)
+                || (unknownContext && LineValidation.UsesGenderedPronounForUnknown(text, translated)) ? "InventedGender"
+                : LineValidation.NarratesAsFirstPerson(text, translated) ? "NarratedAsFirstPerson"
+                : LineValidation.LosesSelfReference(text, translated) ? "SelfReferenceLost"
                 : null;
             return new PronounClassification(category, false, false);
         }
 
         // The speaker's gender is known, so he/she is allowed - but only if it is the right one.
         // A continuation split that opens with he/she points back to the previous sentence's subject, which it cannot see.
-        var pointsBack = split.SubIndex > 0 && LineValidation.OpensWithPronounSubject(split.Translated);
-        var knownCategory = !pointsBack && LineValidation.ContradictsGender(split.Text, split.Translated, known.Gender) ? "WrongGender"
-            : !pointsBack && LineValidation.ContradictsGenderDespiteKinshipTerm(split.Text, split.Translated, known.Gender) ? "WrongGenderKinshipTerm"
-            : LineValidation.NarratesAsFirstPerson(split.Text, split.Translated) ? "NarratedAsFirstPerson"
-            : LineValidation.LosesSelfReference(split.Text, split.Translated) ? "SelfReferenceLost"
+        var pointsBack = split.SubIndex > 0 && LineValidation.OpensWithPronounSubject(translated);
+        var knownCategory = !pointsBack && LineValidation.ContradictsGender(text, translated, known.Gender) ? "WrongGender"
+            : !pointsBack && LineValidation.ContradictsGenderDespiteKinshipTerm(text, translated, known.Gender) ? "WrongGenderKinshipTerm"
+            : LineValidation.NarratesAsFirstPerson(text, translated) ? "NarratedAsFirstPerson"
+            : LineValidation.LosesSelfReference(text, translated) ? "SelfReferenceLost"
             : null;
 
-        var correct = knownCategory == null && LineValidation.InventsGender(split.Text, split.Translated, skipWhenNamesSomeone, tokens);
-        return new PronounClassification(knownCategory, correct, correct && LineValidation.UsesOnlyNeutralPronouns(split.Translated));
+        var correct = knownCategory == null && LineValidation.InventsGender(text, translated, skipWhenNamesSomeone, tokens);
+        return new PronounClassification(knownCategory, correct, correct && LineValidation.UsesOnlyNeutralPronouns(translated));
     }
     /// <summary>One current translation that shows an invented gender or first-person narration.</summary>
     public sealed record PronounDefectHit(string File, string Category, string Source, string Translated, bool QcRewrote);

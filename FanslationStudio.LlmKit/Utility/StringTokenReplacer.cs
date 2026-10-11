@@ -1,5 +1,7 @@
 ﻿using System.Text;
 using System.Text.RegularExpressions;
+using FanslationStudio.LlmKit.Configuration;
+using FanslationStudio.LlmKit.Support;
 
 namespace FanslationStudio.LlmKit.Utility;
 
@@ -23,6 +25,33 @@ public class StringTokenReplacer
     private Dictionary<string, string> sizeMap = new();
 
     public static Regex? ExtraTokenRegex;
+
+    // With named tokens configured, a digit run straight after "{word" belongs to a slot name ("{playerTitle2}"), not a number.
+    private static readonly Regex SlotAwareNumericValueRegex = new(@"(?<![{<]|color=|<[^>]*|\{[A-Za-z][A-Za-z0-9]*)(?:[+-]?(?:\d+\.\d*|\.\d+|\d+))(?![}>])", RegexOptions.Compiled);
+
+    private static TokenSlotter slotter = TokenSlotter.None;
+
+    /// <summary>The configured named tokens (<c>Config.yaml: namedTokenReplacers</c>).</summary>
+    public static TokenSlotter Slotter => slotter;
+
+    /// <summary>
+    /// Configures <see cref="NamedTokenReplacer"/>s (called once after the glossary is loaded). Throws on a bad entry so a
+    /// typo fails at start-up instead of silently sending the raw token to the model.
+    /// </summary>
+    public static void SetNamedTokens(IEnumerable<NamedTokenReplacer>? configured, IEnumerable<GlossaryLine> glossaryLines)
+    {
+        slotter = new TokenSlotter(configured, glossaryLines);
+        IsConfigured = true;
+    }
+
+    /// <summary>True once any configuration has been loaded (<see cref="SetNamedTokens"/> has been called, even with no tokens).</summary>
+    public static bool IsConfigured { get; private set; }
+
+    /// <summary>
+    /// The prompt lines describing every named token present in <paramref name="maskedRaw"/> (already masked), one per
+    /// configured <see cref="NamedTokenReplacer.Description"/>; empty when none apply.
+    /// </summary>
+    public static string DescribeNamedTokensIn(string maskedRaw) => slotter.Describe(maskedRaw);
 
     public static void SetExtraTokens(List<string> extraTokens)
     {
@@ -104,6 +133,9 @@ public class StringTokenReplacer
 
         result.Replace(PlaceholderRegex, match =>
         {
+            if (slotter.HasTokens && slotter.IsSlotName(match.Value[1..^1]))
+                return match.Value;
+
             placeholderMap.Add(index, match.Value);
             return $"{{{index++}}}";
         });
@@ -139,7 +171,7 @@ public class StringTokenReplacer
             return key;
         });
 
-        result.Replace(NumericValueRegex, match =>
+        result.Replace(slotter.HasTokens ? SlotAwareNumericValueRegex : NumericValueRegex, match =>
         {
             placeholderMap.Add(index, match.Value);
             return $"{{{index++}}}";

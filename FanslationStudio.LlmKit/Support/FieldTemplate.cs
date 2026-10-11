@@ -26,6 +26,14 @@ public class FieldTemplate
     [YamlMember(ScalarStyle = ScalarStyle.DoubleQuoted)]
     public string Template { get; set; } = string.Empty;
 
+    /// <summary>
+    /// What each named slot (<c>{npcName}</c>) in <see cref="Template"/> stands for, keyed by slot name, for a runtime token that sits
+    /// in the template's literal text because no Chinese is next to it (<c>&lt;color=#E64D00&gt;a&lt;/color&gt;{0}</c>). Same meaning as
+    /// <see cref="TranslationSplit.Tokens"/>, and the slot names are numbered across the whole cell, so they never clash with a fragment's.
+    /// Empty (and not written) when the template has none.
+    /// </summary>
+    public Dictionary<string, TokenValue> Tokens { get; set; } = new();
+
     public FieldTemplate() { }
 
     public FieldTemplate(int split, string template)

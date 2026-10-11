@@ -46,6 +46,7 @@ public static class DynamicStringWorkflow
     public static void ExportDynamicStringsToCustomFormat(
         string workingDirectory, TextFileToSplit textFile, CompoundFieldSplitterOptions? options = null)
     {
+        ExportHelpers.EnsureTokensConfigured(workingDirectory);
         var dumpedPath = $"{workingDirectory}/Raw/Dumped/DynamicStrings/{textFile.Path}";
 
         var foundLines = File.ReadAllLines(dumpedPath)
@@ -200,7 +201,7 @@ public static class DynamicStringWorkflow
             // design deliberately avoids - so a corrected multi-part line loses its bare-label
             // entry. The full reconstructed entry still packages correctly either way.
             var bareFragment = resolved.TranslatedFragments is { Count: 1 } translatedFragments
-                ? (fragments[0].Text, translatedFragments[0])
+                ? (PackagingHelpers.SourceText(fragments[0]), translatedFragments[0])
                 : ((string Raw, string Result)?)null;
 
             return (resolved.Text, resolved.Reason, bareFragment);

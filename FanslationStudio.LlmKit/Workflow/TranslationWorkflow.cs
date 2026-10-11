@@ -299,7 +299,7 @@ public static class TranslationWorkflow
 
         if (config.Hooks?.CustomColumnValidator != null)
         {
-            var failureReason = config.Hooks.CustomColumnValidator(textFile, split.Split, raw, split.Translated);
+            var failureReason = config.Hooks.CustomColumnValidator(textFile, split.Split, split.TextInGameForm(), split.TranslatedInGameForm());
             if (failureReason != null)
             {
                 logLines.Add($"Game-specific validation failed {textFile.Path} ({failureReason}) \n{split.Translated}");
@@ -419,14 +419,23 @@ public static class TranslationWorkflow
         if (!textFile.EnableGlossary)
             return false;
 
-        if (!ManualTranslationsByRaw(config).TryGetValue(split.Text, out var manual))
+        if (!ManualTranslationsByRaw(config).TryGetValue(split.OriginalText(), out var manual))
             return false;
 
-        if (split.Translated == manual.Result)
+        // A manual result is written in the game's own form; the stored translation is in slot space, so a token's final text in it
+        // goes back to its slot. One that leaves a slot of the source out is skipped, not applied half-restored.
+        var manualResult = StringTokenReplacer.Slotter.MaskRestored(manual.Result, split.Tokens);
+        if (StringTokenReplacer.Slotter.FindSlotProblem(split.Text, manualResult) is string slotProblem)
+        {
+            logLines.Add($"Manual translation skipped {textFile.Path} ({slotProblem})\n{split.Text}\n{manual.Result}");
+            return false;
+        }
+
+        if (split.Translated == manualResult)
             return false;
 
         logLines.Add($"Manually Translated {textFile.Path} \n{split.Text}\n{split.Translated}");
-        split.Translated = LineValidation.CleanupLineBeforeSaving(LineValidation.PrepareResult(preparedRaw, manual.Result, config.Hooks, textFile, split.Split), split.Text, textFile, new StringTokenReplacer());
+        split.Translated = LineValidation.CleanupLineBeforeSaving(LineValidation.PrepareResult(preparedRaw, manualResult, config.Hooks, textFile, split.Split), split.Text, textFile, new StringTokenReplacer());
         split.ResetFlags();
         return true;
     }
@@ -526,7 +535,7 @@ public static class TranslationWorkflow
         // hallucination, missing ellipsis, missing required token, any game-specific
         // CustomColumnValidator, and the generic structural check. A new rule added there applies
         // here and to QualityControlWorkflow's QC gate/rule-check without anything more to edit.
-        var ruleResult = EvaluateRules(config, modelConfig, preparedRaw, split.Text, split.Translated, textFile, split.Split);
+        var ruleResult = EvaluateRules(config, modelConfig, preparedRaw, split.Text, split.Translated, textFile, split.Split, split.Tokens);
 
         if (ruleResult.MistranslatedGlossaryTerms.Count > 0)
         {
@@ -721,8 +730,14 @@ public static class TranslationWorkflow
         string splitRaw,
         string candidate,
         TextFileToSplit textFile,
-        int? column)
+        int? column,
+        IReadOnlyDictionary<string, TokenValue>? tokens = null)
     {
+        // Slot space: <paramref name="splitRaw"/> and <paramref name="candidate"/> hold named slots, and the glossary, wording and slot
+        // checks read them that way. The game's own hooks and the structural check look for the game's tokens, so they get the restored forms.
+        var gameRaw = TokenSplitExtensions.InGameForm(splitRaw, tokens);
+        var gameCandidate = TokenSplitExtensions.InGameForm(candidate, tokens);
+
         var mistranslatedGlossaryTerms = FindGlossaryMistranslations(config, preparedRaw, candidate, textFile).ToList();
         var hallucinationReason = FindGlossaryHallucination(preparedRaw, candidate, config, textFile);
         var badWordMatches = FindBadWordMatches(candidate);
@@ -731,11 +746,11 @@ public static class TranslationWorkflow
             : null;
         var ellipsisReason = IsMissingRequiredEllipsis(preparedRaw, candidate) ? "Missing an ellipsis '...' required by the source." : null;
         var negativeSignReason = IsMissingRequiredNegativeSign(preparedRaw, candidate) ? "Missing a negative sign '-' before a number required by the source." : null;
-        var missingTokenReason = FindMissingRequiredToken(splitRaw, candidate, config.ExtraStringTokenReplacers) is string missingToken
+        var missingTokenReason = FindMissingRequiredToken(gameRaw, gameCandidate, config.ExtraStringTokenReplacers) is string missingToken
             ? $"Missing required token '{missingToken}'."
-            : null;
-        var customValidatorReason = config.Hooks?.CustomColumnValidator?.Invoke(textFile, column, splitRaw, candidate);
-        var validation = LineValidation.CheckTransalationSuccessful(modelConfig, splitRaw, candidate, textFile, config.Hooks, column);
+            : StringTokenReplacer.Slotter.FindSlotProblem(splitRaw, candidate);
+        var customValidatorReason = config.Hooks?.CustomColumnValidator?.Invoke(textFile, column, gameRaw, gameCandidate);
+        var validation = LineValidation.CheckTransalationSuccessful(modelConfig, gameRaw, gameCandidate, textFile, config.Hooks, column);
         var structuralReason = validation.Valid ? null
             : !string.IsNullOrWhiteSpace(validation.CorrectionPrompt) ? validation.CorrectionPrompt
             : validation.SilentFailures.Count > 0 ? string.Join(" ", validation.SilentFailures)

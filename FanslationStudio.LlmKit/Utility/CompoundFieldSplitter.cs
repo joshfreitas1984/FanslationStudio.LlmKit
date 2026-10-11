@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.RegularExpressions;
+using FanslationStudio.LlmKit.Support;
 
 namespace FanslationStudio.LlmKit.Utility;
 
@@ -295,6 +296,40 @@ public static partial class CompoundFieldSplitter
         var (rebalancedTemplate, rebalancedFragments) = RebalanceBoundaryMarks(rawTemplate, fragments);
 
         return MergeAdjacentFragments(rebalancedTemplate, rebalancedFragments);
+    }
+
+    /// <summary>
+    /// <see cref="Decompose"/> for export: with <c>namedTokenReplacers</c> configured, every fragment is slotted
+    /// (<see cref="TokenSlotter.Slot"/>) and its slot values returned alongside it, so Converted holds readable slots and the
+    /// game's real token lives in the split's <c>tokens</c>. Slot names are numbered across the whole cell, so one name means one
+    /// thing in every fragment of it. The template's literal text is slotted too, after the fragments: a token with no Chinese next to it
+    /// (a lone code letter between two colour tags, <c>&lt;color=#E64D00&gt;a&lt;/color&gt;{0}</c>) lives there, never reaches the model,
+    /// and would otherwise be packaged as written. Its values come back as <c>TemplateTokens</c>. With nothing configured this is exactly
+    /// <see cref="Decompose"/> with empty token maps.
+    /// </summary>
+    public static (string Template, List<string> Fragments, List<Dictionary<string, TokenValue>> Tokens, Dictionary<string, TokenValue> TemplateTokens) DecomposeSlotted(
+        string cell, CompoundFieldSplitterOptions? options = null, bool enableSizeShrink = true)
+    {
+        var (template, fragments) = Decompose(cell, options, enableSizeShrink);
+        var slotter = StringTokenReplacer.Slotter;
+        var tokens = new List<Dictionary<string, TokenValue>>(fragments.Count);
+
+        if (!slotter.HasTokens || fragments.Count == 0)
+        {
+            tokens.AddRange(fragments.Select(_ => new Dictionary<string, TokenValue>()));
+            return (template, fragments, tokens, new Dictionary<string, TokenValue>());
+        }
+
+        var cellTokens = new Dictionary<string, TokenValue>();
+        for (var i = 0; i < fragments.Count; i++)
+        {
+            var (slotted, used) = slotter.Slot(fragments[i], cellTokens);
+            fragments[i] = slotted;
+            tokens.Add(used);
+        }
+
+        var (slottedTemplate, templateTokens) = slotter.Slot(template, cellTokens);
+        return (slottedTemplate, fragments, tokens, templateTokens);
     }
 
     // Boundary quote/bracket pairs that this game's text uses to wrap a quoted word, title, or

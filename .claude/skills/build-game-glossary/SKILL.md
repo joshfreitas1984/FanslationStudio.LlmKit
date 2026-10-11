@@ -98,6 +98,16 @@ and leaked prompt text into one name), so use its output only as a hint and **re
 7. **Manual translations apply when a line is translated, not to an already-translated line.** To see them on a sample, delete its
    `Files/Converted/*.yaml`, re-export (the export seeds missing Converted files) and translate again.
 
+## 6. Run a dialogue sample before the corpus
+
+Item and map text hides the real problems. Translate the smallest dialogue file and read it for: **runtime tokens** (names filled in by
+the game, gender alternatives such as `<A||B>`, colour tags) that the splitter broke a sentence at; **speaker names** translated
+differently in different lines; and tokens dropped by the model. Fix with `CompoundFieldSplitterOptions.PlaceholderPatterns` (glue the
+tokens into the sentence), `IgnoreHtmlTagsInText` plus a `CustomColumnValidator` for the token check, `UnknownGenderPersonTokens`
+for tokens that stand for the player, an `AdditionalPromptName` prompt, and reviewed English for each distinct token and for every speaker
+and NPC name (pinyin for people, English for roles; derive corpse/number/letter variants from the base name). Re-export after changing
+the splitter (delete `Files/Converted` first if it only holds sample output).
+
 ## 7. Verify
 
 Add a read-only test that loads `Config.yaml` (`ConfigurationExtensions.GetConfiguration(dir).Runtime.GlossaryLines`) and

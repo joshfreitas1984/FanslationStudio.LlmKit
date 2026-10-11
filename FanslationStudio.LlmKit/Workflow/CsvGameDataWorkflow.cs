@@ -29,6 +29,7 @@ public static class CsvGameDataWorkflow
         string workingDirectory, TextFileToSplit textFile, CompoundFieldSplitterOptions? options = null,
         string rawSubfolder = "Raw/Dumped/GameData")
     {
+        ExportHelpers.EnsureTokensConfigured(workingDirectory);
         var dumpedPath = $"{workingDirectory}/{rawSubfolder}/{textFile.Path}";
 
         var lines = File.ReadAllLines(dumpedPath);
@@ -45,20 +46,20 @@ public static class CsvGameDataWorkflow
                 if (textFile.SkipColumns.Contains(i))
                     continue;
 
-                var (template, fragments) = CompoundFieldSplitter.Decompose(splits[i], options, textFile.EnableSizeShrink);
+                var (template, fragments, tokens, templateTokens) = CompoundFieldSplitter.DecomposeSlotted(splits[i], options, textFile.EnableSizeShrink);
                 if (fragments.Count == 0)
                     continue;
 
                 if (CompoundFieldSplitter.IsTrivialTemplate(template, fragments.Count))
                 {
-                    foundSplits.Add(new TranslationSplit(i, 0, fragments[0]));
+                    foundSplits.Add(new TranslationSplit(i, 0, fragments[0]) { Tokens = tokens[0] });
                     continue;
                 }
 
-                foundTemplates.Add(new FieldTemplate(i, template));
+                foundTemplates.Add(new FieldTemplate(i, template) { Tokens = templateTokens });
 
                 for (int f = 0; f < fragments.Count; f++)
-                    foundSplits.Add(new TranslationSplit(i, f, fragments[f]));
+                    foundSplits.Add(new TranslationSplit(i, f, fragments[f]) { Tokens = tokens[f] });
             }
 
             foundLines.Add(new TranslationLine
@@ -140,7 +141,7 @@ public static class CsvGameDataWorkflow
                         break;
                     }
 
-                    var rawText = resolved.QcAnchor?.Text ?? string.Concat(fragments.Select(f => f.Text));
+                    var rawText = resolved.QcAnchor is { } qcAnchor ? PackagingHelpers.SourceText(qcAnchor) : string.Concat(fragments.Select(PackagingHelpers.SourceText));
                     splits[template.Split] = PackagingTextFixups.Apply(config, textFile, template.Split, rawText, resolved.Text);
                     onColumnPackaged?.Invoke(template.Split, rawText, splits[template.Split]);
                 }
@@ -168,8 +169,9 @@ public static class CsvGameDataWorkflow
 
                         if (resolved.Text != null)
                         {
-                            splits[split.Split] = PackagingTextFixups.Apply(config, textFile, split.Split, split.Text, resolved.Text);
-                            onColumnPackaged?.Invoke(split.Split, split.Text, splits[split.Split]);
+                            var sourceText = PackagingHelpers.SourceText(split);
+                            splits[split.Split] = PackagingTextFixups.Apply(config, textFile, split.Split, sourceText, resolved.Text);
+                            onColumnPackaged?.Invoke(split.Split, sourceText, splits[split.Split]);
                         }
                         else if (!string.IsNullOrEmpty(split.Text))
                         {

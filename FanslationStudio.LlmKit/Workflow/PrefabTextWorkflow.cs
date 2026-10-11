@@ -42,6 +42,7 @@ public static class PrefabTextWorkflow
         string workingDirectory, TextFileToSplit textFile, CompoundFieldSplitterOptions? options = null,
         string rawSubfolder = "Raw/Dumped/PrefabText")
     {
+        ExportHelpers.EnsureTokensConfigured(workingDirectory);
         var dumpedPath = $"{workingDirectory}/{rawSubfolder}/{textFile.Path}";
 
         var foundLines = File.ReadAllLines(dumpedPath)

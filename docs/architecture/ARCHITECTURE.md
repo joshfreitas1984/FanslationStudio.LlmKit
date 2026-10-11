@@ -236,6 +236,19 @@ accepted), and rates its own confidence 0-100. Entirely opt-in (`qualityControl.
   rules — this is the most heavily documented piece of logic in the kit).
 - `StringTokenReplacer` — swaps game-specific tokens (placeholders, extra tokens from
   `Config.yaml: extraStringTokenReplacers`) out before sending to the LLM and back in after.
+  Its numbered `{n}` masking skips the configured slot names (below) and is all it does for named tokens.
+- `TokenSlotter` — `Config.yaml: namedTokenReplacers`: runtime tokens the model reads under a descriptive name instead of a
+  numbered `{0}` (`literal` or `pattern` -> `{name}`, optional `description` added to the prompt when the slot is present,
+  optional `restoreFromGlossary` to put the matched text's glossary Result back rather than the text itself, or `restoreAs` to put
+  back a fixed different text, e.g. `gangName` as `///gangName///`). Pure and stateless: `Slot(text)` returns the slotted text and a
+  `{slot: {source}}` map, `Restore(slotted, tokens)` puts the game's form back from that map alone. Export (`DecomposeSlotted`)
+  slots every fragment and the template's literal text, so **Converted holds slots in `text` and `translated` and each split
+  (and template) carries a `tokens` map**; validation, QC and the prompt work in slot space (`FindSlotProblem`: a dropped, invented
+  or unknown slot fails a candidate), and packaging (`PackagingHelpers.RestoreSlots`) is the one place values are restored.
+  A game's own hooks and the pronoun checks are handed the restored forms. A second distinct source under one name becomes
+  `{name2}`, numbered across a whole cell. A `kind: translate` token (a phrase) is translated once before a pass (`TokenValueTranslator`, glossary first)
+  and stored in the split's `tokens`; `showValue` tells the model what a slot stands for. Pronoun-like alternatives that need different English forms (he/him/his) should not be
+  slotted with `restoreFromGlossary`. Full reference: [`../features/translation-pipeline/token-slots.md`](../features/translation-pipeline/token-slots.md).
 - `ColorTagHelpers`, `HtmlTagHelpers` — Unity rich-text tag extraction/preservation.
 - `LlmHelpers` — request payload construction. `CalculateModelConfig` currently always returns
   the first configured model (per-text model selection is an unimplemented TODO).

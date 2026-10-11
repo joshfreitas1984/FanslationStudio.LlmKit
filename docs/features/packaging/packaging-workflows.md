@@ -129,6 +129,17 @@ anchor convention exists to avoid elsewhere) — so a QC-corrected multi-part dy
 loses its bare-label entry. The full reconstructed entry still packages correctly regardless; only
 the dialogue-button-specific shortcut entry is missing for that one line.
 
+## Token restore
+
+When `namedTokenReplacers` is configured, `Translated` (and a whole-cell `QcTranslated`, and the template's literal text) hold named
+slots, and `PackagingHelpers.ResolveFragments`/`ResolvePlainSplit` put the game's form back from each split's `tokens` (and the template's)
+before the cell is rebuilt. This is the only place values are restored, so a glossary change reaches the packaged text with no
+retranslation. A slot that cannot be resolved - no `tokens` entry, an unconfigured name, a glossary entry that is gone, a slot the model
+invented - makes that field unusable: the line takes its normal raw fallback and the reason is logged (`Packaging: ... in "<text>"`).
+`PackagingTextFixups`, `onColumnPackaged` and the other hooks receive the source text with its slots replaced by their sources
+(`PackagingHelpers.SourceText`). With no tokens configured nothing changes. See
+[`../translation-pipeline/token-slots.md`](../translation-pipeline/token-slots.md).
+
 ## Raw-fallback behavior when a line fails QC or is stale
 
 Independent of QC, a column/line can be genuinely unusable at packaging time: unsafe
