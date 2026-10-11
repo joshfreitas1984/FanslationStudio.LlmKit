@@ -60,6 +60,7 @@ qualityControl:
 | `useContinuousWorkerPool` | Yes | Worker-pool/concurrency toggle. |
 | `maxConcurrency` | Yes | Top-level translation concurrency, separate from `qualityControl.maxConcurrency`. |
 | `retryCount` | Yes | Translation retry count. |
+| `translationModelName` | Optional | Name of the model used for regular translation (like `qualityControl.modelName` for QC). Unset = the first entry under `models:`. A name that matches no model fails at config load. |
 | `escalationModelName` / `escalationRetryCount` | Optional, commonly commented out | DragonHeir has both present but commented — meaning the shape/field names should exist in a starter config (as comments) for discoverability, but escalation is opt-in per project, not a required active setting. |
 | `batchSize` | Yes | |
 | `skipLineValidation` | Yes | |

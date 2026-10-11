@@ -280,6 +280,14 @@ public class LineValidationSilentFailureTests
     public void InventsGender_NameEndingInHe(string raw, string result, bool expected) =>
         Assert.Equal(expected, LineValidation.InventsGender(raw, result));
 
+    [Theory(DisplayName = "A surname He (He Aoshuang) is not read as the pronoun he")]
+    [InlineData("female", "何傲霜", "He Aoshuang", false)]
+    [InlineData("female", "何傲霜说道。", "He Aoshuang said.", false)]
+    [InlineData("female", "何傲霜说道。", "He said.", true)]
+    [InlineData("male", "何傲霜说道。", "She said.", true)]
+    public void ContradictsGender_SurnameHe(string gender, string raw, string result, bool expected) =>
+        Assert.Equal(expected, LineValidation.ContradictsGender(raw, result, gender));
+
     [Theory(DisplayName = "InventsGender treats a he/she near an unknown-gender token as invented, whatever the line's shape")]
     [InlineData("#PlayerName#手脚挺快，", "#PlayerName# is quick on his feet", true)]
     [InlineData("#PlayerName#手脚挺快，", "#PlayerName#, you're quick-handed,", false)]

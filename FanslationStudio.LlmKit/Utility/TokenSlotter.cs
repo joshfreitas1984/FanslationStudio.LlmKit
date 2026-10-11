@@ -322,7 +322,8 @@ public sealed class TokenSlotter
 
         foreach (var (name, count) in needed.Where(n => IsSlotName(n.Key)))
         {
-            if (found.GetValueOrDefault(name) < count)
+            // allowDroppedRepeats: a repeat may become "you", so one occurrence is enough.
+            if (found.GetValueOrDefault(name) < (AllowsDroppedRepeats(name) ? Math.Min(count, 1) : count))
                 return $"Missing required token '{{{name}}}'.";
         }
 
@@ -361,6 +362,16 @@ public sealed class TokenSlotter
         }
 
         return string.Join("\n", lines);
+    }
+
+    /// <summary>
+    /// True when the slot (<c>{playerTitle}</c> or a numbered <c>{playerTitle2}</c>, braces optional) is configured
+    /// <see cref="NamedTokenReplacer.AllowDroppedRepeats"/>.
+    /// </summary>
+    public bool AllowsDroppedRepeats(string slotName)
+    {
+        var name = slotName.Trim('{', '}').TrimEnd('0', '1', '2', '3', '4', '5', '6', '7', '8', '9');
+        return _entries.Any(e => e.Config.AllowDroppedRepeats && e.Config.Name == name);
     }
 
     private static string DescriptionLine(Entry entry) => $"`{{{entry.Config.Name}}}`: {entry.Config.Description}";

@@ -218,8 +218,9 @@ public static class TranslationWorkflow
         if (TryHandleDynamicStringExclusion(split, textFile))
             return true;
 
-        if (TryApplyManualTranslation(logLines, config, split, textFile, preparedRaw))
-            return true;
+        // A manual translation is reviewed, so the rules below do not second-guess it, whether it was just applied or already was.
+        if (TryApplyManualTranslation(logLines, config, split, textFile, preparedRaw) is bool manualChanged)
+            return manualChanged;
 
         if (TryFlagEmptyTranslation(split, preparedRaw))
             return true;
@@ -409,7 +410,11 @@ public static class TranslationWorkflow
         return false;
     }
 
-    private static bool TryApplyManualTranslation(
+    /// <summary>
+    /// null: no manual translation applies. true: the line changed (applied, or stale flags cleared). false: the line already holds
+    /// the manual translation, so there is nothing to count, but the rules must still not run on it.
+    /// </summary>
+    private static bool? TryApplyManualTranslation(
         ConcurrentBag<string> logLines,
         LlmConfig config,
         TranslationSplit split,
@@ -417,10 +422,10 @@ public static class TranslationWorkflow
         string preparedRaw)
     {
         if (!textFile.EnableGlossary)
-            return false;
+            return null;
 
         if (!ManualTranslationsByRaw(config).TryGetValue(split.OriginalText(), out var manual))
-            return false;
+            return null;
 
         // A manual result is written in the game's own form; the stored translation is in slot space, so a token's final text in it
         // goes back to its slot. One that leaves a slot of the source out is skipped, not applied half-restored.
@@ -428,14 +433,23 @@ public static class TranslationWorkflow
         if (StringTokenReplacer.Slotter.FindSlotProblem(split.Text, manualResult) is string slotProblem)
         {
             logLines.Add($"Manual translation skipped {textFile.Path} ({slotProblem})\n{split.Text}\n{manual.Result}");
-            return false;
+            return null;
         }
 
-        if (split.Translated == manualResult)
-            return false;
+        // Compared in the form it is stored in: the save-time cleanup rewrites some manual text (an accented "née" becomes "nee"), so
+        // comparing the raw manual result would re-apply it, and count it as a change, on every pass.
+        var stored = LineValidation.CleanupLineBeforeSaving(LineValidation.PrepareResult(preparedRaw, manualResult, config.Hooks, textFile, split.Split), split.Text, textFile, new StringTokenReplacer());
+        if (split.Translated == manualResult || split.Translated == stored)
+        {
+            if (!split.FlaggedForRetranslation && split.FlaggedMistranslation.Length == 0 && split.FlaggedHallucination.Length == 0)
+                return false;
+
+            split.ResetFlags();
+            return true;
+        }
 
         logLines.Add($"Manually Translated {textFile.Path} \n{split.Text}\n{split.Translated}");
-        split.Translated = LineValidation.CleanupLineBeforeSaving(LineValidation.PrepareResult(preparedRaw, manualResult, config.Hooks, textFile, split.Split), split.Text, textFile, new StringTokenReplacer());
+        split.Translated = stored;
         split.ResetFlags();
         return true;
     }

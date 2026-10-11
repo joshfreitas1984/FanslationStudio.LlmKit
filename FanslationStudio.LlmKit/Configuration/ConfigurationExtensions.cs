@@ -88,6 +88,13 @@ public static class ConfigurationExtensions
             LoadApiKey(apiKeyPath, response.Runtime.Models[model.Name]);
         }
 
+        // Same fail-fast treatment for the regular translation model (see LlmConfig.TranslationModelName).
+        if (!string.IsNullOrEmpty(response.TranslationModelName)
+            && !response.Runtime.Models.ContainsKey(response.TranslationModelName))
+            throw new InvalidOperationException(
+                $"TranslationModelName '{response.TranslationModelName}' does not match any configured model name. " +
+                $"Configured model names: {string.Join(", ", response.Runtime.Models.Keys)}");
+
         // Fail fast on a typo'd/unconfigured escalation model name rather than silently never
         // escalating (see LlmConfig.EscalationModelName doc comment).
         if (!string.IsNullOrEmpty(response.EscalationModelName)

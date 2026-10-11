@@ -1,6 +1,6 @@
 # Token values per split (slotted storage)
 
-Status: phases 1-5 built (2026-10-11), phase 6 (game rollout) not started. Supersedes the in-memory masking in `StringTokenReplacer` (`namedTokenReplacers`, built 2026-10); that masking is removed.
+Status: complete (2026-10-11). All six phases are built and rolled out in PathOfKungfuOverLlm. The one open item is the in-game check in English mode (that `///token///` is substituted and restored titles read correctly); it needs the game, not code. Supersedes the in-memory masking in `StringTokenReplacer` (`namedTokenReplacers`, built 2026-10); that masking is removed.
 
 ## Progress and corrections to the plan
 
@@ -134,7 +134,7 @@ Each phase ends green (`dotnet test` for LlmKit; in a game repo only filtered te
    compare with the golden output; token-free files must be byte-identical.
 5. **Value kinds (done).** `translate` with a cache and `showValue`; phrase-token tests (a repeated phrase is translated once; a missing glossary entry falls
    back to the model; the cache key includes the glossary).
-6. **Game rollout (PathOfKungfuOverLlm).** Switch on, re-export, retranslate flagged and stale token lines in small batches, adapt
+6. **Game rollout (PathOfKungfuOverLlm; re-export, merge and full translation run 2026-10-11, results in the game's `docs/investigations/runtime-tokens.md`; the in-game check is open).** Switch on, re-export, retranslate flagged and stale token lines in small batches, adapt
    `GameFileHandling.ValidateRuntimeTokens` and `PlayerTokenPrompt.txt` if needed, update `docs/investigations/runtime-tokens.md`, update the
    `find-runtime-tokens` skill (storage is now slotted, kinds are config), sync the skill copies into the game repo and confirm with `diff -rq`, then an
    in-game check in English mode.

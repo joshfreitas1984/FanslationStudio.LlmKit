@@ -50,6 +50,13 @@ public class NamedTokenReplacer
     /// without being able to rewrite it. Leave off for a slot whose value must not influence the wording (a gender alternative).
     /// </summary>
     public bool ShowValue { get; set; }
+
+    /// <summary>
+    /// Accept a translation that writes the slot fewer times than the source, as long as it still appears once. For a token the
+    /// source repeats where English reads better with "you" or a pronoun (a form of address such as <c>{playerTitle}</c>), so
+    /// validation does not reject natural prose for collapsing the repeats. Off = every occurrence must be kept.
+    /// </summary>
+    public bool AllowDroppedRepeats { get; set; }
 }
 
 public class LlmConfig
@@ -101,6 +108,15 @@ public class LlmConfig
     public TranslationAssessmentConfig TranslationAssessment { get; set; } = new();
 
     public QualityControlAssessmentConfig QualityControlAssessment { get; set; } = new();
+
+    /// <summary>
+    /// Name of the model (matching a <see cref="ModelConfig.Name"/> entry in <see cref="Models"/>) used
+    /// for regular translation - the counterpart of <see cref="QualityControlConfig.ModelName"/> for QC.
+    /// Optional: when null/empty the first entry under <c>models:</c> is used, as before. Validated at
+    /// config-load time in <see cref="ConfigurationExtensions.GetConfiguration"/> so a typo'd name fails
+    /// fast. Resolved by <see cref="Utility.LlmHelpers.CalculateModelConfig"/>.
+    /// </summary>
+    public string? TranslationModelName { get; set; }
 
     /// <summary>
     /// Name of a model (matching a <see cref="ModelConfig.Name"/> entry in <see cref="Models"/>) to

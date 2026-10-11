@@ -443,7 +443,9 @@ public static partial class LineValidation
 
         foreach (var (token, rawCount) in rawPlaceholderCounts)
         {
-            if (resultPlaceholderCounts.GetValueOrDefault(token) < rawCount)
+            // A slot configured allowDroppedRepeats only has to survive once ("you" can stand in for the repeats).
+            var requiredCount = StringTokenReplacer.Slotter.AllowsDroppedRepeats(token) ? Math.Min(rawCount, 1) : rawCount;
+            if (resultPlaceholderCounts.GetValueOrDefault(token) < requiredCount)
             {
                 response = false;
                 correctionPrompts.AddPromptWithValues(config, "CorrectRemovalPrompt", token);
@@ -1123,9 +1125,13 @@ public static partial class LineValidation
     /// <summary>
     /// Blanks a name that ends in "He" (晁和 becomes "Chao He") before the pronoun checks run, so the name is not mistaken
     /// for "he". Only a capitalised word directly before a capital "He" counts; a sentence-initial "He" after a full
-    /// stop does not match.
+    /// stop does not match. A surname "He" (何傲霜 becomes "He Aoshuang") is blanked the same way: "He" directly before a
+    /// capitalised word is a name, since the pronoun is never followed by one.
     /// </summary>
-    private static string WithoutNameTails(string text) => NameEndingInHeRegex().Replace(text, "$1_");
+    private static string WithoutNameTails(string text) => NameStartingWithHeRegex().Replace(NameEndingInHeRegex().Replace(text, "$1_"), "He_");
+
+    [GeneratedRegex(@"\bHe(?= [A-Z][a-z])")]
+    private static partial Regex NameStartingWithHeRegex();
 
     [GeneratedRegex(@"\b([A-Z][a-z]+) He\b")]
     private static partial Regex NameEndingInHeRegex();

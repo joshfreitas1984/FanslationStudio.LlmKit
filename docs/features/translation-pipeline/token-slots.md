@@ -106,6 +106,6 @@ patterns, or the sentence is translated in pieces around the token.
 - A downstream game keeps a golden packaged output for a fixed set of token and token-free rows (PathOfKungfuOverLlm
   `Tests/PackagingGoldenTests.cs`).
 
-## Not built yet
+## Rolled out
 
-The game rollout (phase 6 of the plan): switching it on in a game, re-exporting, retranslating, and the in-game check.
+PathOfKungfuOverLlm runs on slots (see its `docs/investigations/runtime-tokens.md`). Not checked yet: the in-game result.

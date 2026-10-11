@@ -27,10 +27,11 @@ public static class LlmHelpers
 
     public static ModelExecutionConfig CalculateModelConfig(LlmConfig config, string preparedRaw)
     {
-        // TODO: Implement properly
-        //return preparedRaw.Contains("<")
-        //    ? config.Runtime.Models.First().Value
-        //    : config.Runtime.Models.Last().Value;
+        // TranslationModelName picks the model by name; unset (or absent from Runtime.Models, e.g. the
+        // assessment host swaps in a single model) falls back to the first configured model.
+        if (!string.IsNullOrEmpty(config.TranslationModelName)
+            && config.Runtime.Models.TryGetValue(config.TranslationModelName, out var translationModelConfig))
+            return translationModelConfig;
 
         return config.Runtime.Models.First().Value;
     }
