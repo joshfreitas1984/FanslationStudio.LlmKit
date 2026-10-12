@@ -911,13 +911,21 @@ public static partial class LineValidation
 
     public static string EncaseSquareBracketsForWholeLines(string raw, string translated)
     {
-        if (raw.StartsWith('【')
-            && raw.EndsWith('】')
-            && !translated.Contains('【')
-            && !translated.Contains('】'))
+        // A raw cell that is one whole 【label】 is saved as one ASCII "[label]" whatever the model wrote: bare text is wrapped,
+        // kept wide brackets are converted, and a result already written "[...]" is left alone (wrapping it again gave
+        // "【[...]】"). A game that cannot show "[ ]" can swap them back when packaging.
+        if (!raw.StartsWith('【') || !raw.EndsWith('】'))
+            return translated;
+
+        if (translated.Length >= 2 && translated.StartsWith('【') && translated.EndsWith('】'))
         {
-            translated = $"【{translated}】";
+            var inner = translated[1..^1];
+            return inner.StartsWith('[') && inner.EndsWith(']') ? inner : $"[{inner}]";
         }
+
+        var alreadyBracketed = translated.StartsWith('[') && translated.EndsWith(']');
+        if (!alreadyBracketed && !translated.Contains('【') && !translated.Contains('】'))
+            return $"[{translated}]";
 
         return translated;
     }
@@ -999,6 +1007,18 @@ public static partial class LineValidation
             result[i] == '\''
             && !(i > 0 && char.IsLetter(result[i - 1]) && i < result.Length - 1 && char.IsLetter(result[i + 1]));
 
+        // The model sometimes keeps the wide title mark itself ("Blade-Drawing Art》"), and the fix below then added an ASCII
+        // quote as well. Turn the kept mark into the plain quote, in place, so one marker is left where it stood.
+        var hadWideOpen = result.Contains('《');
+        var hadWideClose = result.Contains('》');
+        if (hadWideOpen || hadWideClose)
+        {
+            result = rawHasOpen
+                ? result.Replace('《', '\'').Replace("》", "")
+                : result.Replace('》', '\'').Replace("《", "");
+            result = result.Replace("''", "'");
+        }
+
         if (rawHasOpen && !rawHasClose)
         {
             // Dangling open marker (closes in a later cell) - remove a spuriously added closing
@@ -1006,8 +1026,8 @@ public static partial class LineValidation
             if (result.Length > 0 && IsBoundaryQuote(result.Length - 1))
                 result = result[..^1];
 
-            // Make sure the dangling opening quote itself survived translation.
-            if (result.Length == 0 || !IsBoundaryQuote(0))
+            // Make sure the dangling opening quote itself survived translation (at the start, or where a kept 《 stood).
+            if (result.Length == 0 || !(IsBoundaryQuote(0) || (hadWideOpen && result.Contains('\''))))
                 result = $"'{result}";
         }
         else if (rawHasClose && !rawHasOpen)

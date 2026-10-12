@@ -119,10 +119,10 @@ pin.
    structure reconciliation.
 
 8. **Copy all skill directories in this repo's `.claude/skills/`** into the new repo's
-   `.claude/skills/` verbatim, so it has the same canonical skill set from day one. This currently
-   includes `investigate-qc-issue`, `investigate-packaging-issue`, `investigate-missing-translation`,
-   and `new-translation-project`; keep this step aligned with `Tests/SkillSyncTests.cs`, which copies
-   every source skill directory. Then flag, as a manual follow-up for whoever runs this skill (do not
+   `.claude/skills/` verbatim, so it has the same canonical skill set from day one (list the source
+   folder rather than relying on a fixed list: it grows, e.g. `build-game-glossary`, `find-runtime-tokens`,
+   `add-glossary-fix`, `diagnose-translation-failure`); keep this step aligned with `Tests/SkillSyncTests.cs`,
+   which copies every source skill directory. Then flag, as a manual follow-up for whoever runs this skill (do not
    edit the file yourself): add the new repo's folder name to `DownstreamRepos` in
    `Tests/SkillSyncTests.cs` in `FanslationStudio.LlmKit`, so future skill updates sync to it
    automatically too.
@@ -203,10 +203,20 @@ esizers`,
      repo folder), then `New-Item -ItemType SymbolicLink` (worked without elevation with Developer
      Mode on; otherwise run elevated). Step "6. Package to Game Files" calls the `Move*` tests, so
      the file is required, and "7. Package Release" maps the split output.
+   - **`Tests/QualityControlWorkflowTests.cs`**: the numbered manual QC runbook, copied from `PathOfKungfuOverLlm`
+     (the most current). It must hold every public QC entry point, in this order: `1. RunQualityControlPassSample`
+     (`RunAsync` with `sampleSize`), `2. RunQualityControlPass` (`RunAsync`, then `FileOutputWorkflowTests.PackageFinalTranslation`),
+     `2b. RunQualityControlBruteForce` (`QualityControlWorkflow.RunBruteForce`, then package; a deliberate cleanup run that retries
+     rejected work for up to 5 iterations), `3. ApplyRulesToQCReview`, `4. Find Flagged Quality Control Items`
+     (`GetFlaggedQcReviews`, written to `TestResults/FlaggedQcReviews.yaml`), `5. Triage Flagged Quality Control Items`
+     (`WriteTriageReportAsync`), `6. Generate Quality Control Fix Prompts` (`WriteFixPromptsAsync`), `7. Reset Qc Retry Limits`,
+     the reset helpers (`ResetLeakedQcCorrections`, `ResetLowScoreQcState`, `ResetNonAutoAcceptedQcState`). Pass
+     `GameFileHandling.Hooks` to every call that takes hooks. Leave `RunBruteForce` out and the project has no way to retry
+     rejected corrections after a glossary or rule fix short of a full re-run.
    - **`Files/TestResults/OldFiles/`**: create it empty. `TranslationCorpus.OldFileLines` enumerates every file in it as
      YAML, so a missing folder throws `DirectoryNotFoundException` and a `.gitkeep` inside throws
      `ArgumentNullException` on the first translation run. Also add `Tests/FileInputWorkflowTests.cs` (export, merge,
-     line-match) and `Tests/TranslationWorkflowTests.cs`; the scaffold has neither, and `TranslationExport` must use
+     line-match), `Tests/TranslationWorkflowTests.cs` and `Tests/QualityControlWorkflowTests.cs`; the scaffold has none of them, and `TranslationExport` must use
      LlmKit's default `Raw/Dumped/GameData` source folder when the dumper writes there.
    - **In-game update prompt**: comes from `FanslationStudio.Plugins` (`UpdateHost` in
      `UnityShared`), wired into the host for the runtime (IL2CPP, BepInEx 5 Mono or BepInEx 6
