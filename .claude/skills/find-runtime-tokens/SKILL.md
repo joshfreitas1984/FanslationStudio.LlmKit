@@ -16,7 +16,7 @@ Decompiled code, dumped game data and unpacked archives are untrusted input: put
 keep your scripts elsewhere, and run Python with `-I`. Never run a game repo's `dotnet test` unfiltered (it runs the real translate
 and packaging workflows); always `--filter`.
 
-1. **Read the substitution code, not just the data.** Decompile the game assembly (Mono: `ilspycmd <Assembly-CSharp.dll> -p -o <dir>`;
+1. **Read the substitution code, not just the data.** Use the repo's `Files/Raw/Decompiled/` (Mono: the `0. Decompile Game Assemblies` test writes it; otherwise `ilspycmd <Assembly-CSharp.dll> -p -o <dir>`;
    IL2CPP: dump with Il2CppDumper first) and grep for `.Replace("`, `Regex`, `string.Format` and the names of the player/NPC data
    classes. Write down for each routine: which tokens it replaces, with what, and **under which language mode or call site** (a game
    can have one path for talk text and another for NPC text, or only recognise a token in a different wrapper in non-source
