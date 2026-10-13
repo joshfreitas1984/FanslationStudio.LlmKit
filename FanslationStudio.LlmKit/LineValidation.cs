@@ -1007,6 +1007,14 @@ public static partial class LineValidation
             result[i] == '\''
             && !(i > 0 && char.IsLetter(result[i - 1]) && i < result.Length - 1 && char.IsLetter(result[i + 1]));
 
+        bool HasBoundaryQuote()
+        {
+            for (var i = 0; i < result.Length; i++)
+                if (IsBoundaryQuote(i))
+                    return true;
+            return false;
+        }
+
         // The model sometimes keeps the wide title mark itself ("Blade-Drawing Art》"), and the fix below then added an ASCII
         // quote as well. Turn the kept mark into the plain quote, in place, so one marker is left where it stood.
         var hadWideOpen = result.Contains('《');
@@ -1026,8 +1034,9 @@ public static partial class LineValidation
             if (result.Length > 0 && IsBoundaryQuote(result.Length - 1))
                 result = result[..^1];
 
-            // Make sure the dangling opening quote itself survived translation (at the start, or where a kept 《 stood).
-            if (result.Length == 0 || !(IsBoundaryQuote(0) || (hadWideOpen && result.Contains('\''))))
+            // Make sure the dangling opening quote itself survived translation. It can sit anywhere: at the start, or mid-sentence
+            // when the cell is the front half of a split title ("...answer with the 'Forty-Two Chapter Sutra").
+            if (result.Length == 0 || !(result.Contains('“') || HasBoundaryQuote()))
                 result = $"'{result}";
         }
         else if (rawHasClose && !rawHasOpen)
@@ -1037,8 +1046,8 @@ public static partial class LineValidation
             if (result.Length > 0 && IsBoundaryQuote(0))
                 result = result[1..];
 
-            // Make sure the dangling closing quote itself survived translation.
-            if (result.Length == 0 || !IsBoundaryQuote(result.Length - 1))
+            // Make sure the dangling closing quote itself survived translation, wherever it sits ("Chapter 19', and the gatekeeper...").
+            if (result.Length == 0 || !(result.Contains('”') || HasBoundaryQuote()))
                 result = $"{result}'";
         }
 
