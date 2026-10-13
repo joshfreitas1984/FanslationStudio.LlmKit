@@ -105,7 +105,10 @@ pin.
    consumes `FanslationStudio.LlmKit` via project reference (not a NuGet package) from sibling repo
    `../FanslationStudio.LlmKit`, that the `TranslationLine`/`TranslationSplit`/`FieldTemplate`
    contract is LlmKit-owned (propose changes upstream, never redefine it downstream), and point to
-   the new repo's own `docs/README.md` as the documentation hub. `CLAUDE.md` stays a thin pointer to
+   the new repo's own `docs/README.md` as the documentation hub. For Mono games, also add the rule from
+   `PathOfKungfuOverLlm/AGENTS.md` that the decompiled game code lives in `Files/Raw/Decompiled/` (gitignored, made by the
+   `0. Decompile Game Assemblies` test, step 10) and is to be grepped instead of re-decompiled, plus the matching row in
+   `docs/README.md`'s "Where should I look?" table. `CLAUDE.md` stays a thin pointer to
    `AGENTS.md` + `docs/README.md`, same as every existing repo.
 
 7. **Create the new repo's `docs/README.md`**, per `docs/architecture/downstream-project-structure/downstream-repository-docs-taxonomy.md`'s file
