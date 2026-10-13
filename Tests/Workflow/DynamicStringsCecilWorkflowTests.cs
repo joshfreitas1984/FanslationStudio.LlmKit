@@ -95,6 +95,15 @@ public class DynamicStringsCecilWorkflowTests
         Assert.Equal(["System.Object", "System.String"], contract.Parameters);
     }
 
+    [Theory(DisplayName = "Package puts the source's edge whitespace back on a trimmed translation")]
+    [InlineData("装备位置: ", "Equipment slot:", "Equipment slot: ")]
+    [InlineData("{0}日{1}时辰 ", "{0}th day {1} hour", "{0}th day {1} hour ")]
+    [InlineData(" 剩余", "Remaining", " Remaining")]
+    [InlineData(" ，使用的AI为：", ", the AI used is:", ", the AI used is:")]
+    [InlineData("你好", "Hello", "Hello")]
+    public void RestoreEdgeWhitespace_KeepsSourceEdges(string raw, string translated, string expected) =>
+        Assert.Equal(expected, DynamicStringsCecilWorkflow.RestoreEdgeWhitespace(raw, translated));
+
     [Fact(DisplayName = "Package skips a line flagged for retranslation and counts it as failed")]
     public async Task PackageDynamicStringsCecilAsync_FlaggedForRetranslation_CountsAsFailed()
     {

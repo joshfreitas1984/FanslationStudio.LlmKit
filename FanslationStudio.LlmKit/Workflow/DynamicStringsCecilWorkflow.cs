@@ -79,6 +79,25 @@ public static class DynamicStringsCecilWorkflow
     /// unsafe-to-translate, which is not a failure - matches the original per-repo behavior this
     /// generalizes).
     /// </summary>
+    /// <summary>
+    /// The game builds text by concatenating literals ("装备位置: " + slot), so the space the source carries at its edges is part of the
+    /// string, but translation trims it. Trailing whitespace is always put back; leading whitespace only before a word, so a translation that
+    /// starts with punctuation (", the AI used is:") is not given a stray space.
+    /// </summary>
+    internal static string RestoreEdgeWhitespace(string raw, string translated)
+    {
+        var trailing = raw[raw.TrimEnd().Length..];
+        if (trailing.Length > 0 && !translated.EndsWith(trailing, StringComparison.Ordinal))
+            translated = translated.TrimEnd() + trailing;
+
+        var leading = raw[..(raw.Length - raw.TrimStart().Length)];
+        if (leading.Length > 0 && !translated.StartsWith(leading, StringComparison.Ordinal)
+            && translated.Length > 0 && (char.IsLetterOrDigit(translated[0]) || translated[0] == '{'))
+            translated = leading + translated.TrimStart();
+
+        return translated;
+    }
+
     public static async Task<(int Passed, int QcRejected, int RawFallback)> PackageDynamicStringsCecilAsync(string workingDirectory, TextFileToSplit textFile)
     {
         var outputPath = $"{workingDirectory}/Mod";
@@ -119,7 +138,7 @@ public static class DynamicStringsCecilWorkflow
                     Method = splits[1],
                     ILOffset = long.Parse(splits[2]),
                     Raw = splits[3],
-                    Translation = translated,
+                    Translation = RestoreEdgeWhitespace(splits[3], translated),
                     Parameters = DynamicStringSupport.PrepareMethodParameters(splits[4]),
                 };
 

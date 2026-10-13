@@ -470,9 +470,11 @@ public static class TranslationWorkflow
     {
         if (string.IsNullOrEmpty(split.Translated) && !string.IsNullOrEmpty(preparedRaw))
         {
+            // Already flagged: report no change, or every pass re-counts (and rewrites the file for) the same empty lines.
+            var alreadyFlagged = split.FlaggedForRetranslation && split.FlaggedMistranslation == "Failed";
             split.FlaggedForRetranslation = true;
             split.FlaggedMistranslation = "Failed"; //Easy search
-            return true;
+            return !alreadyFlagged;
         }
 
         return false;

@@ -135,14 +135,15 @@ public static partial class TranslationService
     /// against other fragments of the SAME column (see <see cref="ColumnIdentity"/>), never against
     /// a whole-cell split or a fragment of a different column that merely shares bare text.
     /// </summary>
-    private static (bool IsFragment, string ColumnIdentity, string Text, string Context) DedupKey(TranslationLine line, TranslationSplit split,
+    private static (bool IsFragment, string ColumnIdentity, string Text, string Context, bool Safe) DedupKey(TranslationLine line, TranslationSplit split,
         IReadOnlyDictionary<TranslationSplit, LineContext>? contexts = null)
     {
         var isFragment = IsCompoundFragment(line, split);
         // Identical text only shares a translation when it also shares a context (e.g. the same speaker).
         var context = contexts != null && contexts.TryGetValue(split, out var lineContext) ? lineContext.Prompt : string.Empty;
         // Likewise two lines whose slots stand for different phrases the model is told about (showValue) are different prompts.
-        return (isFragment, isFragment ? ColumnIdentity(split) : string.Empty, split.Text, context + ShownValuesSignature(split));
+        // An unsafe-to-translate split is never translated, so it must not be the representative a safe duplicate waits on.
+        return (isFragment, isFragment ? ColumnIdentity(split) : string.Empty, split.Text, context + ShownValuesSignature(split), split.SafeToTranslate);
     }
 
     /// <summary>
