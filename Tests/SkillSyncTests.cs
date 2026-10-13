@@ -3,7 +3,7 @@ namespace Tests;
 /// <summary>
 /// "Update Local Skills" - copies this repo's canonical .claude/skills/* into each downstream
 /// repo's .claude/skills/. This repo is the single source of truth for skills shared across
-/// DragonHierOverLlm, LegendOfMortalOverLlm, and WanXiangOverLlm (Claude Code loads skills from
+/// DragonHierOverLlm, LegendOfMortalOverLlm, WanXiangOverLlm, and PathOfKungfuOverLlm (Claude Code loads skills from
 /// the working directory's own repo, so a copy has to exist locally in each one). Not part of the
 /// default test run - re-run explicitly whenever a skill under .claude/skills/ changes:
 /// dotnet test --filter Category=SkillSync
@@ -15,6 +15,7 @@ public class SkillSyncTests
         "DragonHierOverLlm",
         "LegendOfMortalOverLlm",
         "WanXiangOverLlm",
+        "PathOfKungfuOverLlm",
     ];
 
     [Fact(DisplayName = "Update Local Skills - sync .claude/skills to downstream repos")]
