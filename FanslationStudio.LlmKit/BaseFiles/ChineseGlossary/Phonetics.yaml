@@ -4,6 +4,8 @@
   allowalt:
   - slap
   - flap
+  - brush
+  - brushed
   direct: pat pat
   literal: Pai Pai
 - raw: 鹿

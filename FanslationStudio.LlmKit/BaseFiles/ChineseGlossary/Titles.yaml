@@ -170,6 +170,7 @@
   context: Used to address a younger male peer in a friendly, respectful manner.
   allowalt:
     - young men
+    - young man
 - raw: 師弟
   rawSimplified: 师弟
   rawTraditional: 師弟
@@ -513,3 +514,28 @@
   badtrans: true
   direct: rivers lakes strange person
   literal: jiang hu qi ren
+- raw: 小娘子
+  result: Young Lady
+  allowalt:
+  - Young Miss
+  - Lady
+  - Miss
+  - bride
+  - newlywed
+  - young ladies
+  - young woman
+  - wife
+  - girl
+  - maiden
+  - Mistress
+  - Madam
+  - Young Mistress
+- raw: 大娘子
+  result: Madam
+  allowalt:
+  - Lady
+  - Wife
+  - Mistress
+  - Eldest Wife
+  - Mrs
+  - Mrs.

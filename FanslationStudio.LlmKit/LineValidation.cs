@@ -378,15 +378,6 @@ public static partial class LineValidation
             silentFailures.Add("Result is more than 15 times longer than the source.");
         }
 
-        // Small source with 'or' is usually an alternative
-        if ((result.Contains(" or") || result.Contains("(or"))
-            && raw.Length <= 3
-            && !result.Contains("ore", StringComparison.OrdinalIgnoreCase)) //Handle edge case
-        {
-            response = false;
-            correctionPrompts.AddPromptWithValues(config, "CorrectAlternativesPrompt", "or");
-        }
-
         // Small source with 'and' is ususually an alternative
         //if (result.Contains(" and") && raw.Length < 3 && !result.Contains("Spear and Staff", StringComparison.OrdinalIgnoreCase))
         //{
@@ -401,11 +392,8 @@ public static partial class LineValidation
             correctionPrompts.AddPromptWithValues(config, "CorrectAlternativesPrompt", ";");
         }
 
-        if (result.Contains(',') && !raw.Contains(',') && !raw.Contains("，") && !raw.Contains("、") && raw.Length < 4)
-        {
-            response = false;
-            correctionPrompts.AddPromptWithValues(config, "CorrectAlternativesPrompt", ",");
-        }
+        // ' or' and ',' in a short result are no longer rejected here: they are usually legitimate
+        // ("Thank you, sir", "Win or Lose") and QC catches real alternative lists.
 
         // Added literal
         if (result.Contains("(lit."))
