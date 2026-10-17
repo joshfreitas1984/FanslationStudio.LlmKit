@@ -64,7 +64,23 @@ public class TokenValueTests : IDisposable
         ], []);
         var (slotted, tokens) = slotter.Slot("<a><b><c>");
 
-        Assert.Equal("///a////// b///<c>".Replace("/// b", "///b"), slotter.Restore(slotted, tokens).Text);
+        Assert.Equal("///a/// ///b/// <c>", slotter.Restore(slotted, tokens).Text);
+    }
+
+    [Fact(DisplayName = "A restored token is spaced from an adjacent Latin word or restored token, not from punctuation or Chinese")]
+    public void Restore_SpacesAdjacentTokens()
+    {
+        var slotter = new TokenSlotter(
+        [
+            new NamedTokenReplacer { Literal = "<fName>", Name = "firstName" },
+            new NamedTokenReplacer { Literal = "<t>", Name = "playerTitle", RestoreAs = "<Big Brother||Big Sister>" },
+        ], []);
+        var (_, tokens) = slotter.Slot("<fName><t>");
+
+        Assert.Equal("<fName> <Big Brother||Big Sister>, hi", slotter.Restore("{firstName}{playerTitle}, hi", tokens).Text);
+        Assert.Equal("Hi <fName>, <Big Brother||Big Sister>.", slotter.Restore("Hi {firstName}, {playerTitle}.", tokens).Text);
+        Assert.Equal("Hi <fName> and", slotter.Restore("Hi{firstName}and", tokens).Text);
+        Assert.Equal("你<fName>好", slotter.Restore("你{firstName}好", tokens).Text);
     }
 
     // ---------------------------------------------------------------- slotting and restoring

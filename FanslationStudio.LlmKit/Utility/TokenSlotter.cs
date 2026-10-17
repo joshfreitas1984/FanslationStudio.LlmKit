@@ -176,6 +176,7 @@ public sealed class TokenSlotter
             byName.TryAdd(pair.Key, pair);
 
         var unresolved = new List<string>();
+        var lastRestoredEnd = -1;
         var text = SlotRegex.Replace(slotted, match =>
         {
             if (!byName.TryGetValue(match.Groups[1].Value, out var pair))
@@ -188,7 +189,17 @@ public sealed class TokenSlotter
                 return match.Value;
             }
 
-            return value;
+            // The game substitutes the value in place, so a model that wrote "{firstName}{playerTitle}" or "{npcName}said" would
+            // get "FangBig Brother" in-game. Space the value from an adjacent Latin word or another restored slot (a Chinese
+            // neighbour needs none, and a source-form restore of untranslated text keeps its own adjacency).
+            var before = match.Index > 0 ? slotted[match.Index - 1] : '\0';
+            var afterIndex = match.Index + match.Length;
+            var after = afterIndex < slotted.Length ? slotted[afterIndex] : '\0';
+            var padBefore = value.Length > 0 && (match.Index == lastRestoredEnd || char.IsAsciiLetterOrDigit(before));
+            var padAfter = value.Length > 0 && char.IsAsciiLetterOrDigit(after);
+            lastRestoredEnd = afterIndex;
+
+            return (padBefore ? " " : string.Empty) + value + (padAfter ? " " : string.Empty);
         });
 
         return new RestoreResult(text, unresolved);
