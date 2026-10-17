@@ -64,6 +64,45 @@ public static partial class LineValidation
             && raw.IndexOf(phrase, StringComparison.OrdinalIgnoreCase) < 0);
     }
 
+    /// <summary>
+    /// The model talking about its task, or continuing the system prompt's "(Bored) Ah, ..." bracket example, instead of translating:
+    /// "It seems there was an instruction to correct a previous output...", "Ah, ... I wonder what there is to do around here.",
+    /// "Sure, please provide the specific text...". Seen in QC corrections that scored 92-95 and replaced a real translation, and in
+    /// first-pass translations, so it is part of <see cref="CheckTransalationSuccessful"/> and therefore of every rule check.
+    /// Each pattern is specific enough that real dialogue does not match; a Chinese source cannot contain English, so a pattern the
+    /// source itself contains (an English line in a Chinese file) is not narration.
+    /// </summary>
+    private static readonly Regex[] ModelNarrationPatterns =
+    [
+        new(@"\b(?:previous|prior|earlier) (?:output|response|translation|answer)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled),
+        new(@"\bno specific (?:previous|text|output|glossary|source|instruction)", RegexOptions.IgnoreCase | RegexOptions.Compiled),
+        new(@"\bprovide the (?:specific|original|actual|chinese)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled),
+        new(@"\binstruction to correct\b|\bcorrect a previous\b|\bneeds? to be (?:translated|corrected)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled),
+        new(@"\bappears? to be addressing you\b", RegexOptions.IgnoreCase | RegexOptions.Compiled),
+        // The bracket example continued into an invented monologue.
+        new(@"^\W*(?:\(?Bored\)?,?\s*ah,?\s*\.\.\.|ah,? \.\.\.\s*(?:\\n|\n)\s*(?:\\n)?\s*I (?:wonder|guess|can't seem)|ah,? \.\.\.\s*I guess there's nothing)", RegexOptions.IgnoreCase | RegexOptions.Compiled),
+        // "\n" is also matched as the two characters backslash-n: some stored translations carry an escaped newline, which defeats \b before the "I".
+        new(@"(?:\\n|\n|(?<![A-Za-z]))I wonder what(?: there is to do around here|'?s going on outside| [\w' ]{1,40} is up to now)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled),
+        new(@"(?:\\n|\n|(?<![A-Za-z]))I (?:can't|cannot) seem to find anything interesting here\b|\bwhat I should do next\b", RegexOptions.IgnoreCase | RegexOptions.Compiled),
+    ];
+
+    /// <summary>The narration signature <paramref name="result"/> contains that <paramref name="raw"/> does not, or null.</summary>
+    public static string? FindModelNarration(string? raw, string? result)
+    {
+        if (string.IsNullOrEmpty(result))
+            return null;
+
+        raw ??= string.Empty;
+        foreach (var pattern in ModelNarrationPatterns)
+        {
+            var match = pattern.Match(result);
+            if (match.Success && !pattern.IsMatch(raw))
+                return match.Value.Trim();
+        }
+
+        return null;
+    }
+
     // LLM meta-commentary/instruction-leak signatures - the model narrating its own
     // translation process instead of just returning the translation   
     private static readonly string[] InvalidPhrases =
@@ -353,6 +392,13 @@ public static partial class LineValidation
         {
             response = false;
             silentFailures.Add($"Contains the invalid phrase '{invalidPhrase}'.");
+        }
+
+        var narration = FindModelNarration(raw, result);
+        if (narration != null)
+        {
+            response = false;
+            silentFailures.Add($"Reads as the model talking about the task, not a translation ('{narration}').");
         }
 
         // The model echoing a retry-feedback message into its translation ("Restore `#X#` to the

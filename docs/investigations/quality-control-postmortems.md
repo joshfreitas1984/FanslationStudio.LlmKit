@@ -290,6 +290,28 @@ not ("掌、掌门" -> "Sect Leader, Sect Leader, big, big trouble!"; "dealt the
 "knocked back"). The 爷 line stays rejected with a real quote and is flagged, as it should be. Raw first-verification
 acceptance did not move (the gain is in overruled claims and repairs that land); call count and LLM time unchanged.
 
+## First-pass translations that talk about the task (2026-10-17, PathOfKungfuOverLlm)
+
+**Observed.** 34 stored `translated` values in PathOfKungfuOverLlm were not translations: "Ah, ...
+I wonder what Lord Hundred Eyes is up
+to now.", "It seems there was an instruction to correct a previous output, but no specific previous output...", "Sure, please
+provide the specific text...", "Ding Zhao appears to be addressing you as '{playerTitle}'.". The model continued the system prompt's
+`（无趣）哎，……` -> `(Bored) Ah, ...` example into an invented monologue, or answered a request it thought was missing its text.
+`FindPromptLeak` only knew the literal "(Bored) Ah, ..." tail, so nothing validated these.
+
+**What QC did.** For 33 of the 34 the QC pass caught it and stored a proper `qcTranslated` (status `Corrected`, score 92-95), so packaging
+shipped the good text. One QC correction was itself narration and shipped. The garbage sat in `Translated`, and shows again the moment QC
+is off, reset, or a line is retranslated.
+
+**Fix.** `LineValidation.FindModelNarration` (a short list of task-talk signatures, each ignored if the source contains it) is part of
+`CheckTransalationSuccessful`, so it fails a first-pass attempt (which retries), a QC candidate (via `EvaluateRules`), and flags stored
+`Translated` for retranslation when "2. ApplyRulesToCurrentTranslation" runs. Tests: `Tests/ModelNarrationTests.cs`.
+Not matched on purpose: a bare "Ah, ... I wonder what kind of rumors are circulating" is indistinguishable from a real line.
+
+**Find it in another game.** Re-run "2. ApplyRulesToCurrentTranslation" (flags matching lines for retranslation), or grep
+`Files/Converted` for `translated:` values containing "previous output", "provide the specific", "up to now." or `Bored,? ah`.
+A QC cleanup is not needed: a `Translated` change already resets that column's QC state.
+
 ## Follow-up guidance
 
 When a new QC defect is found, record the reproduction, affected model/prompt, observed output,
