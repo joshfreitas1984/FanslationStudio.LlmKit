@@ -37,6 +37,23 @@ public class TranslationWorkflowTests
         Assert.Equal(expected, result);
     }
 
+    // Legend of Mortal: 111 lines "……<long sentence>" came back as "..." - only the leading ellipsis survived. Nothing
+    // rejected it and the QC model scored 22 of them 100.
+    [Theory(DisplayName = "IsContentlessTranslation rejects a translation with no words for a Chinese source")]
+    [InlineData("...老兄,我跟你有啥深仇大恨,你这嘴力也太惊人。", "...", true)]
+    [InlineData("...老兄,我跟你有啥深仇大恨", "... ?!", true)]
+    [InlineData("...老兄,我跟你有啥深仇大恨", "...Brother, what grudge do I have against you?", false)]
+    [InlineData("...", "...", false)] // source has no Chinese: a bare ellipsis is the right answer
+    [InlineData("#PlayerName#", "{0}", false)]
+    [InlineData("你好", "{0}", false)] // a slot holds a digit, so it counts as content
+    public void IsContentlessTranslationDetectsDroppedSentence(string preparedRaw, string translated, bool expected)
+    {
+        var method = typeof(TranslationWorkflow).GetMethod(
+            "IsContentlessTranslation", BindingFlags.NonPublic | BindingFlags.Static)!;
+
+        Assert.Equal(expected, (bool)method.Invoke(null, [preparedRaw, translated])!);
+    }
+
     [Theory(DisplayName = "CustomUnsafeToTranslateRule marks matching splits unsafe and leaves others alone")]
     [InlineData("Mortal.Combat.CombatEnemyController/<SetData>d__24,MoveNext,253,圖片 ,[]", false)]
     [InlineData("Mortal.Combat.CombatStatController/<ModifyStamina>d__266,MoveNext,97,圖片 ,[]", true)]

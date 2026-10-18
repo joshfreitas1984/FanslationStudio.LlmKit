@@ -317,3 +317,18 @@ A QC cleanup is not needed: a `Translated` change already resets that column's Q
 When a new QC defect is found, record the reproduction, affected model/prompt, observed output,
 root cause, and regression coverage here or in a focused investigation. Update the feature guide
 only when the current usage contract changes.
+
+## A translation that is only "..." passed QC (Legend of Mortal, 2026-10)
+
+111 lines of the form `……<long sentence>` had a first-pass translation of exactly `"..."`. QC corrected 89 of them
+(often `DroppedContent`); the QC model scored the other 22 `Passed`/100 and they would have shipped as "...".
+
+- **Why nothing caught it:** `IsMissingRequiredEllipsis` only covers a source that *ends* in "..." and is under 15
+  characters; the length rule in `LineValidation` only fires for a long result from a tiny source. No deterministic
+  rule rejected a result with no words, so dropped content was left to the QC model's judgement.
+- **Fix:** `TranslationWorkflow.IsContentlessTranslation` (Chinese in the source, no letter or digit in the result) is
+  part of `EvaluateRules`, so it flags the line for retranslation in the translate pass and rejects a QC candidate.
+  A slot such as `{0}` counts as content. Run `ApplyRulesToCurrentTranslation` to flag existing lines.
+- **Not covered:** a translation that keeps some words but drops most of the sentence ("Still thought they were" for a
+  50-character source) has no deterministic check; only QC can catch it.
+- **Cause of the first-pass "..." is not established.**

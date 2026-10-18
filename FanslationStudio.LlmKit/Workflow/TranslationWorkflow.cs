@@ -586,6 +586,14 @@ public static class TranslationWorkflow
             modified = true;
         }
 
+        if (ruleResult.ContentlessReason != null)
+        {
+            logLines.Add($"Contentless translation {textFile.Path} Replaces: \n{split.Translated}");
+            AddFlagReason(split, "Contentless translation");
+            split.FlaggedForRetranslation = true;
+            modified = true;
+        }
+
         if (ruleResult.NegativeSignReason != null)
         {
             logLines.Add($"Missing negative sign {textFile.Path} Replaces: \n{split.Translated}");
@@ -660,6 +668,18 @@ public static class TranslationWorkflow
             && !translatedForEllipsisCheck.EndsWith("...!!")
             && !translatedForEllipsisCheck.EndsWith("...?!");
     }
+
+    /// <summary>
+    /// True when <paramref name="preparedRaw"/> has Chinese text but <paramref name="translated"/> has no letter
+    /// or digit at all (only dots, punctuation, whitespace) - the whole sentence was dropped and only a stray
+    /// leading ellipsis survived ("……老兄，我跟你有啥深仇大恨" -> "..."). Every other rule passes such a line:
+    /// <see cref="IsMissingRequiredEllipsis"/> only covers short sources ending in "...", and QC's LLM review has
+    /// scored it 100. A slot ("{0}") counts as content since it holds a digit.
+    /// </summary>
+    internal static bool IsContentlessTranslation(string preparedRaw, string translated) =>
+        CjkIdeographRegex.IsMatch(preparedRaw) && !translated.Any(char.IsLetterOrDigit);
+
+    private static readonly Regex CjkIdeographRegex = new(@"\p{IsCJKUnifiedIdeographs}", RegexOptions.Compiled);
 
     /// <summary>
     /// Matches a hyphen-minus immediately before a digit, in either its raw ASCII form ("-5") or the
@@ -761,6 +781,7 @@ public static class TranslationWorkflow
             ? $"Matches the bad-words list (found: {string.Join(", ", badWordMatches)})."
             : null;
         var ellipsisReason = IsMissingRequiredEllipsis(preparedRaw, candidate) ? "Missing an ellipsis '...' required by the source." : null;
+        var contentlessReason = IsContentlessTranslation(preparedRaw, candidate) ? "The translation has no words; the source's text was dropped." : null;
         var negativeSignReason = IsMissingRequiredNegativeSign(preparedRaw, candidate) ? "Missing a negative sign '-' before a number required by the source." : null;
         var missingTokenReason = FindMissingRequiredToken(gameRaw, gameCandidate, config.ExtraStringTokenReplacers) is string missingToken
             ? $"Missing required token '{missingToken}'."
@@ -780,7 +801,8 @@ public static class TranslationWorkflow
             negativeSignReason,
             missingTokenReason,
             customValidatorReason,
-            structuralReason);
+            structuralReason,
+            contentlessReason);
     }
 
     /// <summary>See <see cref="EvaluateRules"/>.</summary>
@@ -792,7 +814,8 @@ public static class TranslationWorkflow
         string? NegativeSignReason,
         string? MissingTokenReason,
         string? CustomValidatorReason,
-        string? StructuralReason)
+        string? StructuralReason,
+        string? ContentlessReason = null)
     {
         /// <summary>
         /// Every failure reason in generic order - for a caller (like QC) that just wants "did
@@ -812,6 +835,7 @@ public static class TranslationWorkflow
                 if (MissingTokenReason != null) yield return MissingTokenReason;
                 if (CustomValidatorReason != null) yield return CustomValidatorReason;
                 if (StructuralReason != null) yield return StructuralReason;
+                if (ContentlessReason != null) yield return ContentlessReason;
             }
         }
 
@@ -823,7 +847,8 @@ public static class TranslationWorkflow
             || NegativeSignReason != null
             || MissingTokenReason != null
             || CustomValidatorReason != null
-            || StructuralReason != null;
+            || StructuralReason != null
+            || ContentlessReason != null;
     }
 
     /// <summary>
