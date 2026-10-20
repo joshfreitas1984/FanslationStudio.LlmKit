@@ -11,6 +11,7 @@ public class PersonShiftDetectorTests
     [InlineData("被你爹一直囚在这里，不人不鬼过了这些年。", "After all these years, locked up here by my father.", PersonShiftDetector.SecondPersonLost)]
     [InlineData("“……你勾结螣蛇蛊主意欲何为？”", "It seems there was an instruction to correct a previous output, but no specific previous output was given.", PersonShiftDetector.ModelNarration)]
     [InlineData("恍惚间不知过了多久，你只觉周身上下真气奔涌。", "Ah, ... I wonder what there is to do around here. I only feel True Qi surging throughout my body.", PersonShiftDetector.ModelNarration)]
+    [InlineData("{firstName}{playerTitle}先人后己，隐有古侠之风，孙某先谢过了……", "{playerTitle} {firstName}, you show great courtesy, with the air of an ancient hero. Sun Mou thanks you in advance...", PersonShiftDetector.FirstPersonLost)]
     [InlineData("妾身愿随夫君左右。", "You are willing to stay by his side.", PersonShiftDetector.FirstPersonLost)]
     public void CatchesShift(string raw, string translated, string expected) =>
         Assert.Equal(expected, PersonShiftDetector.Find(raw, translated));

@@ -117,8 +117,9 @@ public static partial class PersonShiftDetector
     [GeneratedRegex(@"[你您汝尔]")]
     private static partial Regex SecondPersonSourceRegex();
 
+    // A surname + 某 (孙某) is how a speaker refers to himself, so "Sun Mou" in the English is the speaker turned into a third person.
     // 我 itself is left out: it sits inside 无我, 自我, 我们 (still first person) and idioms, and the lines with a bare 我 already have "I".
-    [GeneratedRegex(@"妾身|奴家|小女子|在下(?![个一面方午次去来风雨雪])|老夫|老朽|本座|本宫|愚兄|为兄|小弟(?!们)|孩儿")]
+    [GeneratedRegex(@"妾身|奴家|小女子|在下(?![个一面方午次去来风雨雪])|老夫|老朽|本座|本宫|愚兄|为兄|小弟(?!们)|孩儿|(?<![某的之此该其])[一-鿿](?<![某人者有些何])某(?![人某处些地天日时事样个方件])")]
     private static partial Regex FirstPersonSourceRegex();
 
     // With 我/咱/俺 beside the 你, the English "I" is the speaker and the 你 may sit in a "with you"/"to you" the translation folds into "we"/"let's".
