@@ -2571,6 +2571,30 @@ public static class QualityControlWorkflow
     }
 
     /// <summary>
+    /// Resets every column at <see cref="QcStatus.Passed"/> whose effective translation prints a surname + "Mou" for a 某
+    /// (<see cref="LineValidation.FindSurnameMou"/>) back to <see cref="QcStatus.NotReviewed"/>. <see cref="GetLlmVerdictAsync"/> now
+    /// flags these on every new review, but a column already <c>Passed</c> is never re-reviewed, so a verdict recorded before that
+    /// check existed would keep "Sun Mou" forever. Only <c>Passed</c>: a <c>Corrected</c> column's gate already refuses a Mou.
+    /// Cheap: a regex scan, no LLM call of its own.
+    /// </summary>
+    public static async Task<int> ResetSurnameMouAffectedQcState(string workingDirectory, TextFileToSplit[] textFiles)
+    {
+        return await ResetColumnsAsync(workingDirectory, textFiles, (column, textFile) =>
+        {
+            var anchor = column.Anchor;
+            if (anchor.QcStatus != QcStatus.Passed)
+                return false;
+
+            if (LineValidation.FindSurnameMou(column.RawText, column.ComputeEffectiveTranslated()) == null)
+                return false;
+
+            Console.WriteLine($"Quality control cleanup: '{textFile.Path}' split {anchor.Split} passed QC with a surname + Mou for 某 - resetting for re-review.");
+            anchor.ResetQcState();
+            return true;
+        });
+    }
+
+    /// <summary>
     /// Matches a Chinese stammer/stutter: a word's leading character repeated right before the full
     /// word, separated by 、, ，, or , - e.g. "思、思阁主" (stammering on 思), "你、你、你……"
     /// (stammering on 你 twice over, matched here as the first 你、你 pair). See

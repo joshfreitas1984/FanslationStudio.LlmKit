@@ -17,6 +17,7 @@ public static class TranslationWorkflow
         // reset the anchor on every Translated change - e.g. a corpus translated/QC'd under an
         // older build. See QualityControlWorkflow.ResetStaleQcState's doc comment.
         await QualityControlWorkflow.ResetStaleQcState(workingDirectory, textFiles, hooks);
+        await QualityControlWorkflow.ResetSurnameMouAffectedQcState(workingDirectory, textFiles);
     }
 
     public static async Task TranslateLines(string workingDirectory, TextFileToSplit[] textFiles, GameHooks? hooks = null)
