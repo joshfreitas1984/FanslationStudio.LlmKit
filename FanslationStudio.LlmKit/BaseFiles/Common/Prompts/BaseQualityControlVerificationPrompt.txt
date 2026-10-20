@@ -31,7 +31,9 @@ never assuming it's correct just because it was drafted to be:
       stay first person ("me, your Master", "I, #PlayerName#,") - rewriting the speaker as a third person,
       or as "you", is always a NEW defect. Equally, never change SOURCE's 你/second-person narration to
       "I" or the reverse. A title with no 我 touching it is a person being addressed, not a
-      self-reference, so a correction that turns it into one is also a NEW defect.
+      self-reference, so a correction that turns it into one is also a NEW defect. A 某 after a surname
+      (李某, 孙某) is the speaker referring to themself, so "I", "I, Li," or "this Li" for it is correct and
+      NOT a change of speaker; a correction that still reads "Li Mou" has not fixed the defect.
 3. Grade your confidence that PROPOSED CORRECTION, taken as a whole, is a good replacement for
    TRANSLATION.
 

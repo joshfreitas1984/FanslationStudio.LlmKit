@@ -1555,6 +1555,13 @@ public static class QualityControlWorkflow
                 return new LlmVerdict(false, null, null);
         }
 
+        // The detector model passes "Li Mou" as a fluent translation, so a 某 rendered as a second name is
+        // flagged here whatever it said (LineValidation.FindSurnameMou); the correction model then rewrites it
+        // and EvaluateQcCandidate's rule gate rejects any correction that still prints one.
+        if (LineValidation.FindSurnameMou(rawText, maskedTranslated) != null
+            && !confirmed.Findings.Any(finding => finding.Category == QcDefectCategory.OtherNamedDefect))
+            confirmed = new QcDetectionResult(true, [.. confirmed.Findings, new QcDefectFinding(QcDefectCategory.OtherNamedDefect)]);
+
         if (!confirmed.HasDefects)
             return new LlmVerdict(true, 100, null, QcDefectCategory.None, confirmed.Findings);
 

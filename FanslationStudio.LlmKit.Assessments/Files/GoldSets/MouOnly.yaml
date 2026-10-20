@@ -1,0 +1,421 @@
+schemaVersion: 2
+labelVersion: reviewed-20260919
+annotationStatus: human-reviewed
+sourceAssessment:
+  path: TestResults/ModelAssessmentOld
+  sampleFingerprint: e3925180910dc12e92d7c695fb9fcfa57fe59589847763b7741f0543801a0ef6
+  sampleSeed: 20260919
+  selection: confidence-0.5 frontier judgments, manually screened for diversity
+  warning: This 6-sample batch has been human-reviewed and finalized; the dataset still needs expansion to the 300-500 sample target described in docs/plans/qc-evaluator-comparison.md before it can serve as the full gold set.
+additionalSourceAssessments:
+- name: ModelAssessment-20260919-larger-run
+  path: TestResults/ModelAssessment
+  sampleFingerprint: 98782ae2b6facd4d6700fa074f07344c5996979fcee590b18a7c35feac5fc2c9
+  sampleSize: 201
+  sampleSeed: 20260919
+  selection: >-
+    manually screened for defect diversity across the 23 samples where at least one model's structural validation failed; introduces the HyMT2-30B-A3B-Q3 quant as a 4th candidate. Items sourced from this run set sampleRun: ModelAssessment-20260919-larger-run below; items without a sampleRun come from the original sourceAssessment above.
+  note: >-
+    HyMT2-30B-A3B's Results.yaml in this run directory was manually overwritten with the HyMT2-30B-A3B-Q4 quant's output after the user changed that model's configured default - so in this run's items, the "HyMT2-30B-A3B" candidate column is actually the Q4 quant, not whatever quant produced the original 6 items above.
+- name: ModelAssessment-20260919-pinned-recheck
+  path: TestResults/ModelAssessment
+  sampleFingerprint: 811c4f24b1f70ff417b39ab06da24e36f1fb6e2f39a359227f488aa686e6559e
+  sampleSize: 215
+  sampleSeed: 20260919
+  selection: >-
+    a fresh 200-sample random draw plus all 15 pinnedSampleSources configured in Files/Config.yaml at the time of the run (200 + 15 = 215). Mined for: (a) whether the 3 newly-pinned historically-QC-flagged terms (殷殷/五毒弟子/撤撤撤) still reproduce their documented defects, and (b) a further diversity pass over newly-failed samples. Items sourced from this run set sampleRun: ModelAssessment-20260919-pinned-recheck below. Only 3 models were configured for this run (Qwen25-Standard, HyMT2-7B, HyMT2-30B-A3B) - no Q3/Q4 quant variants were separately compared this time.
+- name: ConvertedCorpus-20260920-mining
+  path: Files/Converted
+  sampleFingerprint: n/a - not a TranslationAssessmentWorkflow run
+  sampleSize: n/a
+  sampleSeed: n/a
+  selection: >-
+    30 detection items hand-mined directly from Files/Converted's ~81,165 real production splits (not from a ModelAssessment run - there is no fingerprint/seed to record). Candidates use each row's pre-QC "translated" field as a single-candidate "ProductionTranslation" column, judged independently of whatever qcStatus/qcDefectCategory that row already carries in production (to avoid circularity - see docs/plans/qc-evaluator-comparison.md's Fifteenth round entry). Selected for diversity across file types (PlotData, dynamicStrings, dynamicStringsFromColumns, dynamicStringsPoetry, dumpedPrefabText(FromOtherFields), KungFuData, SpeAddDataBase, SpeHeroData, heroFullNames) and defect categories (mistranslation, fabricated-content, formatting, garbage-output, fluency), with a deliberate emphasis on lines carrying 2+ placeholders (#Token# and the game's ⟦n⟧ bracket style) in a single line, since the gold set previously had only one such example. Items sourced from this batch set sampleRun: ConvertedCorpus-20260920-mining below.
+- name: ConvertedCorpus-20260926-unnatural-phrasing-mining
+  path: Files/Converted
+  sampleFingerprint: n/a - not a TranslationAssessmentWorkflow run
+  sampleSize: n/a
+  sampleSeed: n/a
+  selection: >-
+    8 detection items hand-mined directly from Files/Converted to test the new UNNATURAL_PHRASING DEFECT category (added alongside this batch - see QcDefectCategory.cs, the shared BaseQualityReviewPrompt.txt, and docs/investigations/tests/qc-qualityscore-noise-investigation.md for the reported line that motivated it). 3 Defect/unnatural-phrasing items (the reported "角色获取的额外内力上限" line itself, its immediate sibling "角色获取的额外生命上限", and a structurally distinct "初始获得随机秘籍" example) plus 5 clean Pass baselines deliberately drawn from the same terse UI/stat-label register the HARD_TO_PARSE_SEAM carve-out already protects, to directly test false-positive risk on exactly that register. A ~10-item smoke test, not a hand-validated precision sample - the category starts outside autoAcceptDefectCategories and stays there until a real corpus-volume validation pass is run as follow-up work. Items sourced from this batch set sampleRun: ConvertedCorpus-20260926-unnatural-phrasing-mining below.
+- name: FlaggedQueue-20260926-mining
+  path: Files/Converted
+  sampleFingerprint: n/a - not a TranslationAssessmentWorkflow run
+  sampleSize: n/a
+  sampleSeed: n/a
+  selection: >-
+    8 detection items hand-mined from the corpus's existing flaggedForQcReview: true queue (376 items across the corpus as of this mining pass), 2 each from 4 of the gold set's thinnest established categories (LostIdiom, DroppedStutter, GarbledNumber, UntranslatedPinyin), chosen for being unambiguous single-defect examples where production's own qcDefectCategory call was independently re-confirmed correct on inspection (as opposed to the many flagged rows spanning multi-part templated cells where the visible defect and the flagged qcDefectCategory did not obviously line up without deeper digging). The two items mined as UntranslatedPinyin surfaced a real category-definition gap: every UntranslatedPinyin-flagged row actually found in this pass was the mirror-image direction of that category's literal definition (a term that should stay Pinyin got mistranslated into an English gloss, not a term left in Pinyin that should have been translated). Fixed the same day this was found - BaseQualityReviewPrompt.txt's UNTRANSLATED_PINYIN/OTHER_NAMED_DEFECT bullets and QcDefectCategory.cs's doc comments now state explicitly that this reverse direction is OTHER_NAMED_DEFECT, not UNTRANSLATED_PINYIN - so these two items (4de67554e9244783/7a9b4022c55d8896) are labeled mistranslation in this gold set, matching the corrected category boundary rather than production's original (pre-fix) label. Items sourced from this batch set sampleRun: FlaggedQueue-20260926-mining below.
+- name: ConvertedCorpus-20260926-concrete-noun-mining
+  path: Files/Converted
+  sampleFingerprint: n/a - not a TranslationAssessmentWorkflow run
+  sampleSeed: n/a
+  sampleSize: n/a
+  selection: >-
+    11 short martial-arts skill/item/weapon names hand-mined from Files/Converted/dynamicStringsFromColumns.txt.yaml after 三尸蜈蚣爪 (8c1504d4fd25c3fa, Scorpion for centipede) was found shipping with qcStatus Passed. A scan for creature characters whose English rendering lacked the matching creature word found a real QC blind spot - a concrete noun in a name swapped for a different one (蜈蚣 as Earthworm), dropped (千蛛万毒手 with no spiders) or invented (灵蛇 as Dragon Serpent) - which QC passed in almost every case. 7 Defect items plus 4 Pass controls using the same creatures (蝎尾鞭, 银蛇枪法, 蛇鹤八打, 灵蛇杖法) so the evaluator is tested on distinguishing right from wrong, not on reacting to any creature word. Added BEFORE the prompt fix meant to address them, so the current prompt is baselined on them first. Borderline cases deliberately left out: 鱼肠剑法 (fish dropped from a famous sword name) and 控鹤功 (Featherfall Technique, crane dropped).
+- name: ConvertedCorpus-20261004-pronoun-mining
+  path: Files/Converted
+  sampleFingerprint: n/a - not a TranslationAssessmentWorkflow run
+  sampleSize: n/a
+  sampleSeed: n/a
+  selection: >-
+    16 single-candidate items hand-mined from Files/Converted for two reported translation habits of the Qwen25 translator: (a) inventing he/she/his/him where the source states no gender (a subject-omitted stage direction, a hermit, a beggar, a poem title) instead of singular "they/their", and (b) flipping second person to first or third person (你 rendered as "my", "me" or "them", or a speaker's 我 rendered as "he"). 10 Defect items (all pronoun-attribution) plus 6 Pass controls where the source states gender (他/她) or the translation correctly uses "they/their" or "you", so a prompt change is tested for over-correction as well. Candidates were found with a throwaway keyword scan, then each line read individually; ambiguous cases (NPC stage directions where "I" could be the actor) were left out. The 10 Defect sources are also pinned in Config.yaml pinnedSampleSources so every assessment run re-translates them. Items sourced from this batch set sampleRun: ConvertedCorpus-20261004-pronoun-mining below.
+- name: ConvertedCorpus-20261004-pronoun-mining-2
+  path: Files/Converted
+  sampleFingerprint: n/a - not a TranslationAssessmentWorkflow run
+  sampleSize: n/a
+  sampleSeed: n/a
+  selection: >-
+    Second pronoun batch, 25 single-candidate items mined from Files/Converted after the first 16 (ConvertedCorpus-20261004-pronoun-mining), widening file coverage beyond PlotData (dynamicStrings, dumpedPrefabText*). 11 Defect items (all pronoun-attribution): six invented he/his in subject-omitted lines, four 你 rendered as "them", "I" or "the two of them", and one garbled "this couple". 14 Pass controls: ungendered 此人/这人/对方 correctly rendered as "they/them", explicit 他 kept gendered, 你/你们 kept as "you", and named speakers (我宋廉庭, 我沈退) kept as "I". The 11 Defect sources are also pinned in Config.yaml pinnedSampleSources. Items sourced from this batch set sampleRun: ConvertedCorpus-20261004-pronoun-mining-2 below.
+- name: ConvertedCorpus-20261004-first-person-mining
+  path: Files/Converted
+  sampleFingerprint: n/a - not a TranslationAssessmentWorkflow run
+  sampleSize: n/a
+  sampleSeed: n/a
+  selection: >-
+    18 single-candidate items mined from Files/Converted after the reported "I where it should be you" habit. A scan of 4231 translations with first-person "I/my/me" and no first-person word in the source found most are legitimate (dialogue drops 我 and the speaker is the right subject). The real defect is omitted-subject NARRATION (只见/只听/行至/忽然听闻) rendered "I see/I heard" when the game narrates to the player in second person. 10 Defect items of that shape (PlotData, dynamicStrings) plus 8 Pass controls where "I" is correct (speaker dialogue, parenthesised inner thoughts, 听闻 in direct address), so a narration rule is tested for turning speech into "you". Narration voice in PlotData is mixed (about 79 "I" vs 153 "you" among narration openers), so these defects are the clear-cut dynamicStrings/second-person shapes, not every "I". All 18 are pinned in Config.yaml pinnedSampleSources. Items sourced from this batch set sampleRun: ConvertedCorpus-20261004-first-person-mining below.
+- name: ConvertedCorpus-20261007-qc-flagged-review
+  path: Files/Converted
+  sampleFingerprint: 'n/a - not a TranslationAssessmentWorkflow run'
+  sampleSize: 'n/a'
+  sampleSeed: 'n/a'
+  selection: >-
+    21 correctionSamples mined from the 161 splits flagged flaggedForQcReview in Files/Converted (2026-10-07 review). Covers 14 safe fixes (name/terminology, pronoun, anachronism, acupoint pinyin), 2 unnecessary rewrites and 5 harmful corrections (geisha for 舞伎, Pukdao for 朴刀, La'er for 江老二, an invented 'your humble wife' for 妾身, odds and evens for 管他三七二十一). Items set sampleRun ConvertedCorpus-20261007-qc-flagged-review.
+- name: ConvertedCorpus-20261007-qc-flagged-review-2
+  path: Files/Converted
+  sampleFingerprint: 'n/a - not a TranslationAssessmentWorkflow run'
+  sampleSize: 'n/a'
+  sampleSeed: 'n/a'
+  selection: >-
+    10 correctionSamples mined from the 73 splits still flagged flaggedForQcReview after the 2026-10-07 full re-QC of the first 160 (with the first batch's Files/Glossary/QcFixes.yaml entries in place). 5 safe corrections (hand-written or pipeline) and 5 harmful pipeline corrections (wrong person shift, leaked game term, dropped title, invented content), plus the 朴刀 relabel from Pass to Defect (Cutlass is not wuxia-themed).
+- name: ConvertedCorpus-20261007-self-reference-mining
+  path: Files/Converted
+  sampleFingerprint: 'n/a - not a TranslationAssessmentWorkflow run'
+  sampleSize: 'n/a'
+  sampleSeed: 'n/a'
+  selection: >-
+    Self-reference by title or name: 4 Defect items QC marked Passed (师傅我 / 师姐我 turned into a third party, 我#$PlayerName# rendered "I #$PlayerName# is") plus 2 Pass controls where 掌门我 is already correct, and 5 correctionSamples (3 safe fixes, 1 harmful person shift, 1 over-application control). The 4 Defect sources are also pinned in Config.yaml pinnedSampleSources.
+- name: FlaggedQcMining-20261010
+  path: Files/Converted
+  sampleFingerprint: n/a - not a TranslationAssessmentWorkflow run
+  sampleSize: n/a
+  sampleSeed: n/a
+  selection: >-
+    83 detection items from the "Mine gold-set candidates" scan (flagged and FailedValidation QC items across the registered games, lowest QC score first, plus a few Pass rows), labelled by hand from the source and pre-QC translation alone. The game's own QC verdict was context only and was not copied into any label. Clean Pass cases are included on purpose.
+- name: ConvertedCorpus-20261020-mou-mining
+  path: Files/Converted
+  sampleFingerprint: 'n/a - not a TranslationAssessmentWorkflow run'
+  sampleSize: 'n/a'
+  sampleSeed: 'n/a'
+  selection: >-
+    20 single-candidate items for the 某 rule (a surname plus 某 is the speaker saying "I" or a vague "so-and-so", never a person called Mou). Mined from Files/Converted across PathOfKungfu, LegendOfMortal, DragonHier and WanXiang, where about 150 lines rendered it "Sun Mou", "Lv Mouren" or "Zhao Mouxia". 13 Defect items (false name, speaker turned third person, the 左 in 左某 rendered "Left", one 自称“胡某” about someone else) plus 7 Pass controls: five lines already rendered as "I, Xie" / "Lu here", and two hand-written controls so a prompt change is tested for over-correction (the real surname 牟 stays Mou, a third-party 那李某 is "that Li fellow"). Items sourced from this batch set sampleRun: ConvertedCorpus-20261020-mou-mining.
+models:
+- Qwen25-Standard
+- HyMT2-7B
+- HyMT2-30B-A3B-Q3
+- HyMT2-30B-A3B
+items:
+- sampleId: d6090210ef18b834
+  sampleKind: split
+  source: '{firstName}{playerTitle}先人后己，隐有古侠之风，孙某先谢过了……'
+  candidates:
+    ProductionTranslation: '{playerTitle} {firstName}, you show great courtesy, with the air of an ancient hero. Sun Mou thanks you in advance...'
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories: &id001
+      - mistranslation
+      - pronoun-attribution
+      correctionSafety: safe
+  provenance: Real production translation mined from Files/Converted/Converted/TaskProcess__TaskProcess.json.csv.yaml (pre-QC 'translated' field). ProductionTranslation is a single-candidate label, not a specific configured model name.
+  reviewNote: '孙某 is the speaker saying "I" ("Sun thanks you"), not a person called Mou. "Sun Mou" reads as a full name. Correct: "I thank you in advance" or "this Sun thanks you in advance".'
+  sampleRun: ConvertedCorpus-20261020-mou-mining
+  game: PathOfKungfuOverLlm
+  glossary: []
+- sampleId: cc3c7a1dad320d89
+  sampleKind: split
+  source: 不错，魏某昔年下野乃陛下授意，江湖上这些事，也多是魏某所为。
+  candidates:
+    ProductionTranslation: Not bad. Wei Mou's retirement from politics years ago was at the emperor's behest, and most of these affairs in the Jianghu also stem from Wei Mou's actions.
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories: *id001
+      correctionSafety: safe
+  provenance: Real production translation mined from Files/Converted/Converted/TaskProcess__TaskProcess.json.csv.yaml (pre-QC 'translated' field). ProductionTranslation is a single-candidate label, not a specific configured model name.
+  reviewNote: 魏某 is the speaker referring to themself twice. "Wei Mou's retirement" and "Wei Mou's actions" should be "my retirement" and "my doing".
+  sampleRun: ConvertedCorpus-20261020-mou-mining
+  game: PathOfKungfuOverLlm
+  glossary: []
+- sampleId: e39abbcfc331fcb1
+  sampleKind: split
+  source: 卢某本想去寻京中门生，暗中问些近日情讯，但却一人不见。若非这位张统领见机得快，恐怕连卢某这把老骨头，也要被他们抓了去。
+  candidates:
+    ProductionTranslation: Lu Mou had intended to seek out his students in the capital and secretly inquire about recent developments, but he found no one. If not for this Zhang Commander acting quickly, even Lu Mou's old bones might have been taken by them.
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories: *id001
+      correctionSafety: safe
+  provenance: Real production translation mined from Files/Converted/Converted/TaskProcess__TaskProcess.json.csv.yaml (pre-QC 'translated' field). ProductionTranslation is a single-candidate label, not a specific configured model name.
+  reviewNote: '卢某 is the speaker (a first-person account), so "Lu Mou had intended ... his students" is a person shift as well as a false name. Correct: "I had intended to seek out my students ...".'
+  sampleRun: ConvertedCorpus-20261020-mou-mining
+  game: PathOfKungfuOverLlm
+  glossary: []
+- sampleId: 255372c74182f31d
+  sampleKind: split
+  source: 不错，不错，那人自称“胡某”，想来便是姓胡。
+  candidates:
+    ProductionTranslation: Very good, very good. That person calls themselves Hu Mou, so they must be surnamed Hu.
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories: *id001
+      correctionSafety: safe
+  provenance: Real production translation mined from Files/Converted/Converted/TaskProcess__TaskProcess.json.csv.yaml (pre-QC 'translated' field). ProductionTranslation is a single-candidate label, not a specific configured model name.
+  reviewNote: 'Not a self-reference: someone else claims to be "胡某", a stand-in surname. "Hu Mou" invents a name. Correct: a person who calls themself "a certain Hu", so they must be surnamed Hu.'
+  sampleRun: ConvertedCorpus-20261020-mou-mining
+  game: PathOfKungfuOverLlm
+  glossary: []
+- sampleId: 37ec9142db92813a
+  sampleKind: split
+  source: '{firstName}{playerTitle}，李某护着小师父先行一步，云灵之事……便托于你手了，若事有不谐，还望{firstName}{playerTitle}谨记保全自身，我等在承安东北林间寻一隐秘之处，静候佳讯。'
+  candidates:
+    ProductionTranslation: '{playerTitle} {firstName}, Li Mou is protecting Little Master and will proceed first. The matter of Yun Ling... I entrust it to your hands. If anything goes awry, I hope {playerTitle} {firstName} will remember to prioritize your own safety. We will head northeast of Cheng An to find a secluded spot to wait for good news.'
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories: *id001
+      correctionSafety: safe
+  provenance: Real production translation mined from Files/Converted/Converted/TaskProcess__TaskProcess.json.csv.yaml (pre-QC 'translated' field). ProductionTranslation is a single-candidate label, not a specific configured model name.
+  reviewNote: 李某 is the speaker ("I am protecting Little Master"). "Li Mou is protecting ... " makes him a third person with a strange name.
+  sampleRun: ConvertedCorpus-20261020-mou-mining
+  game: PathOfKungfuOverLlm
+  glossary: []
+- sampleId: e22c4278a175a4ef
+  sampleKind: split
+  source: 左某自无妄想，此行能见你败，总也不算白来。
+  candidates:
+    ProductionTranslation: Left Mou had no delusions that this journey would see your defeat; it still wasn't a wasted trip.
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories:
+      - mistranslation
+      - pronoun-attribution
+      - terminology
+      correctionSafety: safe
+  provenance: Real production translation mined from Files/Converted/Converted/TaskProcess__TaskProcess.json.csv.yaml (pre-QC 'translated' field). ProductionTranslation is a single-candidate label, not a specific configured model name.
+  reviewNote: '左某 is the speaker ("I have no delusions"). Two defects: Mou treated as a name, and 左 (the surname Zuo) translated as "Left".'
+  sampleRun: ConvertedCorpus-20261020-mou-mining
+  game: PathOfKungfuOverLlm
+  glossary: []
+- sampleId: 24139a58a4fad07e
+  sampleKind: split
+  source: 唐某厌憎点苍，不屑受你兄妹感恩。要谢你便谢我唐家掌门仁义为怀，以德报怨。
+  candidates:
+    ProductionTranslation: Tang Mou detests Diancang and deems it unworthy to accept your siblings' gratitude. If you wish to express thanks, then thank my Tang family sect leader, who upholds benevolence and righteousness, repaying hatred with virtue.
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories: *id001
+      correctionSafety: safe
+  provenance: Real production translation mined from Files/Converted/Converted/Story_14.csv.yaml (pre-QC 'translated' field). ProductionTranslation is a single-candidate label, not a specific configured model name.
+  reviewNote: 唐某 is the speaker referring to themself ("I detest Diancang"), and the line continues with "my Tang Clan". "Tang Mou ... it" breaks that.
+  sampleRun: ConvertedCorpus-20261020-mou-mining
+  game: LegendOfMortalOverLlm
+  glossary: []
+- sampleId: 6b8ff8e39fc25547
+  sampleKind: split
+  source: 您也太大看赵某。
+  candidates:
+    ProductionTranslation: You're underestimating Zhao Mou too much
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories: *id001
+      correctionSafety: safe
+  provenance: Real production translation mined from Files/Converted/Converted/Story_21.csv.yaml (pre-QC 'translated' field). ProductionTranslation is a single-candidate label, not a specific configured model name.
+  reviewNote: 赵某 is the speaker ("you think too highly of me"). "Zhao Mou" turns the speaker into a third party.
+  sampleRun: ConvertedCorpus-20261020-mou-mining
+  game: LegendOfMortalOverLlm
+  glossary: []
+- sampleId: 3b7222d5d8cb4be6
+  sampleKind: split
+  source: 啊，是叶某疏忽了。
+  candidates:
+    ProductionTranslation: Ah, it's Ye Mou's oversight
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories: *id001
+      correctionSafety: safe
+  provenance: Real production translation mined from Files/Converted/Converted/Story_15.csv.yaml (pre-QC 'translated' field). ProductionTranslation is a single-candidate label, not a specific configured model name.
+  reviewNote: 叶某 is the speaker ("it was my oversight"). "Ye Mou's oversight" is a false name.
+  sampleRun: ConvertedCorpus-20261020-mou-mining
+  game: LegendOfMortalOverLlm
+  glossary: []
+- sampleId: 967b34af455c8496
+  sampleKind: split
+  source: 放屁～谁舍得打她。我赵某侠是要趁她不能动弹，跟她拜堂成亲！
+  candidates:
+    ProductionTranslation: Farting~ Who would dare to hit her? I, Zhao Mouxia, intend to take advantage of her inability to move and marry her!
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories: *id001
+      correctionSafety: safe
+  provenance: Real production translation mined from Files/Converted/Converted/Story_4.csv.yaml (pre-QC 'translated' field). ProductionTranslation is a single-candidate label, not a specific configured model name.
+  reviewNote: '我赵某侠 is the speaker boasting of themself as a hero ("I, the hero Zhao"). "Zhao Mouxia" invents a name from the 某 and 侠. Correct: "I, Hero Zhao, ...".'
+  sampleRun: ConvertedCorpus-20261020-mou-mining
+  game: LegendOfMortalOverLlm
+  glossary: []
+- sampleId: 1f630f42a5f0a147
+  sampleKind: split
+  source: 你们交头接耳在偷偷商量什么？我吕某人纵横商场几十年，想耍奸使滑，搪塞于吕某，只怕也没那么容易！
+  candidates:
+    ProductionTranslation: What are you whispering about in secret? I, Lv Mouren, have traversed the business world for decades. If you think of being cunning and evading me, you'll find it no easy task!
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories: *id001
+      correctionSafety: safe
+  provenance: Real production translation mined from Files/Converted/Converted/Story_8.csv.yaml (pre-QC 'translated' field). ProductionTranslation is a single-candidate label, not a specific configured model name.
+  reviewNote: 我吕某人 is the speaker ("I, Lu"). "Lv Mouren" invents a name from 某人. Also the surname 吕 is rendered "Lv" here but "Lu" elsewhere in the same game.
+  sampleRun: ConvertedCorpus-20261020-mou-mining
+  game: LegendOfMortalOverLlm
+  glossary: []
+- sampleId: 72d507041bf60ed3
+  sampleKind: split
+  source: 向某出战，胜负亦属难料。并非不能，但是两盟之争各有主张，向某并不否认武林盟的理念。由我出战，赵掌派认为合适吗？
+  candidates:
+    ProductionTranslation: Xiang Mou will accept the challenge, but the outcome is uncertain. It's not impossible, but each alliance has its own stance. Xiang Mou does not deny the Wulin Alliance's principles. Would Zhao, head of the sect, consider it appropriate for me to fight?
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories: *id001
+      correctionSafety: safe
+  provenance: Real production translation mined from Files/Converted/Converted/Story_21.csv.yaml (pre-QC 'translated' field). ProductionTranslation is a single-candidate label, not a specific configured model name.
+  reviewNote: 向某 is the speaker referring to themself ("I will take the challenge"), repeated in the line. "Xiang Mou" and the repeated bare name are both person shifts.
+  sampleRun: ConvertedCorpus-20261020-mou-mining
+  game: LegendOfMortalOverLlm
+  glossary: []
+- sampleId: 83e2206a37213b73
+  sampleKind: split
+  source: 我韩某却也非任人宰割之辈。
+  candidates:
+    ProductionTranslation: But I, Han Mou, am not someone's meat either.
+  labels:
+    ProductionTranslation:
+      label: Defect
+      defectCategories: *id001
+      correctionSafety: safe
+  provenance: Real production translation mined from Files/Converted/Converted/PlotData.csv.yaml (pre-QC 'translated' field). ProductionTranslation is a single-candidate label, not a specific configured model name.
+  reviewNote: 我韩某 is "I, Han". "I, Han Mou," treats 某 as part of the name.
+  sampleRun: ConvertedCorpus-20261020-mou-mining
+  game: DragonHierOverLlm
+  glossary: []
+- sampleId: 5e322e28c7cd343f
+  sampleKind: split
+  source: ……好。襄阳城北，谢某自去待死。
+  candidates:
+    ProductionTranslation: '...... Fine. At the northern part of Xiangyang City, I, Xie, will go to await my death.'
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  provenance: Real production translation mined from Files/Converted/Converted/NPC__Dialog.csv.yaml (pre-QC 'translated' field). ProductionTranslation is a single-candidate label, not a specific configured model name.
+  reviewNote: 'Control: 谢某 rendered as "I, Xie" with no "Mou". Acceptable; a plain "I" would also be right.'
+  sampleRun: ConvertedCorpus-20261020-mou-mining
+  game: PathOfKungfuOverLlm
+  glossary: []
+- sampleId: a1cbf7b9879e904a
+  sampleKind: split
+  source: 方才还说你不是庸人……看来是项某眼拙了。
+  candidates:
+    ProductionTranslation: I had just said you were no mediocre man... It seems I, Xiang, misjudged you.
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  provenance: Real production translation mined from Files/Converted/Converted/TaskProcess__TaskProcess.json.csv.yaml (pre-QC 'translated' field). ProductionTranslation is a single-candidate label, not a specific configured model name.
+  reviewNote: 'Control: 项某 is the speaker and is rendered "I, Xiang" ("it seems I misjudged you"). Correct person and no false name.'
+  sampleRun: ConvertedCorpus-20261020-mou-mining
+  game: PathOfKungfuOverLlm
+  glossary: []
+- sampleId: 43a5750312ac26c0
+  sampleKind: split
+  source: 为了庆祝此次盛况，我欧某也是忍痛割爱，
+  candidates:
+    ProductionTranslation: To celebrate this grand occasion, I, Ou, had to part with something precious.
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  provenance: Real production translation mined from Files/Converted/Converted/PlotData.csv.yaml (pre-QC 'translated' field). ProductionTranslation is a single-candidate label, not a specific configured model name.
+  reviewNote: 'Control: 我欧某 rendered "I, Ou", with the speaker kept as first person.'
+  sampleRun: ConvertedCorpus-20261020-mou-mining
+  game: DragonHierOverLlm
+  glossary: []
+- sampleId: f3c8e97ced953086
+  sampleKind: split
+  source: 正是余某。
+  candidates:
+    ProductionTranslation: It is I, Yu
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  provenance: Real production translation mined from Files/Converted/Converted/Story_19.csv.yaml (pre-QC 'translated' field). ProductionTranslation is a single-candidate label, not a specific configured model name.
+  reviewNote: 'Control: 余某 as an answer to "who is it?" is "It is I, Yu". Correct.'
+  sampleRun: ConvertedCorpus-20261020-mou-mining
+  game: LegendOfMortalOverLlm
+  glossary: []
+- sampleId: 5f7490e46ee78ff0
+  sampleKind: split
+  source: 陆某在此，要杀要剐，冲我来便是，与旁人无关！
+  candidates:
+    ProductionTranslation: Lu here. If you wish to kill or torture me, do it; it has nothing to do with anyone else!
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  provenance: Real production translation mined from Files/Converted/Converted/EventDialog.json.yaml (pre-QC 'translated' field). ProductionTranslation is a single-candidate label, not a specific configured model name.
+  reviewNote: 'Control: 陆某在此 rendered "Lu here", the "[Surname] here" form for the speaker. Correct person, no false name.'
+  sampleRun: ConvertedCorpus-20261020-mou-mining
+  game: WanXiangOverLlm
+  glossary: []
+- sampleId: 7769bf7febd10789
+  sampleKind: split
+  source: 牟前辈在此隐居多年，从不见外客。
+  candidates:
+    ProductionTranslation: Senior Mou has lived here in seclusion for many years and never receives outside guests.
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  provenance: Hand-written control (not from the corpus); the translation is also hand-written.
+  reviewNote: 'Control: 牟 is a real surname that reads "Mou". The 某 rule must not touch it.'
+  sampleRun: ConvertedCorpus-20261020-mou-mining
+  game: PathOfKungfuOverLlm
+  glossary: []
+- sampleId: 20cc0075de65ac5d
+  sampleKind: split
+  source: 那李某昨夜来过，说是要找你。
+  candidates:
+    ProductionTranslation: That Li fellow came by last night and said he was looking for you.
+  labels:
+    ProductionTranslation:
+      label: Pass
+      defectCategories: []
+      correctionSafety: unnecessary
+  provenance: Hand-written control (not from the corpus); the translation is also hand-written.
+  reviewNote: 'Control: 那李某 refers to another person without giving their full name, rendered as "that Li fellow".'
+  sampleRun: ConvertedCorpus-20261020-mou-mining
+  game: PathOfKungfuOverLlm
+  glossary: []

@@ -75,6 +75,15 @@ TRANSLATION RULES:
     never reduce it to just "I". Do not
     add "you"/"your" unless the source has 你/您. These rules describe how to translate the line you are
     given; never copy any wording from them into your answer.
+13. 某 after a surname (李某, 孙某, 我韩某) is a stand-in for a name, "so-and-so", not part of one. Never
+    write the surname followed by "Mou". A title after it (我赵某侠, 我吕某人) is the same speaker with that
+    title: "I, Hero Zhao", "I, Lu", never "Zhao Xia". Spoken by someone about themself, which is the usual case, it is
+    the speaker's "I": use I/me/my, and name the surname only where the line announces or identifies the
+    speaker ("I, Li, will go"), not in every sentence. When the formal self-naming voice matters (a stern
+    warning, a formal declaration) "this Li" is fine, and "this humble Li" only when the speaker is plainly
+    being polite or deferential. Keep the speaker's own pronouns: 李某的剑 is "my sword", never "Li's sword" or
+    "his sword". When it clearly names someone else (那李某, 自称"胡某"), write "a certain Li" or "that Li
+    fellow". The surname 牟 is really "Mou"; this rule is only for 某.
 
 SPECIAL RULES:
 - Text inside single quotes '...' must remain unchanged.

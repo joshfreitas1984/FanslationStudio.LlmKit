@@ -780,6 +780,9 @@ public static class TranslationWorkflow
         var badWordsReason = badWordMatches.Count > 0
             ? $"Matches the bad-words list (found: {string.Join(", ", badWordMatches)})."
             : null;
+        var surnameMouReason = LineValidation.FindSurnameMou(splitRaw, candidate) is string surnameMou
+            ? $"'{surnameMou}' makes 某 part of a name. 某 stands in for a name and is usually the speaker saying \"I\"; write \"I\" or \"this [Surname]\" and never the surname followed by \"Mou\"."
+            : null;
         var ellipsisReason = IsMissingRequiredEllipsis(preparedRaw, candidate) ? "Missing an ellipsis '...' required by the source." : null;
         var contentlessReason = IsContentlessTranslation(preparedRaw, candidate) ? "The translation has no words; the source's text was dropped." : null;
         var negativeSignReason = IsMissingRequiredNegativeSign(preparedRaw, candidate) ? "Missing a negative sign '-' before a number required by the source." : null;
@@ -802,7 +805,8 @@ public static class TranslationWorkflow
             missingTokenReason,
             customValidatorReason,
             structuralReason,
-            contentlessReason);
+            contentlessReason,
+            surnameMouReason);
     }
 
     /// <summary>See <see cref="EvaluateRules"/>.</summary>
@@ -815,7 +819,8 @@ public static class TranslationWorkflow
         string? MissingTokenReason,
         string? CustomValidatorReason,
         string? StructuralReason,
-        string? ContentlessReason = null)
+        string? ContentlessReason = null,
+        string? SurnameMouReason = null)
     {
         /// <summary>
         /// Every failure reason in generic order - for a caller (like QC) that just wants "did
@@ -836,6 +841,7 @@ public static class TranslationWorkflow
                 if (CustomValidatorReason != null) yield return CustomValidatorReason;
                 if (StructuralReason != null) yield return StructuralReason;
                 if (ContentlessReason != null) yield return ContentlessReason;
+                if (SurnameMouReason != null) yield return SurnameMouReason;
             }
         }
 
@@ -848,7 +854,8 @@ public static class TranslationWorkflow
             || MissingTokenReason != null
             || CustomValidatorReason != null
             || StructuralReason != null
-            || ContentlessReason != null;
+            || ContentlessReason != null
+            || SurnameMouReason != null;
     }
 
     /// <summary>
@@ -967,8 +974,9 @@ public static class TranslationWorkflow
     }
 
     /// <summary>
-    /// Active bad-words list - deliberately just "knight" and its inflections today: this is a
-    /// wuxia setting, and "knight" is a jarring Western chivalric term that has no place in it
+    /// Active bad-words list - deliberately just "knight" and "mage" (and their inflections) today:
+    /// this is a wuxia setting, and "knight" is a jarring Western chivalric term that has no place
+    /// in it, while "mage" is a Western fantasy term the model tends to substitute for "monk"
     /// (unlike the other, now-commented-out entries below, which were transient false positives
     /// from unrelated languages, not an intentional ban). Every other entry stays commented out as
     /// a record of past false positives rather than removed - see git history for how each one got
@@ -978,6 +986,7 @@ public static class TranslationWorkflow
     [
         //"hiu", "tut", "thut", "oi", "avo", "porqe", "obrigado",
             "knight", "knights", "knight-at-arms", "knights-errant",
+            "mage", "mages",
             //"nom", "esto", "tem", "mais", "com", "ver", "nos", "sobre", "vermos",
             //"dar", "nam", "J'ai", "je", "veux", "pas", "ele", "una", "keqi", "shiwu",
             //"ich", "ein", "der", "ganzes", "Leben", "dort", //"de", NAmes can have de

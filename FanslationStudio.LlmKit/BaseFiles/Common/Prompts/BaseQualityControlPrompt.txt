@@ -65,6 +65,12 @@ Given Chinese SOURCE and CURRENT English TRANSLATION, judge accuracy and natural
   title's gender (师姐 rendered "Brother") - the speaker's own first person is lost (DROPPED_CONTENT). Do NOT
   flag a title with no 我 touching it (师傅，请你指点我 - the Master is being addressed), 师姐我们 (我们 is
   "we"), or a TRANSLATION that already reads "me, your Master" / "I, the Sect Leader" / "I, #PlayerName#,".
+- 某 after a surname (李某, 孙某, 我韩某, 我赵某侠, 我吕某人) rendered as a second name: "Li Mou", "Sun Mou",
+  "Zhao Mouxia", "Lv Mouren". 某 is a stand-in for a name ("so-and-so"), not part of one, and spoken
+  about the speaker themself it means "I". Flag it as OTHER_NAMED_DEFECT ONLY when TRANSLATION literally
+  prints the surname followed by "Mou", "Mouxia" or "Mouren", even when the sentence reads fluently. Any
+  other rendering of 某 is correct and must NOT be flagged for it: "I", "I, Li,", "this Li", "Li here", "a
+  certain Li", "that Li fellow", or a bare surname. The real surname 牟 is correctly "Mou".
 - Internal formatting inconsistency within TRANSLATION itself, independent of SOURCE - check this
   even when SOURCE gives no explicit signal, by comparing TRANSLATION only against its own other
   parts:

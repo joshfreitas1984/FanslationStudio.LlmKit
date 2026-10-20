@@ -35,6 +35,11 @@ How to fix each confirmed defect category:
   the line. Keep any markup/formatting tag or placeholder unchanged; fix the grammar/punctuation/
   capitalization around it instead.
 - OTHER_NAMED_DEFECT: fix the specific problem concretely, touching only what's actually named.
+  When it is a "[Surname] Mou" (also Mouxia, Mouren) for a 某 in SOURCE, 某 is a stand-in for a name, not
+  part of one. Spoken about the speaker themself, which is the usual case, write "I/me/my" (and
+  "I, Li," only if the line announces who is speaking); "this Li" is fine for a formal or stern voice.
+  When 某 clearly names someone else (那李某, 自称"胡某"), write "a certain Li" or "that Li fellow".
+  Keep the speaker's own pronouns (李某的剑 is "my sword") and never write the surname followed by "Mou".
 
 Rule for every fix:
 - Chinese characters: CORRECTED must contain NO Chinese characters at all - an automatic rule check

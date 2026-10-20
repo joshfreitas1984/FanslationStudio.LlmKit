@@ -835,6 +835,24 @@ public static partial class LineValidation
         || (INameRegex().IsMatch(raw)
             && (IThenPlaceholderRegex().IsMatch(result) || (!SecondPersonSourceRegex().IsMatch(raw) && YourRegex().IsMatch(result))));
 
+    /// <summary>
+    /// The "Li Mou" / "Zhao Mouxia" / "Lv Mouren" a translation printed for a 某 in <paramref name="raw"/>, or null.
+    /// 某 after a surname (李某, 孙某, 我韩某) is a stand-in for a name - almost always the speaker saying "I" - so
+    /// pinyin-ing it into a second name is a defect the translator and QC both used to pass. Skipped when the source
+    /// also holds 牟, a real surname that reads "Mou".
+    /// </summary>
+    public static string? FindSurnameMou(string raw, string result)
+    {
+        if (!raw.Contains('某') || raw.Contains('牟'))
+            return null;
+
+        var match = SurnameMouRegex().Match(result);
+        return match.Success ? match.Value : null;
+    }
+
+    [GeneratedRegex(@"\b[A-Z][a-z]+ Mou(?:xia|ren)?\b|\bMou(?:xia|ren)\b")]
+    private static partial Regex SurnameMouRegex();
+
     // The English words each self-reference title can be rendered as. Tying "my <title>" to the title that actually
     // follows 我 stops "scolded by my Master" in a 师兄我 line from counting as a defect.
     private static readonly Dictionary<string, string> SelfReferenceTitleWords = new()
