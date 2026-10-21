@@ -768,7 +768,8 @@ public static class TranslationWorkflow
         string candidate,
         TextFileToSplit textFile,
         int? column,
-        IReadOnlyDictionary<string, TokenValue>? tokens = null)
+        IReadOnlyDictionary<string, TokenValue>? tokens = null,
+        bool checkSurnameMou = false)
     {
         // Slot space: <paramref name="splitRaw"/> and <paramref name="candidate"/> hold named slots, and the glossary, wording and slot
         // checks read them that way. The game's own hooks and the structural check look for the game's tokens, so they get the restored forms.
@@ -781,7 +782,9 @@ public static class TranslationWorkflow
         var badWordsReason = badWordMatches.Count > 0
             ? $"Matches the bad-words list (found: {string.Join(", ", badWordMatches)})."
             : null;
-        var surnameMouReason = LineValidation.FindSurnameMou(splitRaw, candidate) is string surnameMou
+        // QC only: the first-pass model (Qwen2.5) cannot follow the 某 instruction, so rejecting its output here just strands the line
+        // as flaggedForRetranslation; QC's correction model is the one that rewrites it.
+        var surnameMouReason = checkSurnameMou && LineValidation.FindSurnameMou(splitRaw, candidate) is string surnameMou
             ? $"'{surnameMou}' makes 某 part of a name. 某 stands in for a name and is usually the speaker saying \"I\"; write \"I\" or \"this [Surname]\" and never the surname followed by \"Mou\"."
             : null;
         var ellipsisReason = IsMissingRequiredEllipsis(preparedRaw, candidate) ? "Missing an ellipsis '...' required by the source." : null;

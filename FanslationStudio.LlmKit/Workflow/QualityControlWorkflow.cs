@@ -573,7 +573,7 @@ public static class QualityControlWorkflow
         IReadOnlyDictionary<string, TokenValue>? tokens = null)
     {
         var preparedRaw = LineValidation.PrepareRaw(rawText, null);
-        var ruleResult = TranslationWorkflow.EvaluateRules(config, modelConfig, preparedRaw, rawText, candidate, textFile, split, tokens);
+        var ruleResult = TranslationWorkflow.EvaluateRules(config, modelConfig, preparedRaw, rawText, candidate, textFile, split, tokens, checkSurnameMou: true);
         var capsFailureReason = CheckCapitalizationRegression(baselineTranslated, candidate);
 
         return capsFailureReason ?? CheckRunawayRepetition(baselineTranslated, candidate) ?? CheckInventedStutter(rawText, baselineTranslated, candidate) ?? CheckInvalidPinyin(baselineTranslated, candidate) ?? CheckSelfReferenceRegression(rawText, baselineTranslated, candidate) ?? ruleResult.AllReasons.FirstOrDefault();
