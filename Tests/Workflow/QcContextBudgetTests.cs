@@ -61,6 +61,17 @@ public sealed class QcContextBudgetTests
         Assert.Contains("num_ctx 6144", e.Message);
     }
 
+    [Fact(DisplayName = "Context check names the offending item in the error")]
+    public async Task OversizedPrompt_NamesTheItem()
+    {
+        using var client = new HttpClient(Counting(6144));
+
+        var e = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            QualityControlWorkflow.CheckDetectionContextBudgetAsync(BuildConfig(), BuildModel(), client, ["SOURCE (Chinese): a"], ["Sheet.csv: \"a\""]));
+
+        Assert.Contains("Offending item: Sheet.csv: \"a\"", e.Message);
+    }
+
     [Fact(DisplayName = "Context check throws when the server rejects the probe as over the context size")]
     public async Task ServerContextRejection_Throws()
     {

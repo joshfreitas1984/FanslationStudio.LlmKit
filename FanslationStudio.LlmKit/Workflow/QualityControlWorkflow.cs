@@ -799,7 +799,8 @@ public static class QualityControlWorkflow
         using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(300) };
         var reviewCache = new ReviewLlmCache();
 
-        await CheckDetectionContextBudgetAsync(config, modelConfig, client, LongestDetectionUserPrompts(config, workItems));
+        var probes = LongestDetectionUserPrompts(config, workItems);
+        await CheckDetectionContextBudgetAsync(config, modelConfig, client, probes.Select(p => p.Prompt).ToList(), probes.Select(p => p.Label).ToList());
 
         await Parallel.ForEachAsync(workItems, new ParallelOptions { MaxDegreeOfParallelism = maxConcurrency }, async (item, _) =>
         {
@@ -1353,7 +1354,7 @@ public static class QualityControlWorkflow
     /// built exactly as <see cref="ReviewColumnAsync"/> builds them. Shortlisted on raw + translated
     /// size first, since the glossary scan is too slow to run over every column of a full pass.
     /// </summary>
-    private static List<string> LongestDetectionUserPrompts(LlmConfig config, List<QcWorkItem> workItems) =>
+    private static List<(string Prompt, string Label)> LongestDetectionUserPrompts(LlmConfig config, List<QcWorkItem> workItems) =>
         workItems
             .Select(item => (Item: item, Translated: item.Column.ComputeEffectiveTranslated()))
             .OrderByDescending(x => Encoding.UTF8.GetByteCount(x.Item.Column.RawText) + Encoding.UTF8.GetByteCount(x.Translated))
@@ -1363,12 +1364,20 @@ public static class QualityControlWorkflow
                 var tokenReplacer = new StringTokenReplacer();
                 var glossaryPrompt = LineContexts.WithColumnContext(config,
                     GlossaryLine.AppendPromptsFor(x.Item.Column.RawText, config.Runtime.GlossaryLines, x.Item.File.TextFile.Path), x.Item.Column.Anchor);
-                return BuildQcUserPrompt(tokenReplacer.Replace(x.Item.Column.RawText), tokenReplacer.Replace(x.Translated), glossaryPrompt);
+                var prompt = BuildQcUserPrompt(tokenReplacer.Replace(x.Item.Column.RawText), tokenReplacer.Replace(x.Translated), glossaryPrompt);
+                return (Prompt: prompt, Label: DescribeProbedItem(x.Item));
             })
-            .Distinct()
-            .OrderByDescending(Encoding.UTF8.GetByteCount)
+            .DistinctBy(x => x.Prompt)
+            .OrderByDescending(x => Encoding.UTF8.GetByteCount(x.Prompt))
             .Take(ContextBudgetProbeCount)
             .ToList();
+
+    /// <summary>Names the item behind a probed prompt (file and the start of its source text) so an over-budget error says which line to skip or shrink.</summary>
+    private static string DescribeProbedItem(QcWorkItem item)
+    {
+        var raw = item.Column.RawText.ReplaceLineEndings(" ");
+        return $"{item.File.TextFile.Path}: \"{(raw.Length > 60 ? raw[..60] + "..." : raw)}\"";
+    }
 
     /// <summary>
     /// Fail-fast guard before a review pass: gets the exact token count of each of
@@ -1380,7 +1389,7 @@ public static class QualityControlWorkflow
     /// warns, since the pass's own calls will surface that. See
     /// docs/investigations/quality-control-postmortems.md.
     /// </summary>
-    internal static async Task CheckDetectionContextBudgetAsync(LlmConfig config, ModelExecutionConfig modelConfig, HttpClient client, IReadOnlyList<string> userPrompts)
+    internal static async Task CheckDetectionContextBudgetAsync(LlmConfig config, ModelExecutionConfig modelConfig, HttpClient client, IReadOnlyList<string> userPrompts, IReadOnlyList<string>? labels = null)
     {
         if (userPrompts.Count == 0
             || modelConfig.Url?.Contains("/api/chat", StringComparison.OrdinalIgnoreCase) != true
@@ -1390,8 +1399,11 @@ public static class QualityControlWorkflow
 
         var probeModel = WithModelParam(WithDetectionTemperature(config, modelConfig), "num_predict", 1);
         var largest = 0;
-        foreach (var userPrompt in userPrompts)
+        string? largestLabel = null;
+        for (var i = 0; i < userPrompts.Count; i++)
         {
+            var userPrompt = userPrompts[i];
+            var label = labels != null && i < labels.Count ? labels[i] : null;
             var requestData = LlmHelpers.GenerateLlmRequestData(probeModel, BuildQcMessages(probeModel, "BaseQualityControlPrompt", userPrompt));
             using var request = new HttpRequestMessage(HttpMethod.Post, probeModel.Url)
             {
@@ -1415,7 +1427,7 @@ public static class QualityControlWorkflow
             }
 
             if (body.Contains("exceed_context_size", StringComparison.OrdinalIgnoreCase))
-                throw ContextBudgetExceeded(numCtx, $"the server rejected it as over the context size ({body.Trim()})");
+                throw ContextBudgetExceeded(numCtx, $"the server rejected it as over the context size ({body.Trim()})", label);
 
             int? promptTokens = null;
             if (success)
@@ -1437,17 +1449,25 @@ public static class QualityControlWorkflow
                 return;
             }
 
-            largest = Math.Max(largest, promptTokens.Value);
+            if (promptTokens.Value > largest)
+            {
+                largest = promptTokens.Value;
+                largestLabel = label;
+            }
+
+            if (label != null)
+                Console.WriteLine($"Quality control: detection prompt probe {promptTokens.Value} tokens - {label}");
         }
 
         Console.WriteLine($"Quality control: largest detection prompt is {largest} tokens of num_ctx {numCtx} ({numCtx - largest} spare, {DetectionAnswerReserveTokens} reserved for the answer).");
 
         if (largest + DetectionAnswerReserveTokens > numCtx)
-            throw ContextBudgetExceeded(numCtx, $"it measured {largest} tokens, leaving under {DetectionAnswerReserveTokens} for the answer");
+            throw ContextBudgetExceeded(numCtx, $"it measured {largest} tokens, leaving under {DetectionAnswerReserveTokens} for the answer", largestLabel);
     }
 
-    private static InvalidOperationException ContextBudgetExceeded(int numCtx, string detail) => new(
+    private static InvalidOperationException ContextBudgetExceeded(int numCtx, string detail, string? label = null) => new(
         $"Quality control: the longest detection prompt in this pass does not fit num_ctx {numCtx} - {detail}. " +
+        (label == null ? string.Empty : $"Offending item: {label}. ") +
         "Shrink BaseQualityControlPrompt.txt or raise the QC model's num_ctx before running QC.");
 
     /// <summary>
